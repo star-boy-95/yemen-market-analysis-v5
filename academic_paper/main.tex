@@ -1,0 +1,58 @@
+% Chicago Style LaTeX Template
+\documentclass[12pt]{article}
+
+% Required packages
+\usepackage[margin=1in]{geometry}
+\usepackage[authordate,backend=biber,doi=false,isbn=false,url=false]{biblatex-chicago}
+\usepackage{setspace}
+\usepackage{indentfirst}
+\usepackage{fontspec}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+
+% Chicago style formatting
+\doublespacing
+\setmainfont{Times New Roman}
+\addbibresource{bibliography/references.bib}
+
+% Title information
+\title{Market Unity Amidst Conflict: Key Econometric Methodologies for Yemen's Market Integration}
+\author{Your Name\\Your Institution}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  Yemen's protracted conflict has severely fragmented its commodity markets, creating a dual economy with divergent exchange rates and disrupted trade routes. This paper analyzes market integration dynamics in conflict-affected Yemen, employing threshold cointegration and spatial econometric techniques to quantify price transmission barriers. By modeling how conflict-induced transaction costs impede arbitrage and examining the impact of dual exchange rate regimes, we identify critical thresholds that must be exceeded before price convergence occurs. Through simulations of market integration scenarios, particularly exchange rate unification, we provide empirically grounded policy insights to enhance economic stability in this fragile and conflict-affected situation. The research bridges theoretical gaps in understanding market integration under conflict conditions while offering practical recommendations for humanitarian and development interventions.
+\end{abstract}
+
+% Include sections
+\input{sections/introduction}
+\input{sections/literature-review}
+\input{sections/methodology}
+
+% Results section placeholder
+\section{Results and Discussion}
+\subsection{Preliminary Data Analysis}
+[This section will present descriptive statistics and preliminary analyses of commodity price dispersions, exchange rate divergence, and spatial patterns in market fragmentation.]
+
+\subsection{Threshold Cointegration Results}
+[This section will present findings from threshold cointegration models, including estimated threshold parameters, adjustment speeds, and tests for asymmetry in price transmission.]
+
+\subsection{Spatial Analysis of Market Integration}
+[This section will present results from spatial econometric models, including evidence of geographic dependencies and the impact of conflict intensity on effective market distances.]
+
+\subsection{Policy Simulation Findings}
+[This section will present results from exchange rate unification and connectivity improvement simulations, quantifying potential welfare gains from policy interventions.]
+
+% Conclusion section placeholder
+\section{Conclusion}
+[This section will summarize key findings, discuss policy implications, acknowledge limitations, and suggest directions for future research.]
+
+% Print bibliography
+\printbibliography
+
+\end{document}
