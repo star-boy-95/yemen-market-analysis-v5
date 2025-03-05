@@ -1,197 +1,220 @@
 """
-Yemen Market Integration Project utilities package.
-
-This package provides optimized utility functions for data analysis,
-statistical modeling, spatial operations, and performance enhancements
-specifically for working with Yemen market integration data on Apple
-Silicon (M1/M2) hardware.
-
-Usage examples and best practices are documented in each module.
+Performance optimization utilities for the Yemen Market Integration Project.
 """
+import os
+import sys
+import logging
+import multiprocessing
+import pandas as pd
+import numpy as np
+from typing import Callable, Any, Optional, List, Dict, Union
+import platform
+import psutil
+from functools import wraps
+import time
 
-# Import key utilities to make them available at package level
-from .error_handler import (
-    handle_errors, 
-    MarketIntegrationError, 
-    DataError, 
-    ModelError, 
-    ValidationError
+from src.utils.decorators import timer
+from src.utils.error_handler import handle_errors
+
+logger = logging.getLogger(__name__)
+
+# Check if running on Apple Silicon
+IS_APPLE_SILICON = (
+    platform.system() == "Darwin" and 
+    platform.machine().startswith(("arm", "aarch"))
 )
 
-from .config import (
-    config,
-    initialize_config
-)
-
-from .logging_setup import (
-    setup_logging,
-    get_logger_with_context,
-    add_json_logging
-)
-
-from .decorators import (
-    timer,
-    m1_optimized,
-    disk_cache,
-    memoize,
-    retry,
-    singleton
-)
-
-from .validation import (
-    validate_dataframe,
-    validate_geodataframe,
-    validate_time_series,
-    validate_model_inputs,
-    raise_if_invalid
-)
-
-from .file_utils import (
-    read_json,
-    write_json,
-    read_csv,
-    write_csv,
-    read_geojson,
-    write_geojson
-)
-
-from .data_utils import (
-    clean_column_names,
-    convert_dates,
-    fill_missing_values,
-    normalize_columns,
-    compute_price_differentials,
-    aggregate_time_series,
-    create_lag_features
-)
-
-from .stats_utils import (
-    test_stationarity,
-    test_cointegration,
-    test_granger_causality,
-    fit_threshold_vecm,
-    test_causality_granger
-)
-
-from .spatial_utils import (
-    reproject_gdf,
-    calculate_distances,
-    create_spatial_weight_matrix,
-    assign_exchange_rate_regime
-)
-
-from .performance_utils import (
-    configure_system_for_performance,
-    parallelize_dataframe,
-    optimize_dataframe,
-    get_system_info
-)
-
-from .plotting_utils import (
-    set_plotting_style,
-    plot_time_series,
-    plot_multiple_time_series,
-    plot_time_series_by_group
-)
-
-# Initialize performance optimizations for M1 Mac
-from .performance_utils import IS_APPLE_SILICON
-if IS_APPLE_SILICON:
-    from .performance_utils import configure_system_for_performance
-    configure_system_for_performance()
-
-# Package metadata
-__version__ = '0.1.0'
-__author__ = 'Yemen Market Integration Team'
-
-
-# Best practices guide
-BEST_PRACTICES = """
-Yemen Market Integration Utilities Best Practices
-================================================
-
-1. Error Handling
-----------------
-- Use the handle_errors decorator for consistent error handling
-- Raise specific exceptions (DataError, ModelError) for better error tracking
-- Example: @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
-
-2. Configuration
----------------
-- Access configuration via the singleton 'config' object
-- Initialize with project defaults: initialize_config(config_file='config.yaml')
-- Override with environment variables using YEMEN_ prefix
-
-3. Logging
----------
-- Set up logging once at application start: setup_logging(log_dir='logs')
-- Get module-specific loggers: logger = logging.getLogger(__name__)
-- Add context to logs: logger = get_logger_with_context(__name__, {'region': 'north'})
-
-4. Optimization
--------------
-- Use the @m1_optimized decorator for compute-intensive functions
-- Process large DataFrames in parallel with parallelize_dataframe()
-- Optimize memory usage with optimize_dataframe()
-
-5. Data Validation
-----------------
-- Validate inputs early: valid, errors = validate_dataframe(df, required_columns=[...])
-- Abort processing on validation failure: raise_if_invalid(valid, errors)
-
-6. Spatial Operations
--------------------
-- Always check and ensure consistent CRS before spatial operations
-- Use optimized spatial joins for large datasets
-- Create spatial weight matrices with conflict adjustment
-
-7. Visualization
---------------
-- Set style once at the start of analysis: set_plotting_style()
-- Use specialized plotting functions for time series and spatial data
-- Save plots with consistent settings: save_plot(fig, 'output.png', dpi=300)
-
-8. Statistical Analysis
---------------------
-- Test for stationarity before time series analysis
-- Use threshold models for data with regime shifts
-- Validate model inputs and outputs
-
-9. Parallelization
-----------------
-- Parallelize CPU-bound tasks with @m1_optimized(parallel=True)
-- Process large files in chunks with chunked_file_reader()
-- Monitor memory usage with memory_usage_decorator
-"""
-
-def show_best_practices():
-    """Print the best practices guide for using Yemen Market Integration utilities."""
-    print(BEST_PRACTICES)
-
-
-def setup_project_environment(config_file=None, log_dir='logs'):
+@handle_errors(logger=logger)
+def get_system_info() -> Dict[str, Any]:
     """
-    Set up the project environment with standard configuration and logging.
-    
-    Parameters
-    ----------
-    config_file : str, optional
-        Path to config file
-    log_dir : str, optional
-        Directory for log files
+    Get system information including hardware and memory.
     
     Returns
     -------
-    tuple
-        (config object, root logger)
+    dict
+        System information
     """
-    # Initialize configuration
-    cfg = initialize_config(config_file=config_file)
+    cpu_count = multiprocessing.cpu_count()
+    mem = psutil.virtual_memory()
     
-    # Set up logging
-    logger = setup_logging(log_dir=log_dir)
+    return {
+        "platform": platform.platform(),
+        "processor": platform.processor(),
+        "python_version": platform.python_version(),
+        "cpu_count": cpu_count,
+        "total_memory_gb": round(mem.total / (1024**3), 2),
+        "available_memory_gb": round(mem.available / (1024**3), 2),
+        "is_apple_silicon": IS_APPLE_SILICON
+    }
+
+@handle_errors(logger=logger)
+def configure_system_for_performance() -> None:
+    """
+    Configure the system for optimal performance based on hardware.
+    """
+    sys_info = get_system_info()
+    logger.info(f"Configuring system for performance: {sys_info}")
     
-    # Configure system for performance
-    configure_system_for_performance()
+    # Set number of threads for NumPy operations based on CPU count
+    cpu_count = sys_info["cpu_count"]
     
-    return cfg, logger
+    # Apple Silicon specific optimizations
+    if sys_info["is_apple_silicon"]:
+        os.environ["VECLIB_MAXIMUM_THREADS"] = str(cpu_count)
+        logger.info(f"Configured for Apple Silicon with {cpu_count} cores")
+        
+        # Try to enable MPS acceleration if available
+        try:
+            import torch
+            if torch.backends.mps.is_available():
+                torch.backends.mps.enable_mps_device = True
+                logger.info("MPS acceleration enabled for PyTorch")
+        except (ImportError, AttributeError):
+            pass
+    
+    # Configure NumPy to use multiple threads
+    try:
+        import numpy as np
+        np.set_printoptions(precision=6, suppress=True)
+        logger.info("NumPy configured for better output formatting")
+    except ImportError:
+        pass
+
+@handle_errors(logger=logger)
+@timer
+def parallelize_dataframe(
+    df: pd.DataFrame, 
+    func: Callable[[pd.DataFrame], pd.DataFrame], 
+    n_workers: Optional[int] = None,
+    chunk_size: Optional[int] = None
+) -> pd.DataFrame:
+    """
+    Apply a function to a DataFrame in parallel using multiprocessing.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame
+    func : callable
+        Function to apply to each chunk
+    n_workers : int, optional
+        Number of worker processes
+    chunk_size : int, optional
+        Size of each chunk
+        
+    Returns
+    -------
+    pandas.DataFrame
+        Processed DataFrame
+    """
+    if n_workers is None:
+        n_workers = max(1, multiprocessing.cpu_count() - 1)
+    
+    # Calculate chunk size if not provided
+    if chunk_size is None:
+        chunk_size = max(1, len(df) // n_workers)
+    
+    # Split DataFrame into chunks
+    df_split = [df[i:i+chunk_size] for i in range(0, len(df), chunk_size)]
+    
+    logger.info(f"Processing DataFrame in parallel: {len(df_split)} chunks with {n_workers} workers")
+    
+    # Process chunks in parallel
+    with multiprocessing.Pool(n_workers) as pool:
+        results = pool.map(func, df_split)
+    
+    # Combine results
+    return pd.concat(results)
+
+@handle_errors(logger=logger)
+def optimize_dataframe(
+    df: pd.DataFrame,
+    downcast: bool = True,
+    category_min_size: int = 50
+) -> pd.DataFrame:
+    """
+    Optimize DataFrame memory usage by adjusting dtypes.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame
+    downcast : bool, optional
+        Whether to downcast numeric columns
+    category_min_size : int, optional
+        Convert string columns with fewer unique values to category
+        
+    Returns
+    -------
+    pandas.DataFrame
+        Memory-optimized DataFrame
+    """
+    result = df.copy()
+    start_mem = result.memory_usage(deep=True).sum() / (1024 ** 2)
+    
+    # Process each column
+    for column in result.columns:
+        column_type = result[column].dtype
+        
+        # Numeric columns
+        if pd.api.types.is_numeric_dtype(column_type) and downcast:
+            # Integers
+            if pd.api.types.is_integer_dtype(column_type):
+                result[column] = pd.to_numeric(result[column], downcast='integer')
+            # Floats
+            elif pd.api.types.is_float_dtype(column_type):
+                result[column] = pd.to_numeric(result[column], downcast='float')
+        
+        # String columns
+        elif pd.api.types.is_object_dtype(column_type):
+            n_unique = result[column].nunique()
+            n_total = len(result[column])
+            
+            # Convert to category if low cardinality
+            if n_unique / n_total < 0.5 and n_unique < category_min_size:
+                result[column] = result[column].astype('category')
+    
+    # Calculate memory savings
+    end_mem = result.memory_usage(deep=True).sum() / (1024 ** 2)
+    reduction = 100 * (start_mem - end_mem) / start_mem
+    
+    logger.info(f"Memory usage reduced from {start_mem:.2f} MB to {end_mem:.2f} MB ({reduction:.2f}%)")
+    
+    return result
+
+def memory_usage_decorator(func):
+    """
+    Decorator to track memory usage of a function.
+    
+    Parameters
+    ----------
+    func : callable
+        Function to track
+        
+    Returns
+    -------
+    callable
+        Decorated function
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Get initial memory usage
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / (1024 ** 2)
+        
+        # Run the function
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        execution_time = time.time() - start_time
+        
+        # Get final memory usage
+        mem_after = process.memory_info().rss / (1024 ** 2)
+        
+        logger.info(
+            f"Function {func.__name__} used {mem_after - mem_before:.2f} MB "
+            f"(total: {mem_after:.2f} MB) and took {execution_time:.2f} seconds"
+        )
+        
+        return result
+    
+    return wrapper

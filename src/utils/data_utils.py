@@ -33,13 +33,13 @@ def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
         DataFrame with cleaned column names
     """
     df = df.copy()
-    df.columns = [re.sub(r'[^\w\s]', '', col).lower().replace(' ', '_') for col in df.columns]
+    df.columns = [re.sub(r'[^\w\s]', '', column).lower().replace(' ', '_') for column in df.columns]
     return df
 
 @handle_errors(logger=logger)
 def convert_dates(
     df: pd.DataFrame, 
-    date_cols: List[str], 
+    date_columns: List[str], 
     format: Optional[str] = None,
     errors: str = 'coerce'
 ) -> pd.DataFrame:
@@ -50,7 +50,7 @@ def convert_dates(
     ----------
     df : pandas.DataFrame
         DataFrame with date columns
-    date_cols : list
+    date_columns : list
         List of column names to convert
     format : str, optional
         Date format string
@@ -63,9 +63,9 @@ def convert_dates(
         DataFrame with converted date columns
     """
     df = df.copy()
-    for col in date_cols:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], format=format, errors=errors)
+    for column in date_columns:
+        if column in df.columns:
+            df[column] = pd.to_datetime(df[column], format=format, errors=errors)
     return df
 
 @handle_errors(logger=logger)
@@ -74,7 +74,7 @@ def fill_missing_values(
     numeric_strategy: str = 'median',
     categorical_strategy: str = 'mode',
     date_strategy: str = 'nearest',
-    group_cols: Optional[List[str]] = None
+    group_columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Fill missing values based on column types
@@ -89,7 +89,7 @@ def fill_missing_values(
         Strategy for categorical columns ('mode', 'none')
     date_strategy : str, optional
         Strategy for date columns ('nearest', 'forward', 'backward', 'none')
-    group_cols : list, optional
+    group_columns : list, optional
         Columns to group by before filling
         
     Returns
@@ -100,52 +100,52 @@ def fill_missing_values(
     df = df.copy()
     
     # Get column types
-    numeric_cols = df.select_dtypes(include=['number']).columns
-    categorical_cols = df.select_dtypes(include=['object', 'category']).columns
-    date_cols = df.select_dtypes(include=['datetime']).columns
+    numeric_columns = df.select_dtypes(include=['number']).columns
+    categorical_columns = df.select_dtypes(include=['object', 'category']).columns
+    date_columns = df.select_dtypes(include=['datetime']).columns
     
     # Fill missing values by group if specified
-    if group_cols:
-        # Filter group_cols to those that exist in the dataframe
-        valid_group_cols = [col for col in group_cols if col in df.columns]
+    if group_columns:
+        # Filter group_columns to those that exist in the dataframe
+        valid_group_columns = [column for column in group_columns if column in df.columns]
         
-        if valid_group_cols:
+        if valid_group_columns:
             # Handle numeric columns
-            if numeric_strategy != 'none' and len(numeric_cols) > 0:
-                for col in numeric_cols:
+            if numeric_strategy != 'none' and len(numeric_columns) > 0:
+                for column in numeric_columns:
                     if numeric_strategy == 'mean':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.fillna(x.mean())
                         )
                     elif numeric_strategy == 'median':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.fillna(x.median())
                         )
                     elif numeric_strategy == 'zero':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.fillna(0)
                         )
             
             # Handle categorical columns
-            if categorical_strategy == 'mode' and len(categorical_cols) > 0:
-                for col in categorical_cols:
-                    df[col] = df.groupby(valid_group_cols)[col].transform(
+            if categorical_strategy == 'mode' and len(categorical_columns) > 0:
+                for column in categorical_columns:
+                    df[column] = df.groupby(valid_group_columns)[column].transform(
                         lambda x: x.fillna(x.mode().iloc[0] if not x.mode().empty else None)
                     )
             
             # Handle date columns
-            if date_strategy != 'none' and len(date_cols) > 0:
-                for col in date_cols:
+            if date_strategy != 'none' and len(date_columns) > 0:
+                for column in date_columns:
                     if date_strategy == 'nearest':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.interpolate(method='nearest')
                         )
                     elif date_strategy == 'forward':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.fillna(method='ffill')
                         )
                     elif date_strategy == 'backward':
-                        df[col] = df.groupby(valid_group_cols)[col].transform(
+                        df[column] = df.groupby(valid_group_columns)[column].transform(
                             lambda x: x.fillna(method='bfill')
                         )
         else:
@@ -156,36 +156,36 @@ def fill_missing_values(
                 numeric_strategy=numeric_strategy,
                 categorical_strategy=categorical_strategy,
                 date_strategy=date_strategy,
-                group_cols=None
+                group_columns=None
             )
     else:
         # Fill missing values without grouping
         
         # Handle numeric columns
-        if numeric_strategy != 'none' and len(numeric_cols) > 0:
+        if numeric_strategy != 'none' and len(numeric_columns) > 0:
             if numeric_strategy == 'mean':
-                df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].mean())
+                df[numeric_columns] = df[numeric_columns].fillna(df[numeric_columns].mean())
             elif numeric_strategy == 'median':
-                df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
+                df[numeric_columns] = df[numeric_columns].fillna(df[numeric_columns].median())
             elif numeric_strategy == 'zero':
-                df[numeric_cols] = df[numeric_cols].fillna(0)
+                df[numeric_columns] = df[numeric_columns].fillna(0)
         
         # Handle categorical columns
-        if categorical_strategy == 'mode' and len(categorical_cols) > 0:
-            for col in categorical_cols:
-                if df[col].isna().any():
-                    mode_val = df[col].mode()
+        if categorical_strategy == 'mode' and len(categorical_columns) > 0:
+            for column in categorical_columns:
+                if df[column].isna().any():
+                    mode_val = df[column].mode()
                     if not mode_val.empty:
-                        df[col] = df[col].fillna(mode_val.iloc[0])
+                        df[column] = df[column].fillna(mode_val.iloc[0])
         
         # Handle date columns
-        if date_strategy != 'none' and len(date_cols) > 0:
+        if date_strategy != 'none' and len(date_columns) > 0:
             if date_strategy == 'nearest':
-                df[date_cols] = df[date_cols].interpolate(method='nearest')
+                df[date_columns] = df[date_columns].interpolate(method='nearest')
             elif date_strategy == 'forward':
-                df[date_cols] = df[date_cols].fillna(method='ffill')
+                df[date_columns] = df[date_columns].fillna(method='ffill')
             elif date_strategy == 'backward':
-                df[date_cols] = df[date_cols].fillna(method='bfill')
+                df[date_columns] = df[date_columns].fillna(method='bfill')
     
     return df
 
@@ -217,36 +217,36 @@ def detect_outliers(
     """
     result = df.copy()
     
-    for col in columns:
-        if col not in df.columns:
-            logger.warning(f"Column {col} not found in DataFrame")
+    for column in columns:
+        if column not in df.columns:
+            logger.warning(f"Column {column} not found in DataFrame")
             continue
         
         # Skip non-numeric columns
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            logger.warning(f"Column {col} is not numeric, skipping outlier detection")
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            logger.warning(f"Column {column} is not numeric, skipping outlier detection")
             continue
         
         # Create outlier flag column
-        flag_col = f"{col}_outlier"
+        flag_column = f"{column}_outlier"
         
         # Detect outliers based on specified method
         if method == 'zscore':
-            z_scores = stats.zscore(df[col], nan_policy='omit')
-            result[flag_col] = abs(z_scores) > threshold
+            z_scores = stats.zscore(df[column], nan_policy='omit')
+            result[flag_column] = abs(z_scores) > threshold
         
         elif method == 'iqr':
-            q1 = df[col].quantile(0.25)
-            q3 = df[col].quantile(0.75)
+            q1 = df[column].quantile(0.25)
+            q3 = df[column].quantile(0.75)
             iqr = q3 - q1
             lower_bound = q1 - threshold * iqr
             upper_bound = q3 + threshold * iqr
-            result[flag_col] = (df[col] < lower_bound) | (df[col] > upper_bound)
+            result[flag_column] = (df[column] < lower_bound) | (df[column] > upper_bound)
         
         elif method == 'percentile':
-            lower = df[col].quantile(threshold / 100)
-            upper = df[col].quantile(1 - threshold / 100)
-            result[flag_col] = (df[col] < lower) | (df[col] > upper)
+            lower = df[column].quantile(threshold / 100)
+            upper = df[column].quantile(1 - threshold / 100)
+            result[flag_column] = (df[column] < lower) | (df[column] > upper)
         
         else:
             raise ValueError(f"Unknown outlier detection method: {method}")
@@ -279,48 +279,48 @@ def normalize_columns(
     """
     result = df.copy()
     
-    for col in columns:
-        if col not in df.columns:
-            logger.warning(f"Column {col} not found in DataFrame")
+    for column in columns:
+        if column not in df.columns:
+            logger.warning(f"Column {column} not found in DataFrame")
             continue
         
         # Skip non-numeric columns
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            logger.warning(f"Column {col} is not numeric, skipping normalization")
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            logger.warning(f"Column {column} is not numeric, skipping normalization")
             continue
         
         # Create normalized column
-        norm_col = f"{col}_norm"
+        norm_column = f"{column}_norm"
         
         # Apply normalization based on specified method
         if method == 'zscore':
-            mean = df[col].mean()
-            std = df[col].std()
+            mean = df[column].mean()
+            std = df[column].std()
             if std == 0:
-                logger.warning(f"Standard deviation is zero for column {col}, setting normalized values to zero")
-                result[norm_col] = 0
+                logger.warning(f"Standard deviation is zero for column {column}, setting normalized values to zero")
+                result[norm_column] = 0
             else:
-                result[norm_col] = (df[col] - mean) / std
+                result[norm_column] = (df[column] - mean) / std
         
         elif method == 'minmax':
-            min_val = df[col].min()
-            max_val = df[col].max()
+            min_val = df[column].min()
+            max_val = df[column].max()
             if max_val == min_val:
-                logger.warning(f"Min and max are equal for column {col}, setting normalized values to 0.5")
-                result[norm_col] = 0.5
+                logger.warning(f"Min and max are equal for column {column}, setting normalized values to 0.5")
+                result[norm_column] = 0.5
             else:
-                result[norm_col] = (df[col] - min_val) / (max_val - min_val)
+                result[norm_column] = (df[column] - min_val) / (max_val - min_val)
         
         elif method == 'robust':
-            median = df[col].median()
-            q1 = df[col].quantile(0.25)
-            q3 = df[col].quantile(0.75)
+            median = df[column].median()
+            q1 = df[column].quantile(0.25)
+            q3 = df[column].quantile(0.75)
             iqr = q3 - q1
             if iqr == 0:
-                logger.warning(f"IQR is zero for column {col}, setting normalized values to zero")
-                result[norm_col] = 0
+                logger.warning(f"IQR is zero for column {column}, setting normalized values to zero")
+                result[norm_column] = 0
             else:
-                result[norm_col] = (df[col] - median) / iqr
+                result[norm_column] = (df[column] - median) / iqr
         
         else:
             raise ValueError(f"Unknown normalization method: {method}")
@@ -361,8 +361,8 @@ def compute_price_differentials(
 @handle_errors(logger=logger)
 def aggregate_time_series(
     df: pd.DataFrame,
-    date_col: str,
-    value_cols: List[str],
+    date_column: str,
+    value_columns: List[str],
     freq: str = 'M',
     agg_func: str = 'mean',
     fillna: bool = True
@@ -374,9 +374,9 @@ def aggregate_time_series(
     ----------
     df : pandas.DataFrame
         DataFrame with time series data
-    date_col : str
+    date_column : str
         Column containing dates
-    value_cols : list
+    value_columns : list
         Columns containing values to aggregate
     freq : str, optional
         Frequency for aggregation ('D', 'W', 'M', 'Q', 'Y')
@@ -391,9 +391,9 @@ def aggregate_time_series(
         Aggregated time series data
     """
     # Check if date column is datetime type, convert if not
-    if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+    if not pd.api.types.is_datetime64_any_dtype(df[date_column]):
         df = df.copy()
-        df[date_col] = pd.to_datetime(df[date_col])
+        df[date_column] = pd.to_datetime(df[date_column])
     
     # Map aggregation function string to actual function
     if agg_func == 'mean':
@@ -410,10 +410,10 @@ def aggregate_time_series(
         raise ValueError(f"Unknown aggregation function: {agg_func}")
     
     # Set date column as index
-    df_indexed = df.set_index(date_col)
+    df_indexed = df.set_index(date_column)
     
     # Aggregate data
-    df_agg = df_indexed[value_cols].resample(freq).agg(func)
+    df_agg = df_indexed[value_columns].resample(freq).agg(func)
     
     # Fill missing values if requested
     if fillna:
@@ -427,9 +427,9 @@ def aggregate_time_series(
 @handle_errors(logger=logger)
 def create_lag_features(
     df: pd.DataFrame,
-    cols: List[str],
+    columns: List[str],
     lags: List[int],
-    group_cols: Optional[List[str]] = None
+    group_columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Create lagged features for time series analysis
@@ -438,11 +438,11 @@ def create_lag_features(
     ----------
     df : pandas.DataFrame
         Input data
-    cols : list
+    columns : list
         Columns to create lags for
     lags : list
         List of lag values
-    group_cols : list, optional
+    group_columns : list, optional
         Columns to group by before creating lags
         
     Returns
@@ -453,40 +453,40 @@ def create_lag_features(
     result = df.copy()
     
     # Sort by group columns and date if provided
-    if group_cols:
-        # Filter group_cols to those that exist in the dataframe
-        valid_group_cols = [col for col in group_cols if col in df.columns]
-        if valid_group_cols:
-            result = result.sort_values(valid_group_cols)
+    if group_columns:
+        # Filter group_columns to those that exist in the dataframe
+        valid_group_columns = [column for column in group_columns if column in df.columns]
+        if valid_group_columns:
+            result = result.sort_values(valid_group_columns)
     
     # Create lag features
-    for col in cols:
-        if col not in df.columns:
-            logger.warning(f"Column {col} not found in DataFrame")
+    for column in columns:
+        if column not in df.columns:
+            logger.warning(f"Column {column} not found in DataFrame")
             continue
         
         for lag in lags:
-            lag_col = f"{col}_lag{lag}"
+            lag_column = f"{column}_lag{lag}"
             
-            if group_cols:
+            if group_columns:
                 # Create lags within groups
-                valid_group_cols = [col for col in group_cols if col in df.columns]
-                if valid_group_cols:
-                    result[lag_col] = result.groupby(valid_group_cols)[col].shift(lag)
+                valid_group_columns = [column for column in group_columns if column in df.columns]
+                if valid_group_columns:
+                    result[lag_column] = result.groupby(valid_group_columns)[column].shift(lag)
             else:
                 # Create lags without grouping
-                result[lag_col] = result[col].shift(lag)
+                result[lag_column] = result[column].shift(lag)
     
     return result
 
 @handle_errors(logger=logger)
 def create_rolling_features(
     df: pd.DataFrame,
-    cols: List[str],
+    columns: List[str],
     windows: List[int],
     stats: List[str] = ['mean', 'std'],
     min_periods: int = 1,
-    group_cols: Optional[List[str]] = None
+    group_columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Create rolling window features for time series analysis
@@ -495,7 +495,7 @@ def create_rolling_features(
     ----------
     df : pandas.DataFrame
         Input data
-    cols : list
+    columns : list
         Columns to create rolling features for
     windows : list
         List of window sizes
@@ -503,7 +503,7 @@ def create_rolling_features(
         Statistics to compute for each window
     min_periods : int, optional
         Minimum number of observations required
-    group_cols : list, optional
+    group_columns : list, optional
         Columns to group by before creating features
         
     Returns
@@ -514,49 +514,49 @@ def create_rolling_features(
     result = df.copy()
     
     # Sort by group columns if provided
-    if group_cols:
-        # Filter group_cols to those that exist in the dataframe
-        valid_group_cols = [col for col in group_cols if col in df.columns]
-        if valid_group_cols:
-            result = result.sort_values(valid_group_cols)
+    if group_columns:
+        # Filter group_columns to those that exist in the dataframe
+        valid_group_columns = [column for column in group_columns if column in df.columns]
+        if valid_group_columns:
+            result = result.sort_values(valid_group_columns)
     
     # Create rolling features
-    for col in cols:
-        if col not in df.columns:
-            logger.warning(f"Column {col} not found in DataFrame")
+    for column in columns:
+        if column not in df.columns:
+            logger.warning(f"Column {column} not found in DataFrame")
             continue
         
         # Skip non-numeric columns
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            logger.warning(f"Column {col} is not numeric, skipping rolling features")
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            logger.warning(f"Column {column} is not numeric, skipping rolling features")
             continue
         
         for window in windows:
             for stat in stats:
-                feat_col = f"{col}_roll{window}_{stat}"
+                feat_column = f"{column}_roll{window}_{stat}"
                 
-                if group_cols:
+                if group_columns:
                     # Create features within groups
-                    valid_group_cols = [col for col in group_cols if col in df.columns]
-                    if valid_group_cols:
+                    valid_group_columns = [column for column in group_columns if column in df.columns]
+                    if valid_group_columns:
                         if stat == 'mean':
-                            result[feat_col] = result.groupby(valid_group_cols)[col].transform(
+                            result[feat_column] = result.groupby(valid_group_columns)[column].transform(
                                 lambda x: x.rolling(window, min_periods=min_periods).mean()
                             )
                         elif stat == 'std':
-                            result[feat_col] = result.groupby(valid_group_cols)[col].transform(
+                            result[feat_column] = result.groupby(valid_group_columns)[column].transform(
                                 lambda x: x.rolling(window, min_periods=min_periods).std()
                             )
                         elif stat == 'min':
-                            result[feat_col] = result.groupby(valid_group_cols)[col].transform(
+                            result[feat_column] = result.groupby(valid_group_columns)[column].transform(
                                 lambda x: x.rolling(window, min_periods=min_periods).min()
                             )
                         elif stat == 'max':
-                            result[feat_col] = result.groupby(valid_group_cols)[col].transform(
+                            result[feat_column] = result.groupby(valid_group_columns)[column].transform(
                                 lambda x: x.rolling(window, min_periods=min_periods).max()
                             )
                         elif stat == 'median':
-                            result[feat_col] = result.groupby(valid_group_cols)[col].transform(
+                            result[feat_column] = result.groupby(valid_group_columns)[column].transform(
                                 lambda x: x.rolling(window, min_periods=min_periods).median()
                             )
                         else:
@@ -564,15 +564,15 @@ def create_rolling_features(
                 else:
                     # Create features without grouping
                     if stat == 'mean':
-                        result[feat_col] = result[col].rolling(window, min_periods=min_periods).mean()
+                        result[feat_column] = result[column].rolling(window, min_periods=min_periods).mean()
                     elif stat == 'std':
-                        result[feat_col] = result[col].rolling(window, min_periods=min_periods).std()
+                        result[feat_column] = result[column].rolling(window, min_periods=min_periods).std()
                     elif stat == 'min':
-                        result[feat_col] = result[col].rolling(window, min_periods=min_periods).min()
+                        result[feat_column] = result[column].rolling(window, min_periods=min_periods).min()
                     elif stat == 'max':
-                        result[feat_col] = result[col].rolling(window, min_periods=min_periods).max()
+                        result[feat_column] = result[column].rolling(window, min_periods=min_periods).max()
                     elif stat == 'median':
-                        result[feat_col] = result[col].rolling(window, min_periods=min_periods).median()
+                        result[feat_column] = result[column].rolling(window, min_periods=min_periods).median()
                     else:
                         logger.warning(f"Unknown rolling statistic: {stat}")
     
@@ -581,10 +581,10 @@ def create_rolling_features(
 @handle_errors(logger=logger)
 def convert_exchange_rates(
     df: pd.DataFrame,
-    price_col: str,
-    exchange_rate_col: str,
+    price_column: str,
+    exchange_rate_column: str,
     target_currency: str = 'USD',
-    new_col_name: Optional[str] = None
+    new_column_name: Optional[str] = None
 ) -> pd.DataFrame:
     """
     Convert prices from local currency to target currency
@@ -593,14 +593,14 @@ def convert_exchange_rates(
     ----------
     df : pandas.DataFrame
         Input data
-    price_col : str
+    price_column : str
         Column containing prices in local currency
-    exchange_rate_col : str
+    exchange_rate_column : str
         Column containing exchange rates
     target_currency : str, optional
         Target currency code
-    new_col_name : str, optional
-        Name for the new column, defaults to {price_col}_{target_currency}
+    new_column_name : str, optional
+        Name for the new column, defaults to {price_column}_{target_currency}
         
     Returns
     -------
@@ -610,29 +610,29 @@ def convert_exchange_rates(
     result = df.copy()
     
     # Check if columns exist
-    if price_col not in df.columns:
-        raise ValueError(f"Price column '{price_col}' not found in DataFrame")
+    if price_column not in df.columns:
+        raise ValueError(f"Price column '{price_column}' not found in DataFrame")
     
-    if exchange_rate_col not in df.columns:
-        raise ValueError(f"Exchange rate column '{exchange_rate_col}' not found in DataFrame")
+    if exchange_rate_column not in df.columns:
+        raise ValueError(f"Exchange rate column '{exchange_rate_column}' not found in DataFrame")
     
     # Set default new column name if not provided
-    if new_col_name is None:
-        new_col_name = f"{price_col}_{target_currency.lower()}"
+    if new_column_name is None:
+        new_column_name = f"{price_column}_{target_currency.lower()}"
     
     # Convert prices
-    result[new_col_name] = result[price_col] / result[exchange_rate_col]
+    result[new_column_name] = result[price_column] / result[exchange_rate_column]
     
     return result
 
 @handle_errors(logger=logger)
 def calculate_price_changes(
     df: pd.DataFrame,
-    price_col: str,
-    date_col: str,
+    price_column: str,
+    date_column: str,
     method: str = 'pct',
     periods: List[int] = [1],
-    group_cols: Optional[List[str]] = None
+    group_columns: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Calculate price changes over specified periods
@@ -641,15 +641,15 @@ def calculate_price_changes(
     ----------
     df : pandas.DataFrame
         Input data
-    price_col : str
+    price_column : str
         Column containing prices
-    date_col : str
+    date_column : str
         Column containing dates
     method : str, optional
         Change calculation method ('pct', 'diff', 'log')
     periods : list, optional
         List of periods to calculate changes for
-    group_cols : list, optional
+    group_columns : list, optional
         Columns to group by
         
     Returns
@@ -660,61 +660,123 @@ def calculate_price_changes(
     result = df.copy()
     
     # Check if columns exist
-    if price_col not in df.columns:
-        raise ValueError(f"Price column '{price_col}' not found in DataFrame")
+    if price_column not in df.columns:
+        raise ValueError(f"Price column '{price_column}' not found in DataFrame")
     
-    if date_col not in df.columns:
-        raise ValueError(f"Date column '{date_col}' not found in DataFrame")
+    if date_column not in df.columns:
+        raise ValueError(f"Date column '{date_column}' not found in DataFrame")
     
     # Sort by date and group columns if provided
-    sort_cols = [date_col]
-    if group_cols:
-        sort_cols = [col for col in group_cols if col in df.columns] + sort_cols
+    sort_columns = [date_column]
+    if group_columns:
+        sort_columns = [column for column in group_columns if column in df.columns] + sort_columns
     
-    result = result.sort_values(sort_cols)
+    result = result.sort_values(sort_columns)
     
     # Calculate changes for each period
     for period in periods:
         # Create column name based on method and period
         if method == 'pct':
-            change_col = f"{price_col}_pct_change_{period}"
+            change_column = f"{price_column}_pct_change_{period}"
         elif method == 'diff':
-            change_col = f"{price_col}_diff_{period}"
+            change_column = f"{price_column}_diff_{period}"
         elif method == 'log':
-            change_col = f"{price_col}_log_change_{period}"
+            change_column = f"{price_column}_log_change_{period}"
         else:
             raise ValueError(f"Unknown change calculation method: {method}")
         
         # Calculate changes
-        if group_cols:
+        if group_columns:
             # Calculate changes within groups
-            valid_group_cols = [col for col in group_cols if col in df.columns]
-            if valid_group_cols:
+            valid_group_columns = [column for column in group_columns if column in df.columns]
+            if valid_group_columns:
                 if method == 'pct':
-                    result[change_col] = result.groupby(valid_group_cols)[price_col].pct_change(periods=period)
+                    result[change_column] = result.groupby(valid_group_columns)[price_column].pct_change(periods=period)
                 elif method == 'diff':
-                    result[change_col] = result.groupby(valid_group_cols)[price_col].diff(periods=period)
+                    result[change_column] = result.groupby(valid_group_columns)[price_column].diff(periods=period)
                 elif method == 'log':
-                    result[change_col] = result.groupby(valid_group_cols)[price_col].apply(
+                    result[change_column] = result.groupby(valid_group_columns)[price_column].apply(
                         lambda x: np.log(x) - np.log(x.shift(period))
                     )
         else:
             # Calculate changes without grouping
             if method == 'pct':
-                result[change_col] = result[price_col].pct_change(periods=period)
+                result[change_column] = result[price_column].pct_change(periods=period)
             elif method == 'diff':
-                result[change_col] = result[price_col].diff(periods=period)
+                result[change_column] = result[price_column].diff(periods=period)
             elif method == 'log':
-                result[change_col] = np.log(result[price_col]) - np.log(result[price_col].shift(period))
+                result[change_column] = np.log(result[price_column]) - np.log(result[price_column].shift(period))
+    
+    return result
+
+@handle_errors(logger=logger)
+def create_date_features(
+    df: pd.DataFrame,
+    date_column: str,
+    features: List[str] = ['year', 'month', 'day', 'dayofweek', 'quarter']
+) -> pd.DataFrame:
+    """
+    Create features from a date column
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input data
+    date_column : str
+        Date column
+    features : list, optional
+        Date features to create
+        
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with date features added
+    """
+    result = df.copy()
+    
+    # Check if column exists
+    if date_column not in df.columns:
+        raise ValueError(f"Column '{date_column}' not found in DataFrame")
+    
+    # Convert to datetime if needed
+    if not pd.api.types.is_datetime64_any_dtype(df[date_column]):
+        result[date_column] = pd.to_datetime(df[date_column])
+    
+    # Create features
+    for feature in features:
+        feature_column = f"{date_column}_{feature}"
+        
+        if feature == 'year':
+            result[feature_column] = result[date_column].dt.year
+        elif feature == 'month':
+            result[feature_column] = result[date_column].dt.month
+        elif feature == 'day':
+            result[feature_column] = result[date_column].dt.day
+        elif feature == 'dayofweek':
+            result[feature_column] = result[date_column].dt.dayofweek
+        elif feature == 'quarter':
+            result[feature_column] = result[date_column].dt.quarter
+        elif feature == 'weekofyear':
+            result[feature_column] = result[date_column].dt.isocalendar().week
+        elif feature == 'dayofyear':
+            result[feature_column] = result[date_column].dt.dayofyear
+        elif feature == 'weekend':
+            result[feature_column] = result[date_column].dt.dayofweek >= 5
+        elif feature == 'month_start':
+            result[feature_column] = result[date_column].dt.is_month_start
+        elif feature == 'month_end':
+            result[feature_column] = result[date_column].dt.is_month_end
+        else:
+            logger.warning(f"Unknown date feature: {feature}")
     
     return result
 
 @handle_errors(logger=logger)
 def pivot_data(
     df: pd.DataFrame,
-    index_cols: List[str],
-    column_col: str,
-    value_col: str,
+    index_columns: List[str],
+    column_column: str,
+    value_column: str,
     agg_func: str = 'mean',
     fill_value: Optional[Any] = None
 ) -> pd.DataFrame:
@@ -725,11 +787,11 @@ def pivot_data(
     ----------
     df : pandas.DataFrame
         Input data in long format
-    index_cols : list
+    index_columns : list
         Columns to use as index
-    column_col : str
+    column_column : str
         Column to use for new columns
-    value_col : str
+    value_column : str
         Column to use for values
     agg_func : str, optional
         Aggregation function if multiple values per cell
@@ -763,9 +825,9 @@ def pivot_data(
     
     # Pivot data
     result = df.pivot_table(
-        index=index_cols,
-        columns=column_col,
-        values=value_col,
+        index=index_columns,
+        columns=column_column,
+        values=value_column,
         aggfunc=func,
         fill_value=fill_value
     )
@@ -778,7 +840,7 @@ def pivot_data(
 @handle_errors(logger=logger)
 def unpivot_data(
     df: pd.DataFrame,
-    id_vars: List[str],
+    id_columns: List[str],
     value_name: str = 'value',
     var_name: str = 'variable'
 ) -> pd.DataFrame:
@@ -789,7 +851,7 @@ def unpivot_data(
     ----------
     df : pandas.DataFrame
         Input data in wide format
-    id_vars : list
+    id_columns : list
         Columns to keep as is
     value_name : str, optional
         Name for value column
@@ -801,14 +863,14 @@ def unpivot_data(
     pandas.DataFrame
         Unpivoted data in long format
     """
-    # Get value columns (all columns not in id_vars)
-    value_cols = [col for col in df.columns if col not in id_vars]
+    # Get value columns (all columns not in id_columns)
+    value_columns = [column for column in df.columns if column not in id_columns]
     
     # Unpivot data
     result = pd.melt(
         df,
-        id_vars=id_vars,
-        value_vars=value_cols,
+        id_vars=id_columns,
+        value_vars=value_columns,
         var_name=var_name,
         value_name=value_name
     )
@@ -981,10 +1043,10 @@ def encode_categorical(
     result = df.copy()
     
     # Check if columns exist
-    missing_cols = [col for col in columns if col not in df.columns]
-    if missing_cols:
-        logger.warning(f"Columns {missing_cols} not found in DataFrame")
-        columns = [col for col in columns if col in df.columns]
+    missing_columns = [column for column in columns if column not in df.columns]
+    if missing_columns:
+        logger.warning(f"Columns {missing_columns} not found in DataFrame")
+        columns = [column for column in columns if column in df.columns]
     
     # Encode each column
     if method == 'onehot':
@@ -1001,14 +1063,14 @@ def encode_categorical(
         # Use sklearn LabelEncoder for label encoding
         from sklearn.preprocessing import LabelEncoder
         
-        for col in columns:
+        for column in columns:
             le = LabelEncoder()
-            result[f"{col}_encoded"] = le.fit_transform(result[col].astype(str))
+            result[f"{column}_encoded"] = le.fit_transform(result[column].astype(str))
             
     elif method == 'ordinal':
         # Use pandas factorize for ordinal encoding
-        for col in columns:
-            result[f"{col}_encoded"], _ = pd.factorize(result[col])
+        for column in columns:
+            result[f"{column}_encoded"], _ = pd.factorize(result[column])
             
     else:
         raise ValueError(f"Unknown encoding method: {method}")
@@ -1043,20 +1105,20 @@ def winsorize_columns(
     result = df.copy()
     
     # Check if columns exist
-    missing_cols = [col for col in columns if col not in df.columns]
-    if missing_cols:
-        logger.warning(f"Columns {missing_cols} not found in DataFrame")
-        columns = [col for col in columns if col in df.columns]
+    missing_columns = [column for column in columns if column not in df.columns]
+    if missing_columns:
+        logger.warning(f"Columns {missing_columns} not found in DataFrame")
+        columns = [column for column in columns if column in df.columns]
     
     # Winsorize each column
-    for col in columns:
+    for column in columns:
         # Skip non-numeric columns
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            logger.warning(f"Column {col} is not numeric, skipping winsorization")
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            logger.warning(f"Column {column} is not numeric, skipping winsorization")
             continue
         
         # Winsorize column
-        result[col] = mstats.winsorize(df[col], limits=limits)
+        result[column] = mstats.winsorize(df[column], limits=limits)
     
     return result
 
@@ -1089,73 +1151,11 @@ def explode_geojson_features(geojson_path: Union[str, Path]) -> gpd.GeoDataFrame
     return gdf
 
 @handle_errors(logger=logger)
-def create_date_features(
-    df: pd.DataFrame,
-    date_col: str,
-    features: List[str] = ['year', 'month', 'day', 'dayofweek', 'quarter']
-) -> pd.DataFrame:
-    """
-    Create features from a date column
-    
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Input data
-    date_col : str
-        Date column
-    features : list, optional
-        Date features to create
-        
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame with date features added
-    """
-    result = df.copy()
-    
-    # Check if column exists
-    if date_col not in df.columns:
-        raise ValueError(f"Column '{date_col}' not found in DataFrame")
-    
-    # Convert to datetime if needed
-    if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        result[date_col] = pd.to_datetime(df[date_col])
-    
-    # Create features
-    for feature in features:
-        feature_col = f"{date_col}_{feature}"
-        
-        if feature == 'year':
-            result[feature_col] = result[date_col].dt.year
-        elif feature == 'month':
-            result[feature_col] = result[date_col].dt.month
-        elif feature == 'day':
-            result[feature_col] = result[date_col].dt.day
-        elif feature == 'dayofweek':
-            result[feature_col] = result[date_col].dt.dayofweek
-        elif feature == 'quarter':
-            result[feature_col] = result[date_col].dt.quarter
-        elif feature == 'weekofyear':
-            result[feature_col] = result[date_col].dt.isocalendar().week
-        elif feature == 'dayofyear':
-            result[feature_col] = result[date_col].dt.dayofyear
-        elif feature == 'weekend':
-            result[feature_col] = result[date_col].dt.dayofweek >= 5
-        elif feature == 'month_start':
-            result[feature_col] = result[date_col].dt.is_month_start
-        elif feature == 'month_end':
-            result[feature_col] = result[date_col].dt.is_month_end
-        else:
-            logger.warning(f"Unknown date feature: {feature}")
-    
-    return result
-
-@handle_errors(logger=logger)
 def calculate_distance_matrix(
     gdf: gpd.GeoDataFrame,
-    id_col: str = 'admin1',
+    id_column: str = 'admin1',
     method: str = 'euclidean',
-    crs: Optional[str] = 'EPSG:32638'  # UTM zone 38N (Yemen)
+    crs: Optional[str] = 'EPSG:32638'  # UTM Zone 38N for Yemen
 ) -> pd.DataFrame:
     """
     Calculate distance matrix between points in a GeoDataFrame
@@ -1164,7 +1164,7 @@ def calculate_distance_matrix(
     ----------
     gdf : geopandas.GeoDataFrame
         Spatial points data
-    id_col : str, optional
+    id_column : str, optional
         Column to use as identifier
     method : str, optional
         Distance calculation method ('euclidean', 'great_circle')
@@ -1181,7 +1181,7 @@ def calculate_distance_matrix(
         raise ValueError("All geometries must be points")
     
     # Extract unique points (one per identifier)
-    unique_gdf = gdf.drop_duplicates(subset=[id_col])
+    unique_gdf = gdf.drop_duplicates(subset=[id_column])
     
     # Convert to appropriate CRS if needed
     if crs is not None and unique_gdf.crs != crs:
@@ -1189,7 +1189,7 @@ def calculate_distance_matrix(
     
     # Extract point coordinates
     coords = np.array([(p.x, p.y) for p in unique_gdf.geometry])
-    ids = unique_gdf[id_col].values
+    ids = unique_gdf[id_column].values
     
     # Calculate distances
     n = len(coords)
