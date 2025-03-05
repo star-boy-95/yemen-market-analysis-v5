@@ -1,208 +1,147 @@
 """
-Data preprocessing utilities for Yemen market integration analysis.
+Data loading utilities for Yemen market integration analysis.
 """
-import pandas as pd
 import geopandas as gpd
-import numpy as np
-from datetime import datetime
+import pandas as pd
 import logging
+from pathlib import Path
+from typing import Optional, List, Union, Tuple
 
-from src.utils import handle_errors, DataError, ValidationError
-from src.utils import (
-    clean_column_names, 
-    convert_dates, 
-    fill_missing_values,
-    normalize_columns
-)
-from src.utils import validate_dataframe, raise_if_invalid, m1_optimized
+from src.utils import handle_errors, validate_geodataframe, raise_if_invalid
+from src.utils import read_geojson, write_geojson, DataError
 
 logger = logging.getLogger(__name__)
 
-
-class DataPreprocessor:
-    """Preprocess raw GeoJSON market data with optimized methods."""
+class DataLoader:
+    """Data loader for GeoJSON market data."""
     
-    def __init__(self):
-        """Initialize the preprocessor."""
-        pass
+    def __init__(self, data_path: Union[str, Path] = "./data"):
+        """Initialize the data loader."""
+        self.data_path = Path(data_path)
+        self.raw_path = self.data_path / "raw"
+        self.processed_path = self.data_path / "processed"
     
-    @handle_errors(logger=logger, error_type=(DataError, ValueError))
-    def preprocess_geojson(self, gdf):
-        """
-        Preprocess the raw GeoJSON data.
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, OSError))
+    def load_geojson(self, filename: str) -> gpd.GeoDataFrame:
+        """Load GeoJSON data file into a GeoDataFrame."""
+        file_path = self.raw_path / filename
         
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Raw GeoJSON data
-            
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            Preprocessed data
-        """
+        if not file_path.exists():
+            raise DataError(f"GeoJSON file not found: {file_path}")
+        
+        gdf = read_geojson(file_path)
+        
+        valid, errors = validate_geodataframe(
+            gdf, 
+            required_columns=["admin1", "commodity", "date", "price"]
+        )
+        raise_if_invalid(valid, errors, f"Invalid GeoJSON file: {filename}")
+        
+        logger.info(f"Loaded GeoJSON from {file_path}: {len(gdf)} features")
+        return gdf
+    
+    @handle_errors(logger=logger, error_type=(PermissionError, OSError))
+    def save_processed_data(self, gdf: gpd.GeoDataFrame, filename: str) -> None:
+        """Save processed data to the processed directory."""
         if not isinstance(gdf, gpd.GeoDataFrame):
-            raise DataError(f"Expected GeoDataFrame but got {type(gdf)}")
+            raise DataError(f"Expected GeoDataFrame, got {type(gdf)}")
         
-        # Make a copy to avoid modifying the original
-        processed = gdf.copy()
+        self.processed_path.mkdir(parents=True, exist_ok=True)
         
-        # Clean column names using utility function
-        processed = clean_column_names(processed)
+        output_path = self.processed_path / filename
+        write_geojson(gdf, output_path)
         
-        # Convert date strings to datetime objects using utility function
-        processed = convert_dates(processed, date_cols=['date'])
-        
-        # Handle missing values
-        processed = self._handle_missing_values(processed)
-        
-        # Create additional features
-        processed = self._create_features(processed)
-        
-        logger.info(f"Completed preprocessing of {len(processed)} records")
-        return processed
+        logger.info(f"Saved processed data to {output_path}: {len(gdf)} features")
     
     @handle_errors(logger=logger, error_type=ValueError)
-    def _handle_missing_values(self, gdf):
-        """
-        Handle missing values in the data using utility function.
+    def split_by_exchange_regime(self, gdf: gpd.GeoDataFrame) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+        """Split data by exchange rate regime."""
+        if 'exchange_rate_regime' not in gdf.columns:
+            raise ValueError("Column 'exchange_rate_regime' not found in GeoDataFrame")
         
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
-            
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            DataFrame with handled missing values
-        """
-        # Check for missing values
-        missing_values = gdf.isnull().sum()
-        total_missing = missing_values.sum()
+        north = gdf[gdf['exchange_rate_regime'] == 'north'].copy()
+        south = gdf[gdf['exchange_rate_regime'] == 'south'].copy()
         
-        if total_missing > 0:
-            logger.info(f"Found {total_missing} missing values across {sum(missing_values > 0)} columns")
-            
-            # Use utility function for filling missing values
-            filled_gdf = fill_missing_values(
-                gdf,
-                numeric_strategy='median',
-                group_cols=['admin1', 'commodity'],
-                date_strategy='ffill'
-            )
-            
-            # For conflict data, fill remaining NAs with zeros
-            conflict_cols = [col for col in filled_gdf.columns if 'conflict' in col]
-            for col in conflict_cols:
-                if filled_gdf[col].isnull().sum() > 0:
-                    filled_gdf[col] = filled_gdf[col].fillna(0)
-                    logger.info(f"Filled remaining NAs in {col} with zeros")
-            
-            logger.info("Successfully handled missing values")
-            return filled_gdf
-        else:
-            logger.info("No missing values found")
-            return gdf
+        logger.info(f"Split data by exchange regime: {len(north)} north, {len(south)} south")
+        return north, south
     
-    @m1_optimized(use_numba=True)
     @handle_errors(logger=logger, error_type=ValueError)
-    def _create_features(self, gdf):
-        """
-        Create additional features for analysis.
+    def get_time_series(self, gdf: gpd.GeoDataFrame, admin_region: str, commodity: str) -> gpd.GeoDataFrame:
+        """Extract time series for specific region and commodity."""
+        required_cols = ['admin1', 'commodity', 'date']
+        for col in required_cols:
+            if col not in gdf.columns:
+                raise ValueError(f"Required column '{col}' not found in GeoDataFrame")
         
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
-            
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            DataFrame with additional features
-        """
-        # Make a copy to avoid modifying the input
-        df = gdf.copy()
+        mask = (gdf['admin1'] == admin_region) & (gdf['commodity'] == commodity)
+        result = gdf[mask].sort_values('date').copy()
         
-        # Extract year and month
-        df['year'] = df['date'].dt.year
-        df['month'] = df['date'].dt.month
-        
-        # Create price log returns for volatility analysis
-        df['price_log'] = np.log(df['price'])
-        
-        # Normalize conflict intensity if not already normalized
-        if 'conflict_intensity' in df.columns and 'conflict_intensity_normalized' not in df.columns:
-            df = normalize_columns(df, columns=['conflict_intensity'], new_names=['conflict_intensity_normalized'])
-        
-        # Group by admin1, commodity, and date, then calculate log returns
-        df = df.sort_values(['admin1', 'commodity', 'date'])
-        groups = df.groupby(['admin1', 'commodity'])
-        
-        # Calculate price returns (more efficient than apply)
-        price_returns = []
-        for name, group in groups:
-            group = group.copy()
-            group['price_return'] = group['price_log'].diff()
-            price_returns.append(group)
-        
-        if price_returns:
-            df = pd.concat(price_returns)
-            logger.info("Created features: year, month, price_log, price_return")
-        
-        return df
-    
-    @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(DataError, ValueError))
-    def calculate_price_differentials(self, gdf):
-        """
-        Calculate price differentials between north and south exchange rate regimes.
-        
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
-            
-        Returns
-        -------
-        pandas.DataFrame
-            DataFrame with price differentials
-        """
-        # Validate input
-        required_cols = ['commodity', 'date', 'price', 'exchange_rate_regime']
-        valid, errors = validate_dataframe(gdf, required_columns=required_cols)
-        raise_if_invalid(valid, errors, "Invalid data for price differential calculation")
-        
-        # Get unique commodities and dates
-        commodities = gdf['commodity'].unique()
-        dates = gdf['date'].unique()
-        
-        # Create empty list to store differentials
-        differentials = []
-        
-        # For each commodity and date, calculate north-south differential
-        for commodity in commodities:
-            for date in dates:
-                # Filter data for this commodity and date
-                mask = (gdf['commodity'] == commodity) & (gdf['date'] == date)
-                data = gdf[mask]
-                
-                # Get average prices by regime
-                north_price = data[data['exchange_rate_regime'] == 'north']['price'].mean()
-                south_price = data[data['exchange_rate_regime'] == 'south']['price'].mean()
-                
-                # Calculate differential
-                if not (np.isnan(north_price) or np.isnan(south_price)):
-                    differential = {
-                        'commodity': commodity,
-                        'date': date,
-                        'north_price': north_price,
-                        'south_price': south_price,
-                        'price_diff': north_price - south_price,
-                        'price_diff_pct': (north_price - south_price) / south_price * 100
-                    }
-                    differentials.append(differential)
-        
-        result = pd.DataFrame(differentials)
-        logger.info(f"Calculated price differentials for {len(result)} commodity-date combinations")
+        logger.info(f"Extracted time series for {admin_region}, {commodity}: {len(result)} observations")
         return result
+    
+    @handle_errors(logger=logger, error_type=ValueError)
+    def get_commodity_list(self, gdf: gpd.GeoDataFrame) -> List[str]:
+        """Get list of available commodities in the data."""
+        if 'commodity' not in gdf.columns:
+            raise ValueError("Column 'commodity' not found in GeoDataFrame")
+        
+        commodities = sorted(gdf['commodity'].unique())
+        
+        logger.info(f"Found {len(commodities)} unique commodities")
+        return commodities
+    
+    @handle_errors(logger=logger, error_type=ValueError)
+    def get_region_list(self, gdf: gpd.GeoDataFrame) -> List[str]:
+        """Get list of available administrative regions."""
+        if 'admin1' not in gdf.columns:
+            raise ValueError("Column 'admin1' not found in GeoDataFrame")
+        
+        regions = sorted(gdf['admin1'].unique())
+        
+        logger.info(f"Found {len(regions)} unique administrative regions")
+        return regions
+    
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
+    def load_multiple_periods(self, filenames: List[str]) -> gpd.GeoDataFrame:
+        """Load and combine multiple GeoJSON files representing different time periods."""
+        gdfs = []
+        
+        for filename in filenames:
+            gdf = self.load_geojson(filename)
+            gdfs.append(gdf)
+        
+        combined_gdf = pd.concat(gdfs, ignore_index=True)
+        
+        logger.info(f"Combined {len(filenames)} files: {len(combined_gdf)} total observations")
+        return combined_gdf
+    
+    @handle_errors(logger=logger, error_type=ValueError)
+    def filter_data(self, 
+                   gdf: gpd.GeoDataFrame,
+                   commodities: Optional[List[str]] = None,
+                   regions: Optional[List[str]] = None,
+                   start_date: Optional[str] = None,
+                   end_date: Optional[str] = None,
+                   exchange_regime: Optional[str] = None) -> gpd.GeoDataFrame:
+        """Filter data by various criteria."""
+        filtered_gdf = gdf.copy()
+        
+        if commodities:
+            filtered_gdf = filtered_gdf[filtered_gdf['commodity'].isin(commodities)]
+        
+        if regions:
+            filtered_gdf = filtered_gdf[filtered_gdf['admin1'].isin(regions)]
+        
+        if start_date:
+            filtered_gdf = filtered_gdf[filtered_gdf['date'] >= pd.to_datetime(start_date)]
+        
+        if end_date:
+            filtered_gdf = filtered_gdf[filtered_gdf['date'] <= pd.to_datetime(end_date)]
+        
+        if exchange_regime:
+            if exchange_regime not in ['north', 'south']:
+                raise ValueError("exchange_regime must be 'north' or 'south'")
+            filtered_gdf = filtered_gdf[filtered_gdf['exchange_rate_regime'] == exchange_regime]
+        
+        logger.info(f"Filtered data: {len(filtered_gdf)} observations remaining")
+        return filtered_gdf

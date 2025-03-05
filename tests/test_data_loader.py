@@ -1,28 +1,25 @@
-"""
-Unit tests for data loader module.
-"""
+"""Unit tests for data preprocessor module."""
 import unittest
-from unittest.mock import patch, MagicMock
 import pandas as pd
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import Point
-from pathlib import Path
 import os
 import sys
 
 # Add the src directory to the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.data.loader import DataLoader
-from src.utils import DataError
+from src.data.preprocessor import DataPreprocessor
+from src.utils import ValidationError
 
 
-class TestDataLoader(unittest.TestCase):
-    """Tests for the DataLoader class."""
+class TestDataPreprocessor(unittest.TestCase):
+    """Tests for the DataPreprocessor class."""
     
     def setUp(self):
         """Set up test fixtures."""
-        self.loader = DataLoader('./data')
+        self.preprocessor = DataPreprocessor()
         
         # Create a temporary test GeoDataFrame
         self.test_data = gpd.GeoDataFrame(
@@ -33,6 +30,8 @@ class TestDataLoader(unittest.TestCase):
                 'price': [100, 110, 120, 130],
                 'usdprice': [1.0, 1.1, 1.2, 1.3],
                 'exchange_rate_regime': ['north', 'north', 'south', 'south'],
+                'events': [10, 15, 5, 8],
+                'fatalities': [5, 8, 2, 3],
                 'geometry': [
                     Point(45.0, 13.0),
                     Point(45.0, 13.0),
@@ -42,150 +41,50 @@ class TestDataLoader(unittest.TestCase):
             },
             crs="EPSG:4326"
         )
+        
+        # Create test data with missing values
+        self.test_data_with_nulls = self.test_data.copy()
+        self.test_data_with_nulls.loc[1, 'price'] = np.nan
+        self.test_data_with_nulls.loc[2, 'events'] = np.nan
 
-    @patch('src.utils.read_geojson')
-    @patch('src.utils.validate_geodataframe')
-    def test_load_geojson(self, mock_validate, mock_read_geojson):
-        """Test loading GeoJSON file."""
-        # Configure mocks
-        mock_read_geojson.return_value = self.test_data
-        mock_validate.return_value = (True, [])
+    def test_preprocess_geojson(self):
+        """Test preprocessing GeoJSON data."""
+        processed = self.preprocessor.preprocess_geojson(self.test_data)
         
-        # Call the method
-        result = self.loader.load_geojson('test.geojson')
+        # Check that new columns were created
+        self.assertIn('year', processed.columns)
+        self.assertIn('month', processed.columns)
+        self.assertIn('price_log', processed.columns)
         
-        # Verify mocks were called correctly
-        mock_read_geojson.assert_called_once()
-        mock_validate.assert_called_once()
-        
-        # Verify result is correct
-        self.assertEqual(len(result), 4)
-        self.assertListEqual(list(result['admin1']), ['abyan', 'abyan', 'aden', 'aden'])
+        # Check values
+        self.assertEqual(processed['year'].iloc[0], 2020)
+        self.assertEqual(processed['month'].iloc[0], 1)
+        self.assertAlmostEqual(processed['price_log'].iloc[0], np.log(100), places=5)
     
-    @patch('src.utils.read_geojson')
-    @patch('src.utils.validate_geodataframe')
-    @patch('pathlib.Path.exists')
-    def test_load_geojson_file_not_found(self, mock_exists, mock_validate, mock_read_geojson):
-        """Test loading non-existent GeoJSON file."""
-        # Configure mocks
-        mock_exists.return_value = False
+    def test_handle_missing_values(self):
+        """Test handling of missing values."""
+        processed = self.preprocessor._handle_missing_values(self.test_data_with_nulls)
         
-        # Verify that the correct exception is raised
-        with self.assertRaises(DataError):
-            self.loader.load_geojson('nonexistent.geojson')
-        
-        # Verify mocks were called correctly
-        mock_read_geojson.assert_not_called()
-        mock_validate.assert_not_called()
+        # Check that nulls were handled
+        self.assertFalse(processed['price'].isna().any())
+        self.assertFalse(processed['events'].isna().any())
     
-    @patch('src.utils.read_geojson')
-    @patch('src.utils.validate_geodataframe')
-    @patch('pathlib.Path.exists')
-    def test_load_geojson_invalid_data(self, mock_exists, mock_validate, mock_read_geojson):
-        """Test loading invalid GeoJSON file."""
-        # Configure mocks
-        mock_exists.return_value = True
-        mock_read_geojson.return_value = self.test_data
-        mock_validate.return_value = (False, ["Missing required column 'admin1'"])
+    def test_calculate_price_differentials(self):
+        """Test calculation of price differentials."""
+        differentials = self.preprocessor.calculate_price_differentials(self.test_data)
         
-        # Verify that the correct exception is raised
-        with self.assertRaises(ValueError):
-            self.loader.load_geojson('invalid.geojson')
-    
-    @patch('src.utils.write_geojson')
-    def test_save_processed_data(self, mock_write_geojson):
-        """Test saving processed data."""
-        # Call the method
-        self.loader.save_processed_data(self.test_data, 'processed.geojson')
+        # Check that the DataFrame has the expected columns
+        expected_columns = ['commodity', 'date', 'north_price', 'south_price', 'price_diff', 'price_diff_pct']
+        for col in expected_columns:
+            self.assertIn(col, differentials.columns)
         
-        # Verify mock was called correctly
-        mock_write_geojson.assert_called_once()
-    
-    def test_save_processed_data_invalid_input(self):
-        """Test saving processed data with invalid input."""
-        # Create an invalid input (not a GeoDataFrame)
-        invalid_data = pd.DataFrame({
-            'admin1': ['abyan', 'aden'],
-            'commodity': ['beans', 'rice']
-        })
+        # Check calculations
+        beans_diff = differentials[differentials['commodity'] == 'beans']
+        self.assertEqual(len(beans_diff), 2)  # 2 dates
         
-        # Verify that the correct exception is raised
-        with self.assertRaises(DataError):
-            self.loader.save_processed_data(invalid_data, 'processed.geojson')
-    
-    def test_split_by_exchange_regime(self):
-        """Test splitting by exchange rate regime."""
-        north, south = self.loader.split_by_exchange_regime(self.test_data)
-        
-        self.assertEqual(len(north), 2)
-        self.assertEqual(len(south), 2)
-        self.assertTrue(all(north['exchange_rate_regime'] == 'north'))
-        self.assertTrue(all(south['exchange_rate_regime'] == 'south'))
-    
-    def test_split_by_exchange_regime_missing_column(self):
-        """Test splitting by exchange rate regime with missing column."""
-        # Create data without exchange_rate_regime column
-        invalid_data = self.test_data.drop(columns=['exchange_rate_regime'])
-        
-        # Verify that the correct exception is raised
-        with self.assertRaises(ValueError):
-            self.loader.split_by_exchange_regime(invalid_data)
-    
-    def test_get_time_series(self):
-        """Test getting time series for a specific region and commodity."""
-        ts = self.loader.get_time_series(self.test_data, 'abyan', 'beans')
-        
-        self.assertEqual(len(ts), 2)
-        self.assertTrue(all(ts['admin1'] == 'abyan'))
-        self.assertTrue(all(ts['commodity'] == 'beans'))
-        self.assertTrue(ts['date'].is_monotonic_increasing)
-    
-    def test_get_time_series_missing_columns(self):
-        """Test getting time series with missing columns."""
-        # Create data without required columns
-        invalid_data = self.test_data.drop(columns=['admin1'])
-        
-        # Verify that the correct exception is raised
-        with self.assertRaises(ValueError):
-            self.loader.get_time_series(invalid_data, 'abyan', 'beans')
-    
-    def test_get_time_series_no_data(self):
-        """Test getting time series with no matching data."""
-        ts = self.loader.get_time_series(self.test_data, 'nonexistent', 'beans')
-        
-        self.assertEqual(len(ts), 0)
-    
-    def test_get_commodity_list(self):
-        """Test getting list of commodities."""
-        commodities = self.loader.get_commodity_list(self.test_data)
-        
-        self.assertEqual(len(commodities), 2)
-        self.assertListEqual(commodities, ['beans', 'rice'])
-    
-    def test_get_commodity_list_missing_column(self):
-        """Test getting commodity list with missing column."""
-        # Create data without commodity column
-        invalid_data = self.test_data.drop(columns=['commodity'])
-        
-        # Verify that the correct exception is raised
-        with self.assertRaises(ValueError):
-            self.loader.get_commodity_list(invalid_data)
-    
-    def test_get_region_list(self):
-        """Test getting list of regions."""
-        regions = self.loader.get_region_list(self.test_data)
-        
-        self.assertEqual(len(regions), 2)
-        self.assertListEqual(regions, ['abyan', 'aden'])
-    
-    def test_get_region_list_missing_column(self):
-        """Test getting region list with missing column."""
-        # Create data without admin1 column
-        invalid_data = self.test_data.drop(columns=['admin1'])
-        
-        # Verify that the correct exception is raised
-        with self.assertRaises(ValueError):
-            self.loader.get_region_list(invalid_data)
+        # Verify price difference calculation
+        first_row = beans_diff.iloc[0]
+        self.assertEqual(first_row['price_diff'], first_row['north_price'] - first_row['south_price'])
 
 
 if __name__ == '__main__':

@@ -9,6 +9,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from src.utils import handle_errors, validate_geodataframe, raise_if_invalid
+from src.utils import clean_column_names, convert_dates, fill_missing_values
+from src.utils import normalize_columns, create_date_features, create_lag_features
+from src.utils import validate_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +48,13 @@ class DataPreprocessor:
         # Make a copy to avoid modifying the original
         processed = gdf.copy()
         
-        # Convert date strings to datetime objects
-        processed['date'] = pd.to_datetime(processed['date'])
+        # Clean column names using utility
+        processed = clean_column_names(processed)
         
-        # Handle missing values
+        # Convert date strings to datetime objects using utility
+        processed = convert_dates(processed, date_cols=['date'])
+        
+        # Handle missing values using utility
         processed = self._handle_missing_values(processed)
         
         # Create additional features
@@ -71,29 +77,28 @@ class DataPreprocessor:
         geopandas.GeoDataFrame
             DataFrame with handled missing values
         """
-        # Check for missing values
-        missing_values = gdf.isnull().sum()
-        
-        # Forward fill date-based missing values (for time series)
-        for col in ['price', 'usdprice']:
-            if missing_values[col] > 0:
-                gdf[col] = gdf.groupby(['admin1', 'commodity'])[col].fillna(method='ffill')
-                # If still missing, backward fill
-                gdf[col] = gdf.groupby(['admin1', 'commodity'])[col].fillna(method='bfill')
+        # Use the fill_missing_values utility
+        filled_gdf = fill_missing_values(
+            gdf,
+            numeric_strategy='median',
+            group_cols=['admin1', 'commodity'],
+            date_strategy='forward'
+        )
         
         # For conflict data, fill remaining NAs with zeros
-        conflict_cols = [col for col in gdf.columns if 'conflict' in col]
+        conflict_cols = [col for col in filled_gdf.columns if 'conflict' in col]
         for col in conflict_cols:
-            if col in missing_values and missing_values[col] > 0:
-                gdf[col] = gdf[col].fillna(0)
+            if filled_gdf[col].isna().any():
+                filled_gdf[col] = filled_gdf[col].fillna(0)
+                logger.info(f"Filled missing values in {col} with zeros")
         
         # Log missing values that couldn't be filled
-        remaining_missing = gdf.isnull().sum()
+        remaining_missing = filled_gdf.isnull().sum()
         if remaining_missing.sum() > 0:
             for col in remaining_missing[remaining_missing > 0].index:
                 logger.warning(f"Column {col} still has {remaining_missing[col]} missing values")
         
-        return gdf
+        return filled_gdf
     
     def _create_features(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         """
@@ -109,22 +114,43 @@ class DataPreprocessor:
         geopandas.GeoDataFrame
             DataFrame with additional features
         """
-        # Extract year and month
-        gdf['year'] = gdf['date'].dt.year
-        gdf['month'] = gdf['date'].dt.month
+        # Create date features using utility
+        gdf = create_date_features(
+            gdf, 
+            date_col='date',
+            features=['year', 'month', 'weekofyear']
+        )
+        
+        # Add yearmonth manually as it's specific to this application
         gdf['yearmonth'] = gdf['date'].dt.strftime('%Y-%m')
         
-        # Create price log returns for volatility analysis
+        # Create price log for returns calculation
         gdf['price_log'] = np.log(gdf['price'])
         
-        # Group by admin1, commodity, and date, then calculate log returns
+        # Create lagged features using utility
+        gdf = create_lag_features(
+            gdf,
+            cols=['price', 'price_log'],
+            lags=[1],
+            group_cols=['admin1', 'commodity']
+        )
+        
+        # Calculate price returns manually
         gdf = gdf.sort_values(['admin1', 'commodity', 'date'])
         gdf['price_return'] = gdf.groupby(['admin1', 'commodity'])['price_log'].diff()
         
-        # Create price volatility measure (rolling std of returns)
+        # Create rolling features for volatility
         gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_return'].transform(
             lambda x: x.rolling(window=3, min_periods=1).std()
         )
+        
+        # Normalize conflict intensity if present
+        if 'conflict_intensity' in gdf.columns and 'conflict_intensity_normalized' not in gdf.columns:
+            gdf = normalize_columns(
+                gdf, 
+                columns=['conflict_intensity'],
+                method='minmax'
+            )
         
         logger.info("Created additional features for analysis")
         return gdf
@@ -145,8 +171,11 @@ class DataPreprocessor:
             DataFrame with price differentials
         """
         # Validate input data
-        if 'exchange_rate_regime' not in gdf.columns:
-            raise ValueError("Input data must have 'exchange_rate_regime' column")
+        valid, errors = validate_dataframe(
+            gdf,
+            required_columns=['commodity', 'date', 'price', 'exchange_rate_regime']
+        )
+        raise_if_invalid(valid, errors, "Invalid data for price differential calculation")
         
         # Get unique commodities and dates
         commodities = gdf['commodity'].unique()
