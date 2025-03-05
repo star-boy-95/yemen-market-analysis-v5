@@ -27,4 +27,3 @@ mapclassify>=2.4.0
 
 # Configuration and utilities
 pyyaml>=6.0
-

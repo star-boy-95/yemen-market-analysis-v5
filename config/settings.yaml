@@ -1,0 +1,71 @@
+# Yemen Market Integration Project Configuration
+
+# Data settings
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  primary_geojson: "unified_data.geojson"
+  
+# Analysis settings
+analysis:
+  # Cointegration test settings
+  cointegration:
+    max_lags: 4
+    alpha: 0.05
+    trend: "c"
+  
+  # Threshold settings
+  threshold:
+    trim: 0.15
+    n_grid: 300
+    max_lags: 4
+  
+  # Spatial settings
+  spatial:
+    k_neighbors: a5
+    conflict_adjusted: true
+    crs: 32638  # UTM Zone 38N for Yemen
+
+# Commodities of interest (in order of priority)
+commodities:
+  - "beans (kidney red)"
+  - "beans (white)"
+  - "eggs"
+  - "flour"
+  - "rice"
+  - "sugar"
+  - "wheat"
+
+# Regional groupings
+regions:
+  north:
+    - "amanat alasimah"
+    - "sanaa"
+    - "ibb"
+    - "taiz"
+  south:
+    - "abyan"
+    - "aden"
+    - "lahj"
+    - "shabwah"
+
+# Visualization settings
+visualization:
+  color_palette: "viridis"
+  figure_dpi: 300
+  default_fig_width: 12
+  default_fig_height: 8
+  interactive_width: 800
+  interactive_height: 600
+  
+  # Map colors
+  north_color: "#1f77b4"
+  south_color: "#ff7f0e"
+  conflict_color: "#d62728"
+  
+# Logging settings
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/yemen_analysis.log"
+  rotation: "daily"

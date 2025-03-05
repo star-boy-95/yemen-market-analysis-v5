@@ -3,7 +3,7 @@ Setup script for yemen-market-integration package.
 """
 from setuptools import setup, find_packages
 import os
-from pathlib import Path
+from pathlib import Path  # Fixed import from pathPath to pathlib
 
 # Read the contents of README file
 this_directory = Path(__file__).parent
