@@ -5,19 +5,22 @@ scipy>=1.7.0
 
 # Geospatial analysis
 geopandas>=0.10.0
+pyproj>=3.0.0
 pysal>=2.4.0
 folium>=0.12.0
-contextily>=1.2.0  # For adding basemaps
+contextily>=1.1.0
 
-# Econometrics
+# Econometrics and statistics
 statsmodels>=0.13.0
+scikit-learn>=1.0.0
 arch>=5.0.0
-pmdarima>=1.8.0  # For ARIMA models
+pmdarima>=1.8.0
 
 # Spatial econometrics
-spreg>=1.2.4     # Spatial regression models
-libpysal>=4.5.0  # Core PySAL functionality
-esda>=2.4.1      # Exploratory spatial data analysis
+spreg>=1.2.4
+libpysal>=4.5.0
+esda>=2.4.1
+splot>=1.1.0
 
 # Visualization
 matplotlib>=3.4.0
@@ -25,5 +28,33 @@ seaborn>=0.11.0
 plotly>=5.3.0
 mapclassify>=2.4.0
 
-# Configuration and utilities
+# Performance optimization
+numba>=0.55.0
+joblib>=1.1.0
+dask>=2022.1.0
+swifter>=1.0.0
+
+# Data acquisition and APIs
+requests>=2.27.0
+beautifulsoup4>=4.10.0
+openpyxl>=3.0.0
+xlrd>=2.0.0
+
+# Testing and quality assurance
+pytest>=6.2.0
+pytest-cov>=2.12.0
+flake8>=3.9.0
+black>=21.5b2
+pylint>=2.8.0
+
+# Documentation
+sphinx>=4.3.0
+sphinx-rtd-theme>=1.0.0
+nbsphinx>=0.8.0
+
+# CI/CD
+pre-commit>=2.17.0
+
+# Environment management
+python-dotenv>=0.19.0
 pyyaml>=6.0
