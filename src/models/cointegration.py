@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Union, List, Tuple
 from statsmodels.tsa.vector_ar.vecm import coint_johansen
 from statsmodels.tsa.stattools import coint
 import statsmodels.api as sm
+from scipy import stats
 
 from src.utils import (
     # Error handling
@@ -169,7 +170,23 @@ class CointegrationTester:
         Returns
         -------
         dict
-            Dictionary with test results
+            Dictionary with test results including:
+            - trace_statistics: Trace statistics for each cointegration rank
+            - trace_critical_values: Critical values for trace statistics
+            - max_statistics: Maximum eigenvalue statistics
+            - max_critical_values: Critical values for maximum eigenvalue statistics
+            - p_values_trace: P-values calculated using chi-squared approximation (approximate)
+            - rank_trace: Cointegration rank based on trace statistic
+            - rank_max: Cointegration rank based on maximum eigenvalue statistic
+            - cointegration_vectors: Estimated cointegration vectors
+            - eigenvalues: Eigenvalues from decomposition
+            - cointegrated: Boolean indicating if cointegration is present
+            
+        Notes
+        -----
+        The p-values are calculated using a chi-squared approximation to the 
+        asymptotic distribution of the test statistics. These are approximate 
+        p-values and should be interpreted with caution, especially in small samples.
         """
         # Ensure data is a DataFrame or numpy array
         if not isinstance(data, (pd.DataFrame, np.ndarray)):
@@ -203,6 +220,11 @@ class CointegrationTester:
         max_stat = result.lr2
         max_crit = result.cvm
         
+        # Calculate p-values using chi-squared approximation
+        # Degrees of freedom for trace test is (n_vars - r) for each r
+        df_trace = np.array([(n_vars - r) for r in range(n_vars)])
+        p_values_trace = [1 - stats.chi2.cdf(trace_stat[i], df_trace[i]) for i in range(len(trace_stat))]
+        
         # Determine the cointegration rank using 5% significance level
         rank_trace = sum(trace_stat > trace_crit[:, 1])  # 5% significance level
         rank_max = sum(max_stat > max_crit[:, 1])  # 5% significance level
@@ -212,6 +234,7 @@ class CointegrationTester:
             'trace_critical_values': trace_crit,
             'max_statistics': max_stat,
             'max_critical_values': max_crit,
+            'p_values_trace': np.array(p_values_trace),
             'rank_trace': rank_trace,
             'rank_max': rank_max,
             'cointegration_vectors': result.evec,
@@ -248,7 +271,12 @@ class CointegrationTester:
         Returns
         -------
         dict
-            Dictionary with results of both tests
+            Dictionary with results of both tests and additional metrics:
+            - engle_granger: Results from Engle-Granger test
+            - johansen: Results from Johansen test
+            - cointegrated: Boolean indicating if cointegration is present in either test
+            - half_life: Time (in periods) for deviations to revert halfway to equilibrium
+                         (only calculated if Engle-Granger shows cointegration)
         """
         # Convert inputs to numpy arrays
         if isinstance(y, pd.Series):
@@ -275,11 +303,21 @@ class CointegrationTester:
         eg_result = self.test_engle_granger(y_values, x_values, trend=trend)
         jo_result = self.test_johansen(data, det_order=det_order)
         
+        # Calculate half-life if cointegrated according to Engle-Granger test
+        half_life = None
+        if eg_result['cointegrated']:
+            try:
+                half_life = calculate_half_life(eg_result['residuals'])
+                logger.info(f"Half-life of deviations: {half_life:.2f} periods")
+            except Exception as e:
+                logger.warning(f"Could not calculate half-life: {e}")
+        
         # Combine results
         combined = {
             'engle_granger': eg_result,
             'johansen': jo_result,
-            'cointegrated': eg_result['cointegrated'] or jo_result['cointegrated']
+            'cointegrated': eg_result['cointegrated'] or jo_result['cointegrated'],
+            'half_life': half_life
         }
         
         return combined
