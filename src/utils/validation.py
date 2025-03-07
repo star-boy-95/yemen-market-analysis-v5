@@ -112,6 +112,51 @@ def validate_dataframe(
     
     return len(errors) == 0, errors
 
+def validate_exchange_rate_regime(value: str) -> bool:
+    """
+    Validate exchange rate regime value
+    
+    Parameters
+    ----------
+    value : str
+        Exchange rate regime to validate
+        
+    Returns
+    -------
+    bool
+        True if valid
+    """
+    return value in ['north', 'south']
+
+def validate_admin_region(region: str, valid_regions: Optional[List[str]] = None) -> bool:
+    """
+    Validate an administrative region in Yemen
+    
+    Parameters
+    ----------
+    region : str
+        Region to validate
+    valid_regions : list, optional
+        List of valid regions
+        
+    Returns
+    -------
+    bool
+        True if valid
+    """
+    # Get regions from configuration if not provided
+    if not valid_regions:
+        from src.utils import config
+        north = config.get('regions.north', [])
+        south = config.get('regions.south', [])
+        valid_regions = north + south
+    
+    # Normalize input
+    region = region.lower().strip()
+    valid_regions = [r.lower().strip() for r in valid_regions]
+    
+    return region in valid_regions
+
 def validate_geodataframe(
     gdf: gpd.GeoDataFrame,
     crs: Optional[str] = None,

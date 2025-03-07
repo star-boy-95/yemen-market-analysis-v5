@@ -28,16 +28,19 @@ from src.utils import (
     read_csv, write_csv, read_geojson, write_geojson,
     
     # Data processing
-    clean_column_names, normalize_columns, compute_price_differentials,
+    clean_column_names, normalize_columns, compute_price_differentials, split_by_exchange_regime,
     
     # Performance
     configure_system_for_performance, parallelize_dataframe,
     
     # Spatial
-    reproject_gdf, calculate_distances, assign_exchange_rate_regime,
+    reproject_gdf, calculate_distances, assign_exchange_rate_regime, create_conflict_adjusted_weights,
     
     # Statistical
-    test_stationarity, test_cointegration, fit_threshold_vecm
+    test_stationarity, test_cointegration, fit_threshold_vecm, test_granger_causality, estimate_threshold_model,
+    
+    # Plotting
+    plot_time_series_by_group, plot_yemen_market_integration, plot_price_deviation_by_conflict
 )
 ```
 
@@ -68,7 +71,7 @@ raise DataError("Missing price column in market data")
 Tools for validating data inputs and parameters.
 
 ```python
-from src.utils.validation import validate_dataframe, raise_if_invalid
+from src.utils.validation import validate_dataframe, raise_if_invalid, validate_exchange_rate_regime, validate_admin_region
 
 # Validate DataFrame structure
 valid, errors = validate_dataframe(
@@ -80,6 +83,10 @@ valid, errors = validate_dataframe(
 
 # Abort processing if validation fails
 raise_if_invalid(valid, errors, "Market data validation failed")
+
+# Validate Yemen-specific data
+is_valid_regime = validate_exchange_rate_regime(regime)  # 'north' or 'south'
+is_valid_region = validate_admin_region(region, valid_regions=['Sana\'a', 'Aden', 'Taiz'])
 ```
 
 ### Key Functions:
@@ -88,6 +95,8 @@ raise_if_invalid(valid, errors, "Market data validation failed")
 - **`validate_geodataframe`**: Additional checks for spatial data
 - **`validate_time_series`**: Tests for stationarity, length, and null values
 - **`validate_model_inputs`**: Verifies parameters for statistical models
+- **`validate_exchange_rate_regime`**: Validates Yemen exchange rate regime values
+- **`validate_admin_region`**: Validates Yemen administrative regions
 
 ## Module: `file_utils`
 
@@ -216,7 +225,8 @@ from src.utils.data_utils import (
     clean_column_names,
     convert_dates,
     fill_missing_values,
-    create_lag_features
+    compute_price_differentials,
+    split_by_exchange_regime
 )
 
 # Clean and prepare data
@@ -224,14 +234,16 @@ df = clean_column_names(df)
 df = convert_dates(df, date_columns=['date'])
 df = fill_missing_values(df, numeric_strategy='median', group_columns=['region'])
 
-# Create features for time series analysis
-df = create_lag_features(df, columns=['price'], lags=[1, 2, 3], group_columns=['market'])
+# Yemen-specific functions
+north_data, south_data = split_by_exchange_regime(df, regime_col='exchange_rate_regime')
+abs_diff, pct_diff = compute_price_differentials(north_prices, south_prices)
 ```
 
 ### Key Functions:
 
 - **Cleaning**: `clean_column_names`, `fill_missing_values`, `detect_outliers`
 - **Transformation**: `normalize_columns`, `convert_exchange_rates`, `winsorize_columns`
+- **Yemen-specific**: `compute_price_differentials`, `split_by_exchange_regime`
 - **Time Series**: `create_lag_features`, `create_rolling_features`, `calculate_price_changes`
 - **Aggregation**: `aggregate_time_series`, `pivot_data`, `unpivot_data`
 
@@ -243,12 +255,26 @@ Statistical tests and econometric models specific to market integration analysis
 from src.utils.stats_utils import (
     test_stationarity,
     test_cointegration,
+    test_granger_causality,
+    estimate_threshold_model,
     fit_threshold_vecm
 )
 
 # Test time series properties
 stationarity = test_stationarity(price_series, test='adf')
 print(f"Series is stationary: {stationarity['stationary']}")
+
+# Test causality relationships
+causality = test_granger_causality(north_prices, south_prices, max_lags=5)
+print(f"North prices cause south prices: {causality['causality']}")
+
+# Yemen-specific threshold analysis
+threshold_model = estimate_threshold_model(
+    y=price_diff, 
+    x=lagged_diff,
+    threshold_variable='residual'
+)
+print(f"Threshold value: {threshold_model['threshold']}")
 
 # Test for market integration
 result = test_cointegration(
@@ -268,8 +294,9 @@ model = fit_threshold_vecm(
 
 ### Key Functions:
 
-- **Tests**: `test_stationarity`, `test_cointegration`, `test_causality_granger`, `test_linearity`
-- **Models**: `fit_var_model`, `fit_vecm_model`, `fit_threshold_vecm`, `estimate_threshold_tar`
+- **Tests**: `test_stationarity`, `test_cointegration`, `test_granger_causality`, `test_linearity`
+- **Yemen Models**: `estimate_threshold_model`, `estimate_threshold_tar`
+- **Models**: `fit_var_model`, `fit_vecm_model`, `fit_threshold_vecm`
 - **Diagnostics**: `test_white_noise`, `test_autocorrelation`, `compute_variance_ratio`
 - **Bootstrap**: `bootstrap_confidence_interval`, `calculate_threshold_ci`
 
@@ -281,7 +308,9 @@ Utilities for spatial operations and GIS analysis.
 from src.utils.spatial_utils import (
     reproject_gdf,
     calculate_distances,
-    assign_exchange_rate_regime
+    assign_exchange_rate_regime,
+    create_conflict_adjusted_weights,
+    calculate_exchange_rate_boundary
 )
 
 # Ensure consistent coordinate system
@@ -293,6 +322,22 @@ distance_matrix = calculate_distances(
     destination_gdf=markets_gdf,
     origin_id_col='market_id',
     dest_id_col='market_id'
+)
+
+# Yemen-specific spatial analysis
+# Create weights adjusted by conflict intensity
+weights = create_conflict_adjusted_weights(
+    markets_gdf,
+    k=5,  # 5 nearest neighbors
+    conflict_col='conflict_intensity_normalized',
+    conflict_weight=0.5
+)
+
+# Calculate the boundary between exchange rate regimes
+boundary = calculate_exchange_rate_boundary(
+    markets_gdf,
+    regime_col='exchange_rate_regime',
+    buffer_distance=5000  # 5km buffer
 )
 
 # Assign exchange rate regimes based on location
@@ -307,6 +352,7 @@ markets_with_regimes = assign_exchange_rate_regime(
 
 - **Transformations**: `reproject_gdf`, `create_buffer`, `reproject_geometry`
 - **Analysis**: `find_nearest_points`, `overlay_layers`, `calculate_distances`
+- **Yemen-specific**: `create_conflict_adjusted_weights`, `calculate_exchange_rate_boundary`
 - **Market Integration**: `calculate_market_isolation`, `create_market_catchments`, `assign_exchange_rate_regime`
 - **Weights**: `create_spatial_weight_matrix`, `create_exchange_regime_boundaries`
 
@@ -318,6 +364,8 @@ Specialized visualization tools for market integration analysis.
 from src.utils.plotting_utils import (
     plot_time_series_by_group,
     plot_dual_axis,
+    plot_price_deviation_by_conflict,
+    plot_yemen_market_integration,
     set_plotting_style
 )
 
@@ -331,6 +379,23 @@ fig, ax = plot_time_series_by_group(
     y='price',
     group='exchange_rate_regime',
     title='Price Trends by Exchange Rate Regime'
+)
+
+# Yemen-specific visualizations
+# Plot price deviations by conflict intensity
+fig, ax = plot_price_deviation_by_conflict(
+    df,
+    price_col='price',
+    conflict_col='conflict_intensity_normalized',
+    regime_col='exchange_rate_regime',
+    title='Price Deviations vs Conflict Intensity'
+)
+
+# Create a specialized Yemen market map
+fig = plot_yemen_market_integration(
+    markets_gdf,
+    integration_col='market_integration_index',
+    title='Market Integration in Yemen'
 )
 
 # Plot prices and exchange rates
@@ -349,6 +414,7 @@ save_plot(fig, 'results/price_analysis.png', dpi=300)
 ### Key Functions:
 
 - **Time Series**: `plot_time_series`, `plot_multiple_time_series`, `plot_time_series_by_group`
+- **Yemen-specific**: `plot_price_deviation_by_conflict`, `plot_yemen_market_integration`
 - **Statistical**: `plot_scatter`, `plot_boxplot`, `plot_histogram`, `plot_heatmap`
 - **Comparisons**: `plot_bar_chart`, `plot_stacked_bar`, `plot_dual_axis`
 - **Formatting**: `format_date_axis`, `format_currency_axis`, `configure_axes_for_print`
@@ -399,50 +465,63 @@ logger.info("Processing market data")  # Will include region and commodity
    raise_if_invalid(valid, errors)
    ```
 
-3. **Optimize computation-heavy functions**:
+3. **Use Yemen-specific validation**:
+   ```python
+   if not validate_exchange_rate_regime(regime):
+       raise ValidationError(f"Invalid exchange rate regime: {regime}")
+   ```
+
+4. **Optimize computation-heavy functions**:
    ```python
    @m1_optimized(use_numba=True, parallel=True)
    def intensive_calculation():
        # Implementation
    ```
 
-4. **Process large data in chunks**:
+5. **Process large data in chunks**:
    ```python
    for chunk in read_large_csv_chunks('large_file.csv', chunk_size=10000):
        process_chunk(chunk)
    ```
 
-5. **Use the config singleton**:
+6. **Use the config singleton**:
    ```python
    threshold = config.get('analysis.threshold', 0.05)
    ```
 
-6. **Add context to logs**:
+7. **Add context to logs**:
    ```python
    logger = get_logger_with_context(__name__, {'task': 'data_loading'})
    ```
 
-7. **Use specialized plotting functions**:
+8. **Use specialized Yemen functions**:
    ```python
-   fig, ax = plot_time_series_by_group(df, x='date', y='price', group='region')
+   # Split market data by exchange rate regime
+   north_data, south_data = split_by_exchange_regime(market_data)
+   
+   # Create conflict-adjusted weights for spatial analysis
+   weights = create_conflict_adjusted_weights(markets_gdf, conflict_col='conflict_intensity')
+   
+   # Visualize Yemen-specific patterns
+   fig = plot_yemen_market_integration(markets_gdf, integration_col='integration_index')
    ```
 
-8. **Save atomic file writes**:
+9. **Save atomic file writes**:
    ```python
    with AtomicFileWriter('results.csv') as f:
        df.to_csv(f)
    ```
 
-9. **For time series analysis**:
-   ```python
-   # Test before modeling
-   result = test_stationarity(series)
-   if not result['stationary']:
-       series = np.diff(series)
-   ```
+10. **For time series analysis**:
+    ```python
+    # Test before modeling
+    result = test_stationarity(series)
+    if not result['stationary']:
+        series = np.diff(series)
+    ```
 
-10. **For spatial operations**:
+11. **For spatial operations**:
     ```python
     # Always ensure consistent CRS
-    gdf = reproject_gdf(gdf, to_crs=32638)
+    gdf = reproject_gdf(gdf, to_crs=32638)  # UTM Zone 38N for Yemen
     ```

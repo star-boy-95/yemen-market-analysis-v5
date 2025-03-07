@@ -1253,3 +1253,241 @@ def plot_boxplot(
     ax.grid(grid, axis='y' if vert else 'x')
     
     return fig, ax
+
+@handle_errors(logger=logger)
+def plot_price_deviation_by_conflict(
+    df: pd.DataFrame,
+    price_col: str = 'price',
+    conflict_col: str = 'conflict_intensity_normalized',
+    regime_col: str = 'exchange_rate_regime',
+    title: str = 'Price Deviations vs Conflict Intensity',
+    figsize: Tuple[float, float] = (10, 6)
+) -> Tuple[Figure, Axes]:
+    """
+    Plot price deviations against conflict intensity with regime breakdown.
+    
+    Visualizes how conflict affects price transmission in Yemen's markets.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data to plot
+    price_col : str, optional
+        Column name for price data
+    conflict_col : str, optional
+        Column name for conflict intensity
+    regime_col : str, optional
+        Column name for exchange rate regime
+    title : str, optional
+        Plot title
+    figsize : tuple, optional
+        Figure dimensions
+        
+    Returns
+    -------
+    tuple
+        (figure, axes)
+    """
+    # Validate inputs
+    for col in [price_col, conflict_col, regime_col]:
+        if col not in df.columns:
+            raise ValueError(f"Column {col} not found in dataframe")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Get unique regimes
+    regimes = df[regime_col].unique()
+    
+    # Use north/south specific colors if applicable
+    if set(regimes) <= set(['north', 'south']):
+        colors = COLOR_PALETTES['north_south']
+        regime_to_color = dict(zip(['north', 'south'], colors))
+    else:
+        # Use categorical palette
+        colors = COLOR_PALETTES['categorical']
+        regime_to_color = dict(zip(regimes, colors[:len(regimes)]))
+    
+    # Plot each regime
+    for regime in regimes:
+        regime_data = df[df[regime_col] == regime]
+        ax.scatter(
+            regime_data[conflict_col],
+            regime_data[price_col],
+            label=regime,
+            color=regime_to_color.get(regime),
+            alpha=0.7,
+            edgecolor='w',
+            linewidth=0.5
+        )
+        
+        # Add trend line
+        if len(regime_data) >= 2:
+            from scipy import stats
+            slope, intercept, r_value, p_value, std_err = stats.linregress(
+                regime_data[conflict_col],
+                regime_data[price_col]
+            )
+            
+            x = np.array([regime_data[conflict_col].min(), regime_data[conflict_col].max()])
+            y = intercept + slope * x
+            
+            ax.plot(
+                x, y,
+                color=regime_to_color.get(regime),
+                linestyle='--',
+                linewidth=1.5,
+                alpha=0.8
+            )
+            
+            # Add R² annotation
+            r_squared = r_value**2
+            ax.annotate(
+                f"R² = {r_squared:.3f}",
+                xy=(x.mean(), intercept + slope * x.mean()),
+                xytext=(5, 5),
+                textcoords='offset points',
+                color=regime_to_color.get(regime),
+                fontsize=9,
+                bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2')
+            )
+    
+    # Add labels and title
+    ax.set_xlabel('Conflict Intensity')
+    ax.set_ylabel(price_col)
+    ax.set_title(title)
+    
+    # Add legend
+    ax.legend(title=regime_col)
+    
+    # Add grid
+    ax.grid(True, alpha=0.3)
+    
+    return fig, ax
+
+@handle_errors(logger=logger)
+def plot_yemen_market_integration(
+    markets_gdf: gpd.GeoDataFrame,
+    integration_col: str,
+    title: str = 'Market Integration in Yemen',
+    cmap: str = 'RdYlGn',
+    figsize: Tuple[int, int] = (12, 10),
+    save_path: Optional[str] = None
+) -> Figure:
+    """
+    Create a map of Yemen showing market integration levels.
+    
+    Specialized for Yemen market analysis with appropriate basemap and borders.
+    
+    Parameters
+    ----------
+    markets_gdf : geopandas.GeoDataFrame
+        GeoDataFrame with market locations and integration metric
+    integration_col : str
+        Column name for integration metric
+    title : str, optional
+        Plot title
+    cmap : str, optional
+        Colormap name
+    figsize : tuple, optional
+        Figure dimensions
+    save_path : str, optional
+        Path to save figure
+        
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure object
+    """
+    # Validate inputs
+    if not isinstance(markets_gdf, gpd.GeoDataFrame):
+        raise ValueError("markets_gdf must be a GeoDataFrame")
+    
+    if integration_col not in markets_gdf.columns:
+        raise ValueError(f"Column {integration_col} not found in GeoDataFrame")
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot base map of Yemen
+    try:
+        # Try to get Yemen boundaries if we have them
+        import geopandas as gpd
+        
+        # Try to load Yemen boundaries from natural earth
+        world = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+        yemen = world[world['name'] == 'Yemen']
+        
+        if not yemen.empty:
+            yemen.plot(
+                ax=ax,
+                color='lightgray',
+                edgecolor='gray',
+                linewidth=0.5
+            )
+        else:
+            logger.warning("Yemen boundaries not found in natural earth dataset")
+    except Exception as e:
+        logger.warning(f"Could not plot Yemen boundaries: {str(e)}")
+    
+    # Plot markets by integration level
+    scatter = markets_gdf.plot(
+        column=integration_col,
+        ax=ax,
+        cmap=cmap,
+        legend=True,
+        markersize=50,
+        alpha=0.8,
+        edgecolor='k',
+        linewidth=0.5
+    )
+    
+    # If we have an exchange rate regime column, add boundary
+    if 'exchange_rate_regime' in markets_gdf.columns:
+        try:
+            from src.utils import calculate_exchange_rate_boundary
+            
+            # Calculate boundary
+            boundary = calculate_exchange_rate_boundary(markets_gdf, 'exchange_rate_regime')
+            
+            # Plot boundary if exists
+            if not boundary.empty:
+                boundary.plot(
+                    ax=ax,
+                    color='red',
+                    linewidth=2,
+                    linestyle='--',
+                    label='Exchange Rate Boundary'
+                )
+                ax.legend()
+        except Exception as e:
+            logger.warning(f"Could not plot exchange rate boundary: {str(e)}")
+    
+    # Add basemap if contextily is available
+    try:
+        import contextily as ctx
+        ctx.add_basemap(
+            ax,
+            crs=markets_gdf.crs.to_string(),
+            source=ctx.providers.OpenStreetMap.Mapnik,
+            alpha=0.5
+        )
+    except:
+        logger.warning("Contextily not available, skipping basemap")
+    
+    # Add title and labels
+    ax.set_title(title, fontsize=16)
+    ax.set_xlabel('Longitude')
+    ax.set_ylabel('Latitude')
+    
+    # Add legend title
+    legend = ax.get_legend()
+    if legend:
+        legend.set_title(integration_col)
+    
+    # Save if requested
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"Saved map to {save_path}")
+    
+    return fig

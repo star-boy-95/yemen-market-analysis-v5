@@ -65,6 +65,8 @@ from .validation import (
     validate_longitude,
     validate_percentage,
     validate_date_string,
+    validate_exchange_rate_regime,
+    validate_admin_region,
     raise_if_invalid
 )
 
@@ -104,6 +106,7 @@ from .data_utils import (
     normalize_columns,
     detect_outliers,
     compute_price_differentials,
+    split_by_exchange_regime,
     aggregate_time_series,
     create_lag_features,
     create_rolling_features,
@@ -132,6 +135,7 @@ from .stats_utils import (
     test_covariate_significance,
     compute_rolling_correlation,
     estimate_threshold_tar,
+    estimate_threshold_model,
     calculate_threshold_ci,
     test_linearity,
     fit_threshold_vecm,
@@ -153,10 +157,12 @@ from .spatial_utils import (
     calculate_distances,
     calculate_distance_matrix,
     create_spatial_weight_matrix,
+    create_conflict_adjusted_weights,
     extract_area_of_interest,
     aggregate_points_to_polygons,
     compute_accessibility_index,
     create_exchange_regime_boundaries,
+    calculate_exchange_rate_boundary,
     calculate_market_isolation,
     assign_exchange_rate_regime,
     create_market_catchments
@@ -169,4 +175,28 @@ from .performance_utils import (
     optimize_dataframe,
     get_system_info,
     memory_usage_decorator,
-    IS_APPLE_
+    IS_APPLE_SILICON
+)
+
+# Plotting utilities
+from .plotting_utils import (
+    set_plotting_style,
+    create_figure,
+    format_date_axis,
+    format_currency_axis,
+    plot_time_series,
+    plot_multiple_time_series,
+    plot_time_series_by_group,
+    plot_price_deviation_by_conflict,
+    plot_bar_chart,
+    plot_stacked_bar,
+    plot_scatter,
+    plot_heatmap,
+    plot_histogram,
+    plot_dual_axis,
+    plot_boxplot,
+    plot_yemen_market_integration,
+    add_annotations,
+    configure_axes_for_print,
+    save_plot
+)

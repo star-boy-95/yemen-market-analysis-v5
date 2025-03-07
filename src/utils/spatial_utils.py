@@ -1084,3 +1084,160 @@ def create_market_catchments(
     result = result[result['nearest_market'].notna()].copy()
     
     return result
+
+@handle_errors(logger=logger)
+@m1_optimized(parallel=True)
+def create_conflict_adjusted_weights(
+    gdf: gpd.GeoDataFrame,
+    k: int = 5,
+    conflict_col: str = 'conflict_intensity_normalized',
+    conflict_weight: float = 0.5
+) -> Any:  # Using Any because libpysal might not be imported in typing
+    """
+    Create spatial weight matrix adjusted by conflict intensity.
+    
+    In Yemen's context, conflict creates barriers between markets
+    that aren't captured by geographic distance alone.
+    
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        GeoDataFrame with point geometries
+    k : int, optional
+        Number of nearest neighbors
+    conflict_col : str, optional
+        Column with conflict intensity values (0-1 normalized)
+    conflict_weight : float, optional
+        Weight of conflict in distance adjustment (0-1)
+        
+    Returns
+    -------
+    libpysal.weights.W
+        Spatial weight matrix adjusted by conflict
+    """
+    from libpysal.weights import KNN
+    import copy
+    
+    # Validate input
+    if not isinstance(gdf, gpd.GeoDataFrame):
+        raise ValueError("Input must be a GeoDataFrame")
+    
+    # Create base weights using KNN
+    knn = KNN.from_dataframe(gdf, k=k)
+    
+    # If no conflict adjustment requested, return base weights
+    if conflict_col not in gdf.columns or conflict_weight == 0:
+        return knn
+    
+    # Create conflict-adjusted weights
+    conflict_values = gdf[conflict_col].values
+    w = copy.deepcopy(knn)
+    
+    # Adjust weights based on conflict
+    for i, neighbors in w.neighbors.items():
+        new_weights = []
+        for j in neighbors:
+            # Calculate average conflict intensity between regions
+            conflict_factor = (conflict_values[i] + conflict_values[j]) / 2
+            # Reduce weight (increase distance) based on conflict
+            original_weight = w.weights[i][w.neighbors[i].index(j)]
+            new_weight = original_weight * (1 - conflict_weight * conflict_factor)
+            new_weights.append(new_weight)
+        
+        w.weights[i] = new_weights
+    
+    # Ensure symmetry
+    w = w.symmetrize()
+    
+    return w
+
+@handle_errors(logger=logger)
+def calculate_exchange_rate_boundary(
+    markets_gdf: gpd.GeoDataFrame,
+    regime_col: str = 'exchange_rate_regime',
+    buffer_distance: float = 5000  # 5km buffer
+) -> gpd.GeoDataFrame:
+    """
+    Calculate the boundary between different exchange rate regimes in Yemen.
+    
+    Parameters
+    ----------
+    markets_gdf : geopandas.GeoDataFrame
+        GeoDataFrame with market locations and regime information
+    regime_col : str, optional
+        Column with exchange rate regime information
+    buffer_distance : float, optional
+        Buffer distance in coordinate units (e.g., meters if projected)
+        
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        GeoDataFrame with the boundary geometry
+    """
+    from shapely.ops import unary_union
+    
+    # Validate input
+    if not isinstance(markets_gdf, gpd.GeoDataFrame):
+        raise ValueError("Input must be a GeoDataFrame")
+    
+    if regime_col not in markets_gdf.columns:
+        raise ValueError(f"Column {regime_col} not found in GeoDataFrame")
+    
+    # Check if input is projected
+    if not markets_gdf.crs or markets_gdf.crs.is_geographic:
+        logger.warning(
+            "Input GeoDataFrame uses geographic coordinates. "
+            "Consider reprojecting to a projected CRS for accurate distances."
+        )
+    
+    # Split markets by regime
+    regimes = markets_gdf[regime_col].unique()
+    
+    if len(regimes) < 2:
+        raise ValueError(f"Found only one regime: {regimes[0]}. Need at least two regimes.")
+    
+    # Create regime polygons by buffering and dissolving
+    regime_polygons = {}
+    
+    for regime in regimes:
+        # Get markets for this regime
+        regime_markets = markets_gdf[markets_gdf[regime_col] == regime]
+        
+        # Buffer points and dissolve
+        buffered = regime_markets.copy()
+        buffered['geometry'] = regime_markets.geometry.buffer(buffer_distance)
+        dissolved = unary_union(buffered.geometry)
+        
+        regime_polygons[regime] = dissolved
+    
+    # Create boundary by intersecting the boundaries of each regime's area
+    boundaries = []
+    regime_list = list(regime_polygons.keys())
+    
+    for i in range(len(regime_list)):
+        for j in range(i+1, len(regime_list)):
+            regime1 = regime_list[i]
+            regime2 = regime_list[j]
+            
+            # Get boundary of each regime area
+            boundary1 = regime_polygons[regime1].boundary
+            boundary2 = regime_polygons[regime2].boundary
+            
+            # Find intersection (the shared boundary)
+            shared = boundary1.intersection(boundary2)
+            
+            if not shared.is_empty:
+                boundaries.append({
+                    'geometry': shared,
+                    'regime1': regime1,
+                    'regime2': regime2
+                })
+    
+    # Create GeoDataFrame from boundaries
+    if not boundaries:
+        logger.warning("No boundaries found between regimes")
+        return gpd.GeoDataFrame(geometry=[], crs=markets_gdf.crs)
+    
+    boundary_gdf = gpd.GeoDataFrame(boundaries, crs=markets_gdf.crs)
+    
+    return boundary_gdf

@@ -328,6 +328,7 @@ def normalize_columns(
     return result
 
 @m1_optimized(use_numba=True)
+@handle_errors(logger=logger)
 def compute_price_differentials(
     north_prices: np.ndarray,
     south_prices: np.ndarray
@@ -347,6 +348,10 @@ def compute_price_differentials(
     tuple
         (absolute_diff, percentage_diff)
     """
+    # Ensure arrays
+    north_prices = np.asarray(north_prices)
+    south_prices = np.asarray(south_prices)
+    
     # Compute absolute difference
     absolute_diff = north_prices - south_prices
     
@@ -357,6 +362,52 @@ def compute_price_differentials(
     percentage_diff[mask] = (absolute_diff[mask] / south_prices[mask]) * 100
     
     return absolute_diff, percentage_diff
+
+@handle_errors(logger=logger)
+def split_by_exchange_regime(
+    df: pd.DataFrame,
+    regime_col: str = 'exchange_rate_regime'
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Split dataset by exchange rate regime (north/south).
+    
+    In Yemen's context, this is essential due to the different currency values
+    in northern and southern regions.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Data to split
+    regime_col : str, optional
+        Column with exchange rate regime information
+        
+    Returns
+    -------
+    tuple
+        (north_data, south_data)
+    """
+    # Validate input
+    if regime_col not in df.columns:
+        raise ValueError(f"Column {regime_col} not found in dataframe")
+    
+    # Check for valid values
+    valid_regimes = ['north', 'south']
+    invalid_values = set(df[regime_col].unique()) - set(valid_regimes)
+    
+    if invalid_values:
+        logger.warning(
+            f"Found invalid regime values: {invalid_values}. "
+            f"Expected values are: {valid_regimes}"
+        )
+    
+    # Split data
+    north_data = df[df[regime_col] == 'north'].copy()
+    south_data = df[df[regime_col] == 'south'].copy()
+    
+    # Log results
+    logger.info(f"Split data: {len(north_data)} rows for north, {len(south_data)} rows for south")
+    
+    return north_data, south_data
 
 @handle_errors(logger=logger)
 def aggregate_time_series(

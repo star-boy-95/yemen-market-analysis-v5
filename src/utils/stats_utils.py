@@ -364,6 +364,217 @@ def test_granger_causality(
     
     return result
 
+@m1_optimized(use_numba=True)
+@handle_errors(logger=logger)
+def estimate_threshold_model(
+    y: np.ndarray, 
+    x: np.ndarray, 
+    z: Optional[np.ndarray] = None,
+    trim: float = 0.15,
+    threshold_variable: str = 'residual',
+    n_grid: int = 300
+) -> Dict[str, Any]:
+    """
+    Estimate threshold regression model with Yemen-specific adaptations.
+    
+    In Yemen's context, thresholds often represent transaction costs amplified
+    by conflict barriers between markets.
+    
+    Parameters
+    ----------
+    y : numpy.ndarray
+        Dependent variable
+    x : numpy.ndarray
+        Independent variable
+    z : numpy.ndarray, optional
+        Threshold variable (if None, uses residuals from linear model)
+    trim : float, optional
+        Trimming percentage for threshold search
+    threshold_variable : str, optional
+        Type of threshold variable ('residual' or 'custom')
+    n_grid : int, optional
+        Number of grid points for threshold search
+        
+    Returns
+    -------
+    dict
+        Threshold model results
+    """
+    # Convert to numpy arrays
+    y = np.asarray(y)
+    x = np.asarray(x)
+    
+    # Check dimensions
+    if y.ndim > 1:
+        y = y.squeeze()
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    
+    # Add constant term to x
+    X = np.column_stack([np.ones(len(y)), x])
+    
+    # Create threshold variable if not provided
+    if z is None and threshold_variable == 'residual':
+        # Fit linear model to get residuals
+        beta_lin = np.linalg.lstsq(X, y, rcond=None)[0]
+        z = y - X @ beta_lin
+    elif z is not None:
+        z = np.asarray(z)
+        if z.ndim > 1:
+            z = z.squeeze()
+    else:
+        raise ValueError("Either z must be provided or threshold_variable must be 'residual'")
+    
+    # Determine grid points for threshold search
+    z_sorted = np.sort(z)
+    min_idx = int(len(z) * trim)
+    max_idx = int(len(z) * (1 - trim))
+    grid = np.linspace(z_sorted[min_idx], z_sorted[max_idx], n_grid)
+    
+    # Grid search for optimal threshold
+    best_ssr = float('inf')
+    best_threshold = None
+    best_coefs = None
+    
+    for threshold in grid:
+        # Split data based on threshold
+        below = z <= threshold
+        above = z > threshold
+        
+        # Check if enough observations in each regime
+        if np.sum(below) < X.shape[1] + 1 or np.sum(above) < X.shape[1] + 1:
+            continue
+        
+        # Estimate coefficients for each regime
+        try:
+            beta_below = np.linalg.lstsq(X[below], y[below], rcond=None)[0]
+            beta_above = np.linalg.lstsq(X[above], y[above], rcond=None)[0]
+            
+            # Calculate SSR
+            residuals_below = y[below] - X[below] @ beta_below
+            residuals_above = y[above] - X[above] @ beta_above
+            ssr = np.sum(residuals_below**2) + np.sum(residuals_above**2)
+            
+            if ssr < best_ssr:
+                best_ssr = ssr
+                best_threshold = threshold
+                best_coefs = (beta_below, beta_above)
+        except:
+            continue
+    
+    if best_threshold is None:
+        raise ValueError("Failed to find optimal threshold")
+    
+    # Calculate linear model SSR for comparison
+    beta_lin = np.linalg.lstsq(X, y, rcond=None)[0]
+    residuals_lin = y - X @ beta_lin
+    ssr_lin = np.sum(residuals_lin**2)
+    
+    # Calculate F-statistic for threshold effect
+    n = len(y)
+    k = X.shape[1]
+    f_stat = ((ssr_lin - best_ssr) / k) / (best_ssr / (n - 2 * k))
+    
+    # Calculate p-value using F-distribution
+    from scipy import stats
+    p_value = 1 - stats.f.cdf(f_stat, k, n - 2 * k)
+    
+    # Return results
+    return {
+        'threshold': best_threshold,
+        'coefficients': {
+            'below': best_coefs[0],
+            'above': best_coefs[1],
+            'linear': beta_lin
+        },
+        'ssr': {
+            'threshold': best_ssr,
+            'linear': ssr_lin
+        },
+        'f_statistic': f_stat,
+        'p_value': p_value,
+        'threshold_effect': p_value < 0.05,
+        'n_obs': {
+            'below': np.sum(z <= best_threshold),
+            'above': np.sum(z > best_threshold),
+            'total': n
+        }
+    }
+
+@handle_errors(logger=logger)
+def test_granger_causality(
+    y: Union[pd.Series, np.ndarray],
+    x: Union[pd.Series, np.ndarray],
+    max_lags: int = 5,
+    alpha: float = 0.05
+) -> Dict[str, Any]:
+    """
+    Test for Granger causality between time series
+    
+    Parameters
+    ----------
+    y : array_like
+        Time series that might be caused
+    x : array_like
+        Time series that might cause y
+    max_lags : int, optional
+        Maximum number of lags to test
+    alpha : float, optional
+        Significance level
+        
+    Returns
+    -------
+    dict
+        Test results
+    """
+    # Convert to pandas Series if numpy arrays
+    if isinstance(y, np.ndarray):
+        y = pd.Series(y)
+    if isinstance(x, np.ndarray):
+        x = pd.Series(x)
+    
+    # Create a DataFrame with the two series
+    data = pd.DataFrame({'y': y, 'x': x})
+    
+    # Remove missing values
+    data = data.dropna()
+    
+    # Perform Granger causality test
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        gc_test = grangercausalitytests(data, maxlag=max_lags, verbose=False)
+    
+    # Initialize result dictionary
+    result = {
+        'causality': False,
+        'optimal_lag': None,
+        'min_pvalue': 1.0,
+        'lags': {},
+        'parameters': {
+            'max_lags': max_lags,
+            'alpha': alpha
+        }
+    }
+    
+    # Extract results for each lag
+    for lag in range(1, max_lags + 1):
+        # Use the 'ssr_chi2test' results (default F-test can be accessed with 'ssr_ftest')
+        p_value = gc_test[lag][0]['ssr_chi2test'][1]
+        result['lags'][lag] = {
+            'p_value': p_value,
+            'significant': p_value < alpha
+        }
+        
+        # Update minimum p-value and corresponding lag
+        if p_value < result['min_pvalue']:
+            result['min_pvalue'] = p_value
+            result['optimal_lag'] = lag
+    
+    # Determine if there's evidence of Granger causality
+    result['causality'] = result['min_pvalue'] < alpha
+    
+    return result
+
 @handle_errors(logger=logger)
 @m1_optimized(use_numba=True)
 def fit_var_model(
