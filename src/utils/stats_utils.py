@@ -476,7 +476,6 @@ def estimate_threshold_model(
     f_stat = ((ssr_lin - best_ssr) / k) / (best_ssr / (n - 2 * k))
     
     # Calculate p-value using F-distribution
-    from scipy import stats
     p_value = 1 - stats.f.cdf(f_stat, k, n - 2 * k)
     
     # Return results
@@ -502,14 +501,14 @@ def estimate_threshold_model(
     }
 
 @handle_errors(logger=logger)
-def test_granger_causality(
+def test_causality_extended(
     y: Union[pd.Series, np.ndarray],
     x: Union[pd.Series, np.ndarray],
-    max_lags: int = 5,
+    maxlag: int = 5,
     alpha: float = 0.05
 ) -> Dict[str, Any]:
     """
-    Test for Granger causality between time series
+    Test for Granger causality from x to y with enhanced statistics
     
     Parameters
     ----------
@@ -517,7 +516,7 @@ def test_granger_causality(
         Time series that might be caused
     x : array_like
         Time series that might cause y
-    max_lags : int, optional
+    maxlag : int, optional
         Maximum number of lags to test
     alpha : float, optional
         Significance level
@@ -540,41 +539,74 @@ def test_granger_causality(
     data = data.dropna()
     
     # Perform Granger causality test
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        gc_test = grangercausalitytests(data, maxlag=max_lags, verbose=False)
+    test_results = {}
     
-    # Initialize result dictionary
+    for lag in range(1, maxlag + 1):
+        # Create lagged variables for restricted model (y ~ y lags)
+        X_restricted = np.zeros((len(data) - lag, lag))
+        for i in range(lag):
+            X_restricted[:, i] = data['y'].iloc[lag - i - 1:-i - 1].values
+        
+        # Create lagged variables for unrestricted model (y ~ y lags + x lags)
+        X_unrestricted = np.zeros((len(data) - lag, 2 * lag))
+        for i in range(lag):
+            X_unrestricted[:, i] = data['y'].iloc[lag - i - 1:-i - 1].values
+            X_unrestricted[:, lag + i] = data['x'].iloc[lag - i - 1:-i - 1].values
+        
+        # Add constant
+        X_restricted = sm.add_constant(X_restricted)
+        X_unrestricted = sm.add_constant(X_unrestricted)
+        
+        # Get dependent variable
+        y_lag = data['y'].iloc[lag:].values
+        
+        # Fit restricted model
+        model_restricted = sm.OLS(y_lag, X_restricted)
+        results_restricted = model_restricted.fit()
+        
+        # Fit unrestricted model
+        model_unrestricted = sm.OLS(y_lag, X_unrestricted)
+        results_unrestricted = model_unrestricted.fit()
+        
+        # Compute F-statistic
+        ssr_restricted = results_restricted.ssr
+        ssr_unrestricted = results_unrestricted.ssr
+        
+        df1 = lag  # Number of restrictions
+        df2 = len(y_lag) - 2 * lag - 1  # Degrees of freedom in the unrestricted model
+        
+        f_stat = ((ssr_restricted - ssr_unrestricted) / df1) / (ssr_unrestricted / df2)
+        p_value = 1 - stats.f.cdf(f_stat, df1, df2)
+        
+        # Store results for this lag
+        test_results[lag] = {
+            'f_statistic': f_stat,
+            'p_value': p_value,
+            'df1': df1,
+            'df2': df2,
+            'restricted_ssr': ssr_restricted,
+            'unrestricted_ssr': ssr_unrestricted,
+            'significant': p_value < alpha
+        }
+    
+    # Select optimal lag based on minimal p-value
+    optimal_lag = min(test_results.keys(), key=lambda k: test_results[k]['p_value'])
+    
+    # Store overall results
     result = {
-        'causality': False,
-        'optimal_lag': None,
-        'min_pvalue': 1.0,
-        'lags': {},
+        'lag_results': test_results,
+        'optimal_lag': optimal_lag,
+        'min_pvalue': test_results[optimal_lag]['p_value'],
+        'causality_detected': any(res['significant'] for res in test_results.values()),
         'parameters': {
-            'max_lags': max_lags,
+            'maxlag': maxlag,
             'alpha': alpha
         }
     }
     
-    # Extract results for each lag
-    for lag in range(1, max_lags + 1):
-        # Use the 'ssr_chi2test' results (default F-test can be accessed with 'ssr_ftest')
-        p_value = gc_test[lag][0]['ssr_chi2test'][1]
-        result['lags'][lag] = {
-            'p_value': p_value,
-            'significant': p_value < alpha
-        }
-        
-        # Update minimum p-value and corresponding lag
-        if p_value < result['min_pvalue']:
-            result['min_pvalue'] = p_value
-            result['optimal_lag'] = lag
-    
-    # Determine if there's evidence of Granger causality
-    result['causality'] = result['min_pvalue'] < alpha
-    
     return result
 
+@timer
 @handle_errors(logger=logger)
 @m1_optimized(use_numba=True)
 def fit_var_model(
@@ -642,6 +674,7 @@ def fit_var_model(
     
     return var_results
 
+@timer
 @handle_errors(logger=logger)
 @m1_optimized(use_numba=True)
 def fit_vecm_model(
@@ -1132,6 +1165,10 @@ def calculate_threshold_ci(
     """
     Calculate confidence interval for TAR model threshold
     
+    In Yemen's context, accurate threshold confidence intervals help identify
+    the uncertainty around price differentials that trigger market adjustments,
+    which can vary with conflict intensity.
+    
     Parameters
     ----------
     y : array_like
@@ -1277,6 +1314,9 @@ def test_linearity(
 ) -> Dict[str, Any]:
     """
     Test linearity against threshold model alternative
+    
+    Critical for Yemen market analysis as nonlinear adjustments are expected
+    due to conflict barriers that create asymmetric transaction costs.
     
     Parameters
     ----------
@@ -1726,6 +1766,7 @@ def calculate_half_life(
         raise ValueError(f"Unknown regime: {regime}")
 
 @handle_errors(logger=logger)
+@m1_optimized(use_numba=True)
 def bootstrap_confidence_interval(
     data: Union[pd.Series, np.ndarray],
     statistic_func: Callable,
@@ -1793,8 +1834,36 @@ def bootstrap_confidence_interval(
         
     elif method == 'bca':
         # BCa method (bias-corrected and accelerated)
-        # This is more complex and would require more code
-        raise NotImplementedError("BCa method not implemented")
+        # Calculate bias correction factor
+        z0 = stats.norm.ppf(np.mean(bootstrap_stats < original_stat))
+        
+        # Calculate acceleration factor using jackknife
+        jackknife_stats = []
+        for i in range(len(data)):
+            # Remove one observation
+            jackknife_sample = np.delete(data, i)
+            # Calculate statistic
+            jackknife_stats.append(statistic_func(jackknife_sample, **kwargs))
+        
+        jackknife_mean = np.mean(jackknife_stats)
+        numerator = np.sum((jackknife_mean - jackknife_stats)**3)
+        denominator = 6 * (np.sum((jackknife_mean - jackknife_stats)**2))**(3/2)
+        
+        # Avoid division by zero
+        if denominator == 0:
+            a = 0
+        else:
+            a = numerator / denominator
+        
+        # Calculate BCa confidence intervals
+        z_alpha = stats.norm.ppf(alpha/2)
+        z_1_alpha = stats.norm.ppf(1-alpha/2)
+        
+        p_lower = stats.norm.cdf(z0 + (z0 + z_alpha)/(1 - a*(z0 + z_alpha)))
+        p_upper = stats.norm.cdf(z0 + (z0 + z_1_alpha)/(1 - a*(z0 + z_1_alpha)))
+        
+        lower_bound = np.percentile(bootstrap_stats, p_lower*100)
+        upper_bound = np.percentile(bootstrap_stats, p_upper*100)
         
     else:
         raise ValueError(f"Unknown bootstrap method: {method}")
@@ -1903,112 +1972,7 @@ def compute_variance_ratio(
     
     return result
 
-@handle_errors(logger=logger)
-def test_causality_granger(
-    y: Union[pd.Series, np.ndarray],
-    x: Union[pd.Series, np.ndarray],
-    maxlag: int = 5,
-    alpha: float = 0.05
-) -> Dict[str, Any]:
-    """
-    Test for Granger causality from x to y
-    
-    Parameters
-    ----------
-    y : array_like
-        Time series that might be caused
-    x : array_like
-        Time series that might cause y
-    maxlag : int, optional
-        Maximum number of lags to test
-    alpha : float, optional
-        Significance level
-        
-    Returns
-    -------
-    dict
-        Test results
-    """
-    # Convert to pandas Series if numpy arrays
-    if isinstance(y, np.ndarray):
-        y = pd.Series(y)
-    if isinstance(x, np.ndarray):
-        x = pd.Series(x)
-    
-    # Create a DataFrame with the two series
-    data = pd.DataFrame({'y': y, 'x': x})
-    
-    # Remove missing values
-    data = data.dropna()
-    
-    # Perform Granger causality test
-    test_results = {}
-    
-    for lag in range(1, maxlag + 1):
-        # Create lagged variables for restricted model (y ~ y lags)
-        X_restricted = np.zeros((len(data) - lag, lag))
-        for i in range(lag):
-            X_restricted[:, i] = data['y'].iloc[lag - i - 1:-i - 1].values
-        
-        # Create lagged variables for unrestricted model (y ~ y lags + x lags)
-        X_unrestricted = np.zeros((len(data) - lag, 2 * lag))
-        for i in range(lag):
-            X_unrestricted[:, i] = data['y'].iloc[lag - i - 1:-i - 1].values
-            X_unrestricted[:, lag + i] = data['x'].iloc[lag - i - 1:-i - 1].values
-        
-        # Add constant
-        X_restricted = sm.add_constant(X_restricted)
-        X_unrestricted = sm.add_constant(X_unrestricted)
-        
-        # Get dependent variable
-        y_lag = data['y'].iloc[lag:].values
-        
-        # Fit restricted model
-        model_restricted = sm.OLS(y_lag, X_restricted)
-        results_restricted = model_restricted.fit()
-        
-        # Fit unrestricted model
-        model_unrestricted = sm.OLS(y_lag, X_unrestricted)
-        results_unrestricted = model_unrestricted.fit()
-        
-        # Compute F-statistic
-        ssr_restricted = results_restricted.ssr
-        ssr_unrestricted = results_unrestricted.ssr
-        
-        df1 = lag  # Number of restrictions
-        df2 = len(y_lag) - 2 * lag - 1  # Degrees of freedom in the unrestricted model
-        
-        f_stat = ((ssr_restricted - ssr_unrestricted) / df1) / (ssr_unrestricted / df2)
-        p_value = 1 - stats.f.cdf(f_stat, df1, df2)
-        
-        # Store results for this lag
-        test_results[lag] = {
-            'f_statistic': f_stat,
-            'p_value': p_value,
-            'df1': df1,
-            'df2': df2,
-            'restricted_ssr': ssr_restricted,
-            'unrestricted_ssr': ssr_unrestricted,
-            'significant': p_value < alpha
-        }
-    
-    # Select optimal lag based on minimal p-value
-    optimal_lag = min(test_results.keys(), key=lambda k: test_results[k]['p_value'])
-    
-    # Store overall results
-    result = {
-        'lag_results': test_results,
-        'optimal_lag': optimal_lag,
-        'min_pvalue': test_results[optimal_lag]['p_value'],
-        'causality_detected': any(res['significant'] for res in test_results.values()),
-        'parameters': {
-            'maxlag': maxlag,
-            'alpha': alpha
-        }
-    }
-    
-    return result
-
+@m1_optimized()
 @handle_errors(logger=logger)
 def test_structural_break(
     y: Union[pd.Series, np.ndarray],

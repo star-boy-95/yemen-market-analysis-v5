@@ -142,7 +142,7 @@ from .stats_utils import (
     calculate_half_life,
     bootstrap_confidence_interval,
     compute_variance_ratio,
-    test_causality_granger,
+    test_causality_extended,
     test_structural_break
 )
 
