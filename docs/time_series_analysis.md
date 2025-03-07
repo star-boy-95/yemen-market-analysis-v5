@@ -7,8 +7,9 @@ This document provides guidance on using the unit root and cointegration testing
 1. [Introduction](#introduction)
 2. [Unit Root Testing](#unit-root-testing)
 3. [Cointegration Testing](#cointegration-testing)
-4. [Recommended Workflow](#recommended-workflow)
-5. [Examples](#examples)
+4. [Model Diagnostics](#model-diagnostics)
+5. [Recommended Workflow](#recommended-workflow)
+6. [Examples](#examples)
 
 ## Introduction
 
@@ -91,6 +92,51 @@ print(f"Number of cointegrating relations: {jo_result['rank_trace']}")
 
 - **Engle-Granger**: Series are cointegrated if residuals are stationary
 - **Johansen**: The rank indicates the number of cointegrating relationships
+
+## Model Diagnostics
+
+The `diagnostics.py` module provides comprehensive tools for validating econometric models.
+
+### Available Tests
+
+- **Normality Tests**: Jarque-Bera test for normal distribution of residuals
+- **Autocorrelation Tests**: Breusch-Godfrey test for serial correlation
+- **Heteroskedasticity Tests**: White test for constant error variance
+- **Parameter Stability**: Tests for stable coefficients over time
+
+### Basic Usage
+
+```python
+from src.models import ModelDiagnostics, calculate_fit_statistics
+
+# Initialize the diagnostics
+diagnostics = ModelDiagnostics()
+
+# Run comprehensive tests on model residuals
+residual_tests = diagnostics.residual_tests(model_residuals)
+if residual_tests['overall']['valid']:
+    print("Model residuals meet all assumptions")
+else:
+    print("Issues found:", residual_tests['overall']['issues'])
+    
+# Create diagnostic plots
+fig = diagnostics.plot_diagnostics(model_residuals, title="Cointegration Model Diagnostics")
+fig.savefig('diagnostic_plots.png')
+
+# Calculate goodness-of-fit statistics
+fit_stats = calculate_fit_statistics(observed_values, predicted_values)
+print(f"R-squared: {fit_stats['r_squared']:.4f}")
+print(f"RMSE: {fit_stats['rmse']:.4f}")
+```
+
+### Test Result Interpretation
+
+- **Normality**: Residuals should be normally distributed for valid inference
+- **Autocorrelation**: No serial correlation indicates correctly specified dynamics
+- **Heteroskedasticity**: Constant variance is important for efficient estimation
+- **Parameter Stability**: Stable coefficients indicate consistent relationships over time
+
+Conducting these diagnostic tests ensures that your model's assumptions are valid, making your market integration conclusions more reliable.
 
 ## Recommended Workflow
 

@@ -4,7 +4,11 @@
 data:
   raw_path: "data/raw"
   processed_path: "data/processed"
+  interim_path: "data/interim"  # Added for intermediate processing steps
   primary_geojson: "unified_data.geojson"
+  cache_dir: ".cache"
+  max_chunk_size: 10000  # For chunked processing
+  backup_dir: "data/backups"  # Added for automatic backups
   
 # Analysis settings
 analysis:
@@ -13,18 +17,50 @@ analysis:
     max_lags: 4
     alpha: 0.05
     trend: "c"
+    method: "engle-granger"  # Default method
   
   # Threshold settings
   threshold:
     trim: 0.15
     n_grid: 300
     max_lags: 4
+    alpha: 0.05
+    n_bootstrap: 1000
+  
+  # Threshold VECM settings
+  threshold_vecm:
+    alpha: 0.05
+    trim: 0.15
+    n_grid: 300
+    k_ar_diff: 2
+    bootstrap_reps: 1000
+    deterministic: "ci"  # Added for deterministic term specification
   
   # Spatial settings
   spatial:
-    k_neighbors: a5
+    knn: 5
+    conflict_weight: 0.5
     conflict_adjusted: true
     crs: 32638  # UTM Zone 38N for Yemen
+    distance_threshold: 50000  # Meters
+    accessibility_max_distance: 50000  # Meters
+  
+  # Diagnostics settings
+  diagnostics:
+    alpha: 0.05
+    lags: 12
+    bootstrap_reps: 1000
+    tests: ["adf", "kpss", "pp"]  # Available stationarity tests
+
+  # Data cleaning settings (added section)
+  data_cleaning:
+    numeric_strategy: "median"
+    categorical_strategy: "mode"
+    date_strategy: "nearest"
+    outlier_detection_method: "iqr"
+    outlier_threshold: 1.5
+    downcast: true
+    category_min_size: 50
 
 # Commodities of interest (in order of priority)
 commodities:
@@ -63,9 +99,46 @@ visualization:
   south_color: "#ff7f0e"
   conflict_color: "#d62728"
   
+  # Plot directories
+  save_dir: "results/plots"
+  formats: ["png", "pdf"]
+  
+  # Date formatting
+  date_format: "%Y-%m"
+  date_interval: "month"
+  
+  # Added settings for plot styles
+  font_family: "sans-serif"
+  title_fontsize: 14
+  label_fontsize: 12
+  tick_fontsize: 10
+  linewidth: 1.5
+  grid: true
+
+# Performance settings
+performance:
+  use_parallel: true
+  n_workers: 4  # Default, will use (cpu_count - 1) if not specified
+  memory_limit: "4GB"
+  use_numba: true
+  use_cache: true
+  cache_expiration: 86400  # Cache expiration in seconds (24 hours)
+  
 # Logging settings
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   file: "logs/yemen_analysis.log"
+  error_file: "logs/errors.log"  # Added for separate error logging
   rotation: "daily"
+  backup_count: 30
+  add_timestamp_to_files: true
+  capture_warnings: true
+  console: true  # Whether to log to console
+
+# API settings (added section for future integration)
+api:
+  base_url: "https://example.com/api"
+  timeout: 30
+  retries: 3
+  backoff_factor: 2.0
