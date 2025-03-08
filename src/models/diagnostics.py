@@ -18,7 +18,12 @@ from statsmodels.stats.diagnostic import acorr_breusch_godfrey, het_white
 import matplotlib.pyplot as plt
 import logging
 import os
+import time
+import gc
+import psutil
 from typing import Dict, Any, Tuple, Union, Optional, List, Callable
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 import ruptures as rpt
 from scipy import stats
 
@@ -31,6 +36,7 @@ from src.utils import (
     
     # Performance
     timer, m1_optimized, memory_usage_decorator, memoize, disk_cache,
+    parallelize_dataframe, configure_system_for_performance, optimize_dataframe,
     
     # Configuration
     config
@@ -44,6 +50,8 @@ DEFAULT_ALPHA = config.get('analysis.diagnostics.alpha', 0.05)
 DEFAULT_LAGS = config.get('analysis.diagnostics.lags', 12)
 PLOT_DIR = config.get('paths.plots', 'plots')
 
+# Configure system for optimal performance
+configure_system_for_performance()
 
 class ModelDiagnostics:
     """
@@ -54,6 +62,8 @@ class ModelDiagnostics:
     diagnostics for threshold models, spatial models, and cointegration analysis.
     """
     
+    @timer
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def __init__(self, residuals=None, model_name=None, original_data=None):
         """
         Initialize the diagnostics.
@@ -71,7 +81,14 @@ class ModelDiagnostics:
         self.model_name = model_name or "Model"
         self.original_data = original_data
         
-        logger.info(f"Initializing ModelDiagnostics for {self.model_name}")
+        # Get number of available workers based on CPU count
+        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        logger.info(f"Initializing ModelDiagnostics for {self.model_name}. Memory usage: {memory_usage:.2f} MB")
         
         # Ensure plot directory exists
         if not os.path.exists(PLOT_DIR):
@@ -284,10 +301,21 @@ class ModelDiagnostics:
         """
         residuals = self._get_residuals(residuals)
         
-        # Run individual tests
-        normality_results = self.test_normality(residuals)
-        autocorr_results = self.test_autocorrelation(residuals, lags)
-        hetero_results = self.test_heteroskedasticity(residuals)
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Run individual tests in parallel for better performance
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit test tasks
+            future_normality = executor.submit(self.test_normality, residuals)
+            future_autocorr = executor.submit(self.test_autocorrelation, residuals, lags)
+            future_hetero = executor.submit(self.test_heteroskedasticity, residuals)
+            
+            # Collect results
+            normality_results = future_normality.result()
+            autocorr_results = future_autocorr.result()
+            hetero_results = future_hetero.result()
         
         # Calculate basic statistics
         if isinstance(residuals, pd.Series):
@@ -338,7 +366,15 @@ class ModelDiagnostics:
             }
         }
         
-        logger.info(f"Residual diagnostics complete: valid={valid_tests}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Residual diagnostics complete: valid={valid_tests}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return results
     
     @timer
@@ -512,6 +548,10 @@ class ModelDiagnostics:
         
         logger.info(f"Testing model stability with window_size={window_size}, step_size={step_size}")
         
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Get total sample size
         n = len(data)
         
@@ -524,32 +564,51 @@ class ModelDiagnostics:
         params_history = []
         dates = []
         
-        # Rolling estimation
-        for i in range(n_windows):
-            start_idx = i * step_size
-            end_idx = start_idx + window_size
+        # Process windows in parallel for better performance
+        windows = [(i * step_size, i * step_size + window_size) for i in range(n_windows)]
+        
+        # For very large datasets, use chunking to reduce memory usage
+        max_chunk_size = config.get('data.max_chunk_size', 10000)
+        
+        if n > max_chunk_size:
+            # Split the data into manageable chunks
+            data_chunks = []
+            for i in range(0, n, max_chunk_size):
+                end_idx = min(i + max_chunk_size, n)
+                data_chunks.append(data[i:end_idx])
             
-            # Get window data
-            window_data = data[start_idx:end_idx]
+            logger.info(f"Data split into {len(data_chunks)} chunks for memory efficiency")
             
-            try:
-                # Estimate model on window
-                params = model_func(window_data)
+            # Process each chunk
+            all_results = []
+            for chunk_idx, chunk in enumerate(data_chunks):
+                chunk_windows = [w for w in windows if w[0] >= chunk_idx * max_chunk_size and 
+                                w[1] <= (chunk_idx + 1) * max_chunk_size or chunk_idx == len(data_chunks) - 1]
                 
-                # Ensure params is a numpy array
-                if not isinstance(params, np.ndarray):
-                    params = np.array(params)
-                
+                if chunk_windows:
+                    chunk_results = self._process_stability_windows_parallel(
+                        chunk, chunk_windows, model_func
+                    )
+                    all_results.extend(chunk_results)
+            
+            # Sort results by window index
+            all_results.sort(key=lambda x: x[0])
+            
+            # Extract params and dates
+            for window_idx, params, date in all_results:
                 params_history.append(params)
+                dates.append(date)
                 
-                # Store corresponding date if available
-                if hasattr(data, 'index') and isinstance(data.index, pd.DatetimeIndex):
-                    dates.append(data.index[end_idx - 1])
-                else:
-                    dates.append(end_idx - 1)
-                    
-            except Exception as e:
-                logger.warning(f"Error estimating model for window {i+1}: {str(e)}. Skipping window.")
+        else:
+            # Process all windows at once for smaller datasets
+            window_results = self._process_stability_windows_parallel(
+                data, windows, model_func
+            )
+            
+            # Extract params and dates
+            for window_idx, params, date in window_results:
+                params_history.append(params)
+                dates.append(date)
         
         # Check if we have any successful estimations
         if len(params_history) == 0:
@@ -588,6 +647,15 @@ class ModelDiagnostics:
             'unstable_params': unstable_params
         }
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Model stability test complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         if is_stable:
             logger.info("Stability test result: Model parameters are stable")
         else:
@@ -595,10 +663,111 @@ class ModelDiagnostics:
         
         return results
     
+    @handle_errors(logger=logger)
+    def _process_stability_windows_parallel(
+        self, 
+        data: np.ndarray, 
+        windows: List[Tuple[int, int]], 
+        model_func: Callable
+    ) -> List[Tuple[int, np.ndarray, Any]]:
+        """
+        Process stability windows in parallel.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            Data to analyze
+        windows : List[Tuple[int, int]]
+            List of window start and end indices
+        model_func : Callable
+            Function to estimate model parameters
+            
+        Returns
+        -------
+        List[Tuple[int, np.ndarray, Any]]
+            List of (window_index, parameters, date) tuples
+        """
+        results = []
+        
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit window processing tasks
+            futures = {}
+            for i, (start_idx, end_idx) in enumerate(windows):
+                future = executor.submit(
+                    self._process_stability_window,
+                    data, start_idx, end_idx, model_func, i
+                )
+                futures[future] = i
+            
+            # Collect results as they complete
+            for future in as_completed(futures):
+                window_idx = futures[future]
+                try:
+                    result = future.result()
+                    if result is not None:
+                        results.append((window_idx, *result))
+                except Exception as e:
+                    logger.warning(f"Error processing window {window_idx}: {e}")
+        
+        return results
+    
+    @handle_errors(logger=logger)
+    def _process_stability_window(
+        self, 
+        data: np.ndarray, 
+        start_idx: int, 
+        end_idx: int, 
+        model_func: Callable, 
+        window_idx: int
+    ) -> Optional[Tuple[np.ndarray, Any]]:
+        """
+        Process a single stability window.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            Data to analyze
+        start_idx : int
+            Start index of window
+        end_idx : int
+            End index of window
+        model_func : Callable
+            Function to estimate model parameters
+        window_idx : int
+            Window index for logging
+            
+        Returns
+        -------
+        Optional[Tuple[np.ndarray, Any]]
+            Tuple of (parameters, date) or None if estimation fails
+        """
+        try:
+            # Get window data
+            window_data = data[start_idx:end_idx]
+            
+            # Estimate model on window
+            params = model_func(window_data)
+            
+            # Ensure params is a numpy array
+            if not isinstance(params, np.ndarray):
+                params = np.array(params)
+            
+            # Store corresponding date if available
+            if hasattr(data, 'index') and isinstance(data.index, pd.DatetimeIndex):
+                date = data.index[end_idx - 1]
+            else:
+                date = end_idx - 1
+                
+            return params, date
+            
+        except Exception as e:
+            logger.warning(f"Error estimating model for window {window_idx}: {str(e)}. Skipping window.")
+            return None
+    
     @disk_cache(cache_dir='.cache/diagnostics')
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
-    @timer
+    @timer  
     def test_structural_breaks(self, data=None, min_size=5, method='dynp', 
                               max_breaks=3) -> Dict[str, Any]:
         """
@@ -633,20 +802,25 @@ class ModelDiagnostics:
         if method not in ['dynp', 'binseg']:
             raise ModelError(f"method must be 'dynp' or 'binseg', got {method}")
         
+        # Store original index for later
+        has_datetime_index = False
+        original_index = None
+        
         # Convert to numpy array if pandas Series
         if isinstance(data, pd.Series):
-            # Store original index for later
             has_datetime_index = isinstance(data.index, pd.DatetimeIndex)
             original_index = data.index if has_datetime_index else None
             array = data.values
         else:
-            has_datetime_index = False
-            original_index = None
             array = np.asarray(data)
         
         array = array.reshape(-1, 1)  # Ensure 2D for ruptures
         
         logger.info(f"Testing for structural breaks using {method} method, max_breaks={max_breaks}")
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
         
         # Select algorithm
         if method == 'dynp':
@@ -676,6 +850,7 @@ class ModelDiagnostics:
             'method': method
         }
         
+        # Add dates if available
         if breakpoint_dates:
             result['breakpoint_dates'] = breakpoint_dates
         
@@ -688,12 +863,21 @@ class ModelDiagnostics:
         
         result['segments'] = segments
         
-        logger.info(f"Structural break test: detected {result['n_breakpoints']} breakpoints")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Structural break test: detected {result['n_breakpoints']} breakpoints. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return result
     
     @disk_cache(cache_dir='.cache/diagnostics')
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @m1_optimized(parallel=True)
     @timer  
     def test_threshold_validity(self, tvecm_result, data=None, bootstrap_reps=100) -> Dict[str, Any]:
         """
@@ -758,41 +942,156 @@ class ModelDiagnostics:
         if threshold is None:
             raise ModelError("No threshold value found in tvecm_result")
         
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Initialize ThresholdVECM
         model = ThresholdVECM(data)
         
-        # Run test for threshold effect
+        # Process bootstrap iterations in parallel
+        results = []
+        
+        # Create a pool of workers
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit bootstrap tasks
+            futures = []
+            for i in range(bootstrap_reps):
+                futures.append(executor.submit(
+                    self._run_bootstrap_iteration, model, i, bootstrap_reps
+                ))
+            
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        results.append(result)
+                except Exception as e:
+                    logger.warning(f"Error in bootstrap iteration: {e}")
+        
+        # Calculate bootstrap results
+        if results:
+            bootstrap_stats = [stat for stat in results if stat is not None]
+            original_lr = results[0]['original_lr'] if results else None
+            
+            # Calculate p-value
+            p_value = sum(lr > original_lr for lr in bootstrap_stats) / len(bootstrap_stats) if bootstrap_stats else np.nan
+            
+            # Calculate critical values
+            critical_values = {
+                '10%': np.percentile(bootstrap_stats, 90),
+                '5%': np.percentile(bootstrap_stats, 95),
+                '1%': np.percentile(bootstrap_stats, 99)
+            }
+            
+            test_result = {
+                'lr_statistic': original_lr,
+                'p_value': p_value,
+                'significant': p_value < DEFAULT_ALPHA,
+                'critical_values': critical_values,
+                'bootstrap_distribution': bootstrap_stats,
+                'n_bootstrap': len(bootstrap_stats)
+            }
+        else:
+            test_result = {
+                'lr_statistic': None,
+                'p_value': None,
+                'significant': None,
+                'note': "Failed to perform bootstrap threshold test"
+            }
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Threshold validity test complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
+        return test_result
+    
+    @handle_errors(logger=logger)
+    def _run_bootstrap_iteration(
+        self, 
+        model: Any, 
+        iteration: int, 
+        total_iterations: int
+    ) -> Optional[float]:
+        """
+        Run a single bootstrap iteration for threshold validity test.
+        
+        Parameters
+        ----------
+        model : Any
+            ThresholdVECM model instance
+        iteration : int
+            Current iteration number
+        total_iterations : int
+            Total number of iterations
+            
+        Returns
+        -------
+        Optional[float]
+            Likelihood ratio statistic or None if error occurs
+        """
         try:
-            test_result = model.test_threshold_significance(n_bootstrap=bootstrap_reps)
-            return test_result
-        except Exception as e:
-            logger.warning(f"Error in threshold significance test: {str(e)}. Using simplified approach.")
-            
-            # Fallback to simpler approach
-            coint_results = model.estimate_linear_vecm()
-            tvecm_results = model.estimate_tvecm()
-            
-            # Compare likelihoods
-            llf_vecm = coint_results.llf
-            llf_tvecm = tvecm_results.get('llf')
-            
-            if llf_vecm is not None and llf_tvecm is not None:
-                lr_stat = 2 * (llf_tvecm - llf_vecm)
-                # Simple rule: LR statistic > 5 suggests threshold effect
-                threshold_valid = lr_stat > 5
+            # If first iteration, calculate original LR statistic
+            if iteration == 0:
+                # Estimate linear VECM
+                linear_results = model.estimate_linear_vecm()
                 
-                result = {
-                    'lr_statistic': lr_stat,
-                    'threshold_model_valid': threshold_valid,
-                    'note': "Simplified likelihood ratio test used due to error in threshold_significance test"
-                }
-            else:
-                result = {
-                    'threshold_model_valid': None,
-                    'note': "Cannot determine threshold validity"
+                # Estimate TVECM
+                model.grid_search_threshold()
+                tvecm_results = model.estimate_tvecm()
+                
+                # Calculate LR statistic
+                original_lr = 2 * (
+                    (tvecm_results['below_regime']['llf'] + tvecm_results['above_regime']['llf']) - 
+                    linear_results['llf']
+                )
+                
+                return {
+                    'original_lr': original_lr,
+                    'bootstrap_lr': original_lr
                 }
             
-            return result
+            # Generate bootstrap sample
+            bootstrap_data = model._generate_bootstrap_sample()
+            
+            # Create new model with bootstrap data
+            bootstrap_model = type(model)(
+                data=bootstrap_data,
+                k_ar_diff=model.k_ar_diff,
+                deterministic=model.deterministic,
+                coint_rank=model.coint_rank
+            )
+            
+            # Estimate linear VECM
+            bootstrap_linear = bootstrap_model.estimate_linear_vecm()
+            
+            # Estimate threshold
+            bootstrap_model.grid_search_threshold()
+            
+            # Estimate TVECM
+            bootstrap_tvecm = bootstrap_model.estimate_tvecm()
+            
+            # Calculate LR statistic
+            bootstrap_lr = 2 * (
+                (bootstrap_tvecm['below_regime']['llf'] + bootstrap_tvecm['above_regime']['llf']) - 
+                bootstrap_linear['llf']
+            )
+            
+            # Log progress for long-running bootstrap
+            if total_iterations > 50 and iteration % 10 == 0:
+                logger.debug(f"Completed bootstrap iteration {iteration}/{total_iterations}")
+            
+            return bootstrap_lr
+            
+        except Exception as e:
+            logger.debug(f"Error in bootstrap iteration {iteration}: {str(e)}")
+            return None
     
     @disk_cache(cache_dir='.cache/diagnostics')
     @memory_usage_decorator
@@ -968,9 +1267,10 @@ class ModelDiagnostics:
         else:
             raise ModelError("No residuals provided or stored in object")
     
-    @m1_optimized()
+    @m1_optimized(parallel=True)
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @timer
     def run_all_diagnostics(self, residuals=None, data=None, model_type=None,
                           tvecm_result=None, weights_matrix=None, 
                           plot=True, save_plots=True) -> Dict[str, Any]:
@@ -1003,20 +1303,77 @@ class ModelDiagnostics:
         if residuals is not None:
             self.residuals = residuals
         if data is not None:
-            self.original_data = data
+            self.original_data = optimize_dataframe(data) if isinstance(data, pd.DataFrame) else data
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
         
         # Initialize results dictionary
         results = {}
         
-        # Basic residual diagnostics for all model types
-        try:
-            results['residuals'] = self.residual_tests(self.residuals)
-        except Exception as e:
-            logger.warning(f"Error in residual tests: {str(e)}")
-            results['residuals'] = {'error': str(e)}
+        # Run diagnostics in parallel when possible
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit diagnostic tasks
+            futures = {}
+            
+            # Basic residual diagnostics for all model types
+            future_residuals = executor.submit(self.residual_tests, self.residuals)
+            futures['residuals'] = future_residuals
+            
+            # Model-specific diagnostics
+            if model_type == 'threshold' or model_type == 'tvecm':
+                # Threshold validity test
+                if tvecm_result is not None:
+                    future_threshold = executor.submit(
+                        self.test_threshold_validity, tvecm_result, self.original_data
+                    )
+                    futures['threshold_validity'] = future_threshold
+                
+                # Asymmetric adjustment test
+                if self.residuals is not None:
+                    future_asymmetry = executor.submit(
+                        self.test_asymmetric_adjustment, self.residuals
+                    )
+                    futures['asymmetric_adjustment'] = future_asymmetry
+                    
+            elif model_type == 'spatial':
+                # Spatial autocorrelation test
+                if weights_matrix is not None and self.original_data is not None:
+                    future_spatial = executor.submit(
+                        self.test_spatial_autocorrelation, self.original_data, weights_matrix
+                    )
+                    futures['spatial_autocorrelation'] = future_spatial
+            
+            # Common additional diagnostics for all model types
+            if self.original_data is not None:
+                # Structural break test
+                future_breaks = executor.submit(
+                    self.test_structural_breaks, self.original_data
+                )
+                futures['structural_breaks'] = future_breaks
+                
+                # Parameter stability test - not easily parallelizable due to model_func
+                # Will run separately
+            
+            # Collect results as they complete
+            for name, future in futures.items():
+                try:
+                    results[name] = future.result()
+                except Exception as e:
+                    logger.warning(f"Error in {name} diagnostics: {e}")
+                    results[name] = {'error': str(e)}
+        
+        # Run parameter stability test if original data is available
+        if self.original_data is not None:
+            try:
+                results['parameter_stability'] = self.test_model_stability(data=self.original_data)
+            except Exception as e:
+                logger.warning(f"Error in parameter stability test: {e}")
+                results['parameter_stability'] = {'error': str(e)}
         
         # Create plots if requested
-        if plot:
+        if plot and self.residuals is not None:
             try:
                 plots = self.plot_diagnostics(
                     self.residuals, 
@@ -1025,54 +1382,8 @@ class ModelDiagnostics:
                 )
                 results['plots'] = plots
             except Exception as e:
-                logger.warning(f"Error creating diagnostic plots: {str(e)}")
+                logger.warning(f"Error creating diagnostic plots: {e}")
                 results['plots'] = {'error': str(e)}
-        
-        # Model-specific diagnostics
-        if model_type == 'threshold' or model_type == 'tvecm':
-            # Threshold validity test
-            if tvecm_result is not None:
-                try:
-                    results['threshold_validity'] = self.test_threshold_validity(tvecm_result, self.original_data)
-                except Exception as e:
-                    logger.warning(f"Error in threshold validity test: {str(e)}")
-                    results['threshold_validity'] = {'error': str(e)}
-            
-            # Asymmetric adjustment test
-            try:
-                # Use equilibrium errors from tvecm_result if available
-                eq_errors = tvecm_result.get('equilibrium_errors', self.residuals)
-                results['asymmetric_adjustment'] = self.test_asymmetric_adjustment(eq_errors)
-            except Exception as e:
-                logger.warning(f"Error in asymmetric adjustment test: {str(e)}")
-                results['asymmetric_adjustment'] = {'error': str(e)}
-                
-        elif model_type == 'spatial':
-            # Spatial autocorrelation test
-            if weights_matrix is not None and self.original_data is not None:
-                try:
-                    results['spatial_autocorrelation'] = self.test_spatial_autocorrelation(
-                        self.original_data, weights_matrix
-                    )
-                except Exception as e:
-                    logger.warning(f"Error in spatial autocorrelation test: {str(e)}")
-                    results['spatial_autocorrelation'] = {'error': str(e)}
-        
-        # Common additional diagnostics for all model types
-        if self.original_data is not None:
-            # Structural break test
-            try:
-                results['structural_breaks'] = self.test_structural_breaks(self.original_data)
-            except Exception as e:
-                logger.warning(f"Error in structural break test: {str(e)}")
-                results['structural_breaks'] = {'error': str(e)}
-            
-            # Parameter stability test
-            try:
-                results['parameter_stability'] = self.test_model_stability(data=self.original_data)
-            except Exception as e:
-                logger.warning(f"Error in parameter stability test: {str(e)}")
-                results['parameter_stability'] = {'error': str(e)}
         
         # Overall assessment
         valid_model = True
@@ -1115,13 +1426,22 @@ class ModelDiagnostics:
             'issues': issues
         }
         
-        logger.info(f"Model diagnostics complete: valid_model={valid_model}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Model diagnostics complete: valid_model={valid_model}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return results
 
 
-@m1_optimized()
+@m1_optimized(parallel=True)
 @memory_usage_decorator
 @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+@timer
 def calculate_fit_statistics(
     observed: Union[pd.Series, np.ndarray], 
     predicted: Union[pd.Series, np.ndarray],
@@ -1163,46 +1483,146 @@ def calculate_fit_statistics(
     if len(observed) != len(predicted):
         raise ModelError(f"Length of observed ({len(observed)}) must match predicted ({len(predicted)})")
     
+    # For large arrays, process in chunks to reduce memory usage
+    chunk_size = 10000
+    n = len(observed)
+    
+    if n > chunk_size:
+        # Process in chunks and combine results
+        chunks = [(i, min(i + chunk_size, n)) for i in range(0, n, chunk_size)]
+        
+        # Process chunks in parallel
+        with ProcessPoolExecutor() as executor:
+            futures = {}
+            for i, (start, end) in enumerate(chunks):
+                future = executor.submit(
+                    _calculate_fit_statistics_chunk,
+                    observed[start:end],
+                    predicted[start:end],
+                    n_params
+                )
+                futures[future] = i
+            
+            # Collect partial statistics
+            chunk_results = []
+            for future in as_completed(futures):
+                chunk_results.append(future.result())
+        
+        # Combine chunk statistics
+        return _combine_fit_statistics_chunks(chunk_results, n, n_params)
+        
+    else:
+        # Process all data at once for smaller arrays
+        return _calculate_fit_statistics_chunk(observed, predicted, n_params)
+
+
+@handle_errors(logger=logger)
+def _calculate_fit_statistics_chunk(
+    observed: np.ndarray, 
+    predicted: np.ndarray, 
+    n_params: int
+) -> Dict[str, float]:
+    """
+    Calculate fit statistics for a data chunk.
+    
+    Parameters
+    ----------
+    observed : np.ndarray
+        Observed values for this chunk
+    predicted : np.ndarray
+        Predicted values for this chunk
+    n_params : int
+        Number of parameters in the model
+        
+    Returns
+    -------
+    Dict[str, float]
+        Partial fit statistics for this chunk
+    """
     # Calculate residuals
     residuals = observed - predicted
     
-    # Calculate fit statistics
-    n = len(observed)
-    p = n_params
-    
-    # Mean of observed values
-    y_mean = np.mean(observed)
+    # Calculate statistics
+    n_chunk = len(observed)
+    y_mean_chunk = np.mean(observed)
     
     # Total sum of squares
-    ss_total = np.sum((observed - y_mean) ** 2)
+    ss_total_chunk = np.sum((observed - y_mean_chunk) ** 2)
     
     # Residual sum of squares
-    ss_residual = np.sum(residuals ** 2)
+    ss_residual_chunk = np.sum(residuals ** 2)
     
-    # R-squared
-    r_squared = 1 - (ss_residual / ss_total)
-    
-    # Adjusted R-squared
-    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - p - 1))
-    
-    # Root Mean Squared Error
-    rmse = np.sqrt(ss_residual / n)
-    
-    # Mean Absolute Error
-    mae = np.mean(np.abs(residuals))
+    # RMSE and MAE
+    rmse_chunk = np.sqrt(ss_residual_chunk / n_chunk)
+    mae_chunk = np.mean(np.abs(residuals))
     
     # Mean Absolute Percentage Error (avoid division by zero)
     with np.errstate(divide='ignore', invalid='ignore'):
         abs_percent_errors = np.abs(residuals / observed) * 100
-        mape = np.mean(abs_percent_errors[np.isfinite(abs_percent_errors)])
+        mape_chunk = np.mean(abs_percent_errors[np.isfinite(abs_percent_errors)])
     
     # Log likelihood (assuming normal errors)
-    sigma2 = ss_residual / n
-    loglikelihood = -n/2 * (1 + np.log(2 * np.pi) + np.log(sigma2))
+    sigma2_chunk = ss_residual_chunk / n_chunk
+    loglikelihood_chunk = -n_chunk/2 * (1 + np.log(2 * np.pi) + np.log(sigma2_chunk))
+    
+    return {
+        'n': n_chunk,
+        'y_mean': y_mean_chunk,
+        'ss_total': ss_total_chunk,
+        'ss_residual': ss_residual_chunk,
+        'rmse': rmse_chunk,
+        'mae': mae_chunk,
+        'mape': mape_chunk,
+        'loglikelihood': loglikelihood_chunk
+    }
+
+
+@handle_errors(logger=logger)
+def _combine_fit_statistics_chunks(
+    chunk_results: List[Dict[str, float]], 
+    n: int, 
+    n_params: int
+) -> Dict[str, float]:
+    """
+    Combine fit statistics from multiple chunks.
+    
+    Parameters
+    ----------
+    chunk_results : List[Dict[str, float]]
+        Statistics calculated for each chunk
+    n : int
+        Total number of observations
+    n_params : int
+        Number of parameters in the model
+        
+    Returns
+    -------
+    Dict[str, float]
+        Combined fit statistics
+    """
+    # Sum values across chunks
+    ss_total = sum(chunk['ss_total'] for chunk in chunk_results)
+    ss_residual = sum(chunk['ss_residual'] for chunk in chunk_results)
+    
+    # Calculate combined metrics
+    r_squared = 1 - (ss_residual / ss_total)
+    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - n_params - 1))
+    
+    # RMSE (recalculate from total ss_residual)
+    rmse = np.sqrt(ss_residual / n)
+    
+    # MAE (weighted average)
+    mae = sum(chunk['mae'] * chunk['n'] for chunk in chunk_results) / n
+    
+    # MAPE (weighted average)
+    mape = sum(chunk['mape'] * chunk['n'] for chunk in chunk_results) / n
+    
+    # Log likelihood (sum across chunks)
+    loglikelihood = sum(chunk['loglikelihood'] for chunk in chunk_results)
     
     # AIC and BIC
-    aic = -2 * loglikelihood + 2 * p
-    bic = -2 * loglikelihood + p * np.log(n)
+    aic = -2 * loglikelihood + 2 * n_params
+    bic = -2 * loglikelihood + n_params * np.log(n)
     
     return {
         'r_squared': r_squared,
@@ -1214,10 +1634,12 @@ def calculate_fit_statistics(
         'bic': bic,
         'loglikelihood': loglikelihood,
         'n_obs': n,
-        'n_params': p
+        'n_params': n_params
     }
 
 
+@timer
+@memory_usage_decorator
 @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
 def bootstrap_confidence_intervals(
     data: Union[pd.Series, np.ndarray],
@@ -1258,17 +1680,36 @@ def bootstrap_confidence_intervals(
     # Calculate the observed statistic
     observed_stat = statistic_func(data_arr)
     
-    # Generate bootstrap samples
+    # Get number of available workers
+    n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+    
+    # Track memory usage
+    process = psutil.Process(os.getpid())
+    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    
+    # Generate bootstrap samples in parallel
     bootstrap_stats = []
     
-    for _ in range(n_bootstrap):
-        # Draw random sample with replacement
-        indices = np.random.randint(0, n, size=n)
-        sample = data_arr[indices]
+    # Distribute bootstrap iterations across workers
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        # Submit bootstrap tasks
+        futures = []
+        batch_size = max(10, n_bootstrap // (n_workers * 2))  # Ensure enough tasks for parallelism
         
-        # Calculate statistic
-        stat = statistic_func(sample)
-        bootstrap_stats.append(stat)
+        for i in range(0, n_bootstrap, batch_size):
+            n_samples = min(batch_size, n_bootstrap - i)
+            futures.append(executor.submit(
+                _run_bootstrap_batch,
+                data_arr, n, statistic_func, n_samples, i
+            ))
+        
+        # Collect results
+        for future in as_completed(futures):
+            try:
+                batch_stats = future.result()
+                bootstrap_stats.extend(batch_stats)
+            except Exception as e:
+                logger.warning(f"Error in bootstrap batch: {e}")
     
     # Calculate confidence intervals
     lower_percentile = alpha / 2 * 100
@@ -1280,17 +1721,41 @@ def bootstrap_confidence_intervals(
     elif method == 'bca':
         # BCa method (bias-corrected and accelerated) - simplified implementation
         # This is not a full BCa implementation but a simplified version
-        z0 = stats.norm.ppf(np.mean(bootstrap_stats < observed_stat))
+        z0 = stats.norm.ppf(np.mean(np.array(bootstrap_stats) < observed_stat))
         
         # Calculate acceleration factor
         jackknife_stats = []
-        for i in range(n):
-            # Leave one out
-            sample = np.delete(data_arr, i)
-            jackknife_stats.append(statistic_func(sample))
+        
+        # Process jackknife estimates in parallel
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Submit jackknife tasks in batches
+            futures = []
+            batch_size = max(10, n // (n_workers * 2))
+            
+            for i in range(0, n, batch_size):
+                end_idx = min(i + batch_size, n)
+                futures.append(executor.submit(
+                    _run_jackknife_batch,
+                    data_arr, statistic_func, list(range(i, end_idx))
+                ))
+            
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    batch_stats = future.result()
+                    jackknife_stats.extend(batch_stats)
+                except Exception as e:
+                    logger.warning(f"Error in jackknife batch: {e}")
         
         jackknife_mean = np.mean(jackknife_stats)
-        a = np.sum((jackknife_mean - jackknife_stats) ** 3) / (6 * np.sum((jackknife_mean - jackknife_stats) ** 2) ** 1.5)
+        numerator = np.sum((jackknife_mean - jackknife_stats) ** 3)
+        denominator = 6 * (np.sum((jackknife_mean - jackknife_stats) ** 2) ** 1.5)
+        
+        # Avoid division by zero
+        if denominator != 0:
+            a = numerator / denominator
+        else:
+            a = 0
         
         # Adjusted percentiles
         z_alpha = stats.norm.ppf(alpha / 2)
@@ -1305,6 +1770,15 @@ def bootstrap_confidence_intervals(
     else:
         raise ValueError(f"Unknown method: {method}")
     
+    # Track memory after processing
+    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    memory_diff = end_mem - start_mem
+    
+    logger.info(f"Bootstrap confidence intervals calculated. Memory usage: {memory_diff:.2f} MB")
+    
+    # Force garbage collection
+    gc.collect()
+    
     return {
         'statistic': observed_stat,
         'bootstrap_stats': bootstrap_stats,
@@ -1316,6 +1790,93 @@ def bootstrap_confidence_intervals(
     }
 
 
+@handle_errors(logger=logger)
+def _run_bootstrap_batch(
+    data: np.ndarray, 
+    n: int, 
+    statistic_func: Callable, 
+    n_samples: int,
+    batch_idx: int
+) -> List[float]:
+    """
+    Run a batch of bootstrap samples.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Original data array
+    n : int
+        Length of data
+    statistic_func : Callable
+        Function to compute statistic
+    n_samples : int
+        Number of bootstrap samples in this batch
+    batch_idx : int
+        Batch index for logging
+        
+    Returns
+    -------
+    List[float]
+        Bootstrap statistics for this batch
+    """
+    np.random.seed(batch_idx)  # Ensure reproducibility with different seeds
+    
+    batch_stats = []
+    for i in range(n_samples):
+        # Draw random sample with replacement
+        indices = np.random.randint(0, n, size=n)
+        sample = data[indices]
+        
+        # Calculate statistic
+        try:
+            stat = statistic_func(sample)
+            batch_stats.append(stat)
+        except Exception as e:
+            logger.debug(f"Error in bootstrap iteration {batch_idx * n_samples + i}: {e}")
+    
+    return batch_stats
+
+
+@handle_errors(logger=logger)
+def _run_jackknife_batch(
+    data: np.ndarray, 
+    statistic_func: Callable, 
+    indices_to_remove: List[int]
+) -> List[float]:
+    """
+    Run a batch of jackknife samples.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Original data array
+    statistic_func : Callable
+        Function to compute statistic
+    indices_to_remove : List[int]
+        Indices to remove for jackknife samples
+        
+    Returns
+    -------
+    List[float]
+        Jackknife statistics for this batch
+    """
+    batch_stats = []
+    for i in indices_to_remove:
+        # Create leave-one-out sample
+        sample = np.delete(data, i)
+        
+        # Calculate statistic
+        try:
+            stat = statistic_func(sample)
+            batch_stats.append(stat)
+        except Exception as e:
+            logger.debug(f"Error in jackknife sample {i}: {e}")
+    
+    return batch_stats
+
+
+@timer
+@memory_usage_decorator
 @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
 def compute_prediction_intervals(
     model_func: Callable,
@@ -1362,20 +1923,36 @@ def compute_prediction_intervals(
     model = model_func(data_arr)
     predictions = model.predict(pred_x_arr)
     
-    # Generate bootstrap predictions
+    # Get number of available workers
+    n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+    
+    # Track memory usage
+    process = psutil.Process(os.getpid())
+    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    
+    # Generate bootstrap predictions in parallel
     bootstrap_predictions = []
     
-    for _ in range(n_bootstrap):
-        # Draw random sample with replacement
-        indices = np.random.randint(0, n, size=n)
-        sample = data_arr[indices]
+    # Distribute bootstrap iterations across workers
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        # Submit bootstrap tasks
+        futures = []
+        batch_size = max(10, n_bootstrap // (n_workers * 2))  # Ensure enough tasks for parallelism
         
-        # Fit model to bootstrap sample
-        bootstrap_model = model_func(sample)
+        for i in range(0, n_bootstrap, batch_size):
+            n_samples = min(batch_size, n_bootstrap - i)
+            futures.append(executor.submit(
+                _run_prediction_bootstrap_batch,
+                data_arr, pred_x_arr, model_func, n, n_samples, i
+            ))
         
-        # Get predictions
-        bootstrap_pred = bootstrap_model.predict(pred_x_arr)
-        bootstrap_predictions.append(bootstrap_pred)
+        # Collect results
+        for future in as_completed(futures):
+            try:
+                batch_preds = future.result()
+                bootstrap_predictions.extend(batch_preds)
+            except Exception as e:
+                logger.warning(f"Error in bootstrap prediction batch: {e}")
     
     # Convert to numpy array
     bootstrap_predictions = np.array(bootstrap_predictions)
@@ -1384,6 +1961,15 @@ def compute_prediction_intervals(
     lower_bound = np.percentile(bootstrap_predictions, alpha/2 * 100, axis=0)
     upper_bound = np.percentile(bootstrap_predictions, (1-alpha/2) * 100, axis=0)
     
+    # Track memory after processing
+    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    memory_diff = end_mem - start_mem
+    
+    logger.info(f"Prediction intervals calculated. Memory usage: {memory_diff:.2f} MB")
+    
+    # Force garbage collection
+    gc.collect()
+    
     return {
         'predictions': predictions,
         'lower_bound': lower_bound,
@@ -1391,3 +1977,57 @@ def compute_prediction_intervals(
         'n_bootstrap': n_bootstrap,
         'alpha': alpha
     }
+
+
+@handle_errors(logger=logger)
+def _run_prediction_bootstrap_batch(
+    data: np.ndarray, 
+    pred_x: np.ndarray, 
+    model_func: Callable, 
+    n: int, 
+    n_samples: int,
+    batch_idx: int
+) -> List[np.ndarray]:
+    """
+    Run a batch of bootstrap prediction samples.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Original data array
+    pred_x : np.ndarray
+        Predictor values for predictions
+    model_func : Callable
+        Function to fit model
+    n : int
+        Length of data
+    n_samples : int
+        Number of bootstrap samples in this batch
+    batch_idx : int
+        Batch index for logging
+        
+    Returns
+    -------
+    List[np.ndarray]
+        Bootstrap predictions for this batch
+    """
+    np.random.seed(batch_idx)  # Ensure reproducibility with different seeds
+    
+    batch_preds = []
+    for i in range(n_samples):
+        try:
+            # Draw random sample with replacement
+            indices = np.random.randint(0, n, size=n)
+            sample = data[indices]
+            
+            # Fit model to bootstrap sample
+            bootstrap_model = model_func(sample)
+            
+            # Get predictions
+            bootstrap_pred = bootstrap_model.predict(pred_x)
+            batch_preds.append(bootstrap_pred)
+            
+        except Exception as e:
+            logger.debug(f"Error in prediction bootstrap iteration {batch_idx * n_samples + i}: {e}")
+    
+    return batch_preds

@@ -26,6 +26,10 @@ analysis:
     max_lags: 4
     alpha: 0.05
     n_bootstrap: 1000
+    # M-TAR parameters
+    mtar_default_threshold: 0.0
+    mtar_test: true
+    mtar_asymmetry_alpha: 0.05
   
   # Threshold VECM settings
   threshold_vecm:
@@ -51,6 +55,32 @@ analysis:
     lags: 12
     bootstrap_reps: 1000
     tests: ["adf", "kpss", "pp"]  # Available stationarity tests
+    
+  # Structural break settings
+  structural_break:
+    bai_perron_max_breaks: 3
+    bai_perron_min_size: 10 
+    zivot_andrews_trim: 0.15
+    test_both_series: true
+    
+  # Simulation settings for policy interventions
+  simulation:
+    # Exchange rate unification settings
+    exchange_rate_default: "official"  # Default target rate (options: 'official', 'market', 'north', 'south', or numerical value)
+    usd_cross_conversion: true  # Use USD as intermediary for conversion
+    
+    # Connectivity improvement settings
+    conflict_reduction_default: 0.5  # Default conflict reduction factor (0-1)
+    regime_boundary_penalty: 1.5  # Penalty for cross-regime connections
+    
+    # Sensitivity analysis settings 
+    sensitivity_conflict_levels: [0.1, 0.25, 0.5, 0.75, 0.9]  # Default parameter values for sensitivity testing
+    sensitivity_metrics: ["price_convergence", "integration_index", "asymmetry"]  # Default metrics to monitor
+    high_sensitivity_threshold: 0.5  # CV threshold for high sensitivity classification
+    
+    # Robustness testing
+    robustness_structural_break_test: true  # Test for structural breaks during robustness analysis
+    robustness_residual_diagnostics: true   # Compare residual diagnostics during robustness analysis
 
   # Data cleaning settings (added section)
   data_cleaning:
@@ -114,6 +144,12 @@ visualization:
   tick_fontsize: 10
   linewidth: 1.5
   grid: true
+  
+  # Simulation visualization settings
+  simulation_plot_dir: "results/plots/simulations"
+  sensitivity_heatmap: true
+  regime_comparison_palette: "Set2"
+  asymmetry_plot_colors: ["#2ca02c", "#d62728"]
 
 # Performance settings
 performance:

@@ -4,7 +4,13 @@ Unit root testing module for time series analysis.
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, Any, Optional, Union, List, Tuple
+from typing import Dict, Any, Optional, Union, List, Tuple, Callable
+import gc
+import psutil
+import os
+import time
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from statsmodels.tsa.stattools import adfuller, kpss
 import arch.unitroot as unitroot
 import ruptures as rpt
@@ -17,7 +23,8 @@ from src.utils import (
     validate_time_series, raise_if_invalid,
     
     # Performance
-    timer, m1_optimized, memory_usage_decorator, memoize,
+    timer, m1_optimized, memory_usage_decorator, memoize, disk_cache,
+    configure_system_for_performance, optimize_dataframe, parallelize_dataframe,
     
     # Configuration
     config
@@ -31,17 +38,29 @@ DEFAULT_ALPHA = config.get('analysis.cointegration.alpha', 0.05)
 MAX_LAGS = config.get('analysis.cointegration.max_lags', 4)
 TREND = config.get('analysis.cointegration.trend', 'c')
 
+# Configure system for optimal performance
+configure_system_for_performance()
 
 class UnitRootTester:
     """Perform unit root tests on time series data."""
     
+    @timer
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def __init__(self):
         """Initialize the unit root tester."""
-        pass
+        # Get number of available workers based on CPU count
+        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        logger.info(f"Initialized UnitRootTester. Memory usage: {memory_usage:.2f} MB")
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_adf(
         self, 
         series: Union[pd.Series, np.ndarray], 
@@ -69,6 +88,10 @@ class UnitRootTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input with custom validators
         def validate_series_values(s):
             """Check that series has valid numeric values."""
@@ -102,12 +125,21 @@ class UnitRootTester:
             'stationary': result[1] < DEFAULT_ALPHA
         }
         
-        logger.info(f"ADF test: statistic={adf_result['statistic']:.4f}, p-value={adf_result['pvalue']:.4f}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"ADF test: statistic={adf_result['statistic']:.4f}, p-value={adf_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return adf_result
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_adf_gls(
         self, 
         series: Union[pd.Series, np.ndarray], 
@@ -128,6 +160,10 @@ class UnitRootTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=10)
         raise_if_invalid(valid, errors, "Invalid time series for ADF-GLS test")
@@ -148,12 +184,21 @@ class UnitRootTester:
             'stationary': result.pvalue < DEFAULT_ALPHA
         }
         
-        logger.info(f"ADF-GLS test: statistic={adfgls_result['statistic']:.4f}, p-value={adfgls_result['pvalue']:.4f}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"ADF-GLS test: statistic={adfgls_result['statistic']:.4f}, p-value={adfgls_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return adfgls_result
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_kpss(
         self, 
         series: Union[pd.Series, np.ndarray], 
@@ -178,6 +223,10 @@ class UnitRootTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=10)
         raise_if_invalid(valid, errors, "Invalid time series for KPSS test")
@@ -193,16 +242,26 @@ class UnitRootTester:
         kpss_result = {
             'statistic': result[0],
             'pvalue': result[1],
+            'lags': result[2],
             'critical_values': result[3],
             'stationary': result[1] > DEFAULT_ALPHA  # Note: opposite from ADF
         }
         
-        logger.info(f"KPSS test: statistic={kpss_result['statistic']:.4f}, p-value={kpss_result['pvalue']:.4f}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"KPSS test: statistic={kpss_result['statistic']:.4f}, p-value={kpss_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return kpss_result
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_phillips_perron(
         self, 
         series: Union[pd.Series, np.ndarray],
@@ -228,6 +287,10 @@ class UnitRootTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=10)
         raise_if_invalid(valid, errors, "Invalid time series for Phillips-Perron test")
@@ -248,12 +311,21 @@ class UnitRootTester:
             'stationary': result.pvalue < DEFAULT_ALPHA
         }
         
-        logger.info(f"Phillips-Perron test: statistic={pp_result['statistic']:.4f}, p-value={pp_result['pvalue']:.4f}")
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Phillips-Perron test: statistic={pp_result['statistic']:.4f}, p-value={pp_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return pp_result
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_zivot_andrews(
         self, 
         series: Union[pd.Series, np.ndarray]
@@ -271,6 +343,10 @@ class UnitRootTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=20)
         raise_if_invalid(valid, errors, "Invalid time series for Zivot-Andrews test")
@@ -304,13 +380,23 @@ class UnitRootTester:
             except (IndexError, TypeError) as e:
                 logger.warning(f"Could not determine breakpoint date: {e}")
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
         logger.info(
             f"Zivot-Andrews test: statistic={za_result['statistic']:.4f}, "
-            f"p-value={za_result['pvalue']:.4f}, breakpoint={za_result['breakpoint']}"
+            f"p-value={za_result['pvalue']:.4f}, breakpoint={za_result['breakpoint']}. "
+            f"Memory usage: {memory_diff:.2f} MB"
         )
+        
+        # Force garbage collection
+        gc.collect()
+        
         return za_result
     
     @timer
+    @m1_optimized(parallel=True)
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def run_all_tests(
         self, 
@@ -332,18 +418,46 @@ class UnitRootTester:
         dict
             Dictionary with results of all tests
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=20)
         raise_if_invalid(valid, errors, "Invalid time series for unit root tests")
         
-        # Run all tests
-        return {
-            'adf': self.test_adf(series, lags=lags),
-            'adf_gls': self.test_adf_gls(series, lags=lags),
-            'kpss': self.test_kpss(series, lags=lags),
-            'phillips_perron': self.test_phillips_perron(series, lags=lags),
-            'zivot_andrews': self.test_zivot_andrews(series)
-        }
+        # Run tests in parallel for better performance
+        results = {}
+        
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit test tasks
+            futures = {}
+            futures['adf'] = executor.submit(self.test_adf, series, lags=lags)
+            futures['adf_gls'] = executor.submit(self.test_adf_gls, series, lags=lags)
+            futures['kpss'] = executor.submit(self.test_kpss, series, lags=lags)
+            futures['phillips_perron'] = executor.submit(self.test_phillips_perron, series, lags=lags)
+            
+            # Zivot-Andrews test is more computationally intensive, so run it separately
+            futures['zivot_andrews'] = executor.submit(self.test_zivot_andrews, series)
+            
+            # Collect results as they complete
+            for test_name, future in futures.items():
+                try:
+                    results[test_name] = future.result()
+                except Exception as e:
+                    logger.warning(f"Error in {test_name} test: {e}")
+                    results[test_name] = {'error': str(e)}
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"All unit root tests complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
+        return results
     
     @timer
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
@@ -370,7 +484,11 @@ class UnitRootTester:
         int
             Order of integration
         """
-        # Make a copy of the series
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Make a copy of the series to avoid modifying the original
         if isinstance(series, pd.Series):
             test_series = series.copy()
         else:
@@ -381,7 +499,7 @@ class UnitRootTester:
             # Log current integration order being tested
             logger.info(f"Testing integration order {d}")
             
-            # Test stationarity
+            # Test stationarity using the specified test method
             if test == 'adf':
                 result = self.test_adf(test_series)
             elif test == 'adf_gls':
@@ -396,6 +514,12 @@ class UnitRootTester:
             # If stationary, return current order
             if result['stationary']:
                 logger.info(f"Series is I({d}) - stationary after {d} differences")
+                
+                # Track memory after processing
+                end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+                memory_diff = end_mem - start_mem
+                logger.debug(f"Integration order determination complete. Memory usage: {memory_diff:.2f} MB")
+                
                 return d
             
             # Difference the series and continue testing
@@ -407,19 +531,38 @@ class UnitRootTester:
         
         # If we reach here, series has higher order of integration than max_order
         logger.warning(f"Series has integration order > {max_order}")
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        logger.debug(f"Integration order determination complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return max_order + 1
 
 
 class StructuralBreakTester:
     """Detect structural breaks in time series data."""
     
+    @timer
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def __init__(self):
         """Initialize the structural break tester."""
-        pass
+        # Get number of available workers based on CPU count
+        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        logger.info(f"Initialized StructuralBreakTester. Memory usage: {memory_usage:.2f} MB")
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_bai_perron(
         self,
         series: Union[pd.Series, np.ndarray],
@@ -449,6 +592,10 @@ class StructuralBreakTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid, errors = validate_time_series(series, min_length=2*min_size)
         raise_if_invalid(valid, errors, "Invalid time series for Bai-Perron test")
@@ -492,19 +639,38 @@ class StructuralBreakTester:
         bp_result = {
             'breakpoints': breakpoints,
             'n_breakpoints': len(breakpoints),
-            'method': method
+            'method': method,
+            'pen': pen
         }
         
         # Add dates if available
         if breakpoint_dates:
             bp_result['breakpoint_dates'] = breakpoint_dates
         
-        logger.info(f"Bai-Perron test: detected {bp_result['n_breakpoints']} breakpoints")
+        # Create segments (for potential plotting)
+        segments = []
+        start = 0
+        for bp in breakpoints:
+            segments.append((start, bp))
+            start = bp
+        
+        bp_result['segments'] = segments
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Bai-Perron test: detected {bp_result['n_breakpoints']} breakpoints. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return bp_result
     
     @memoize
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_gregory_hansen(
         self,
         y: Union[pd.Series, np.ndarray],
@@ -531,6 +697,10 @@ class StructuralBreakTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate input
         valid_y, errors_y = validate_time_series(y, min_length=30)
         raise_if_invalid(valid_y, errors_y, "Invalid dependent variable for Gregory-Hansen test")
@@ -555,6 +725,10 @@ class StructuralBreakTester:
         # Ensure y and x have the same length
         if len(y_array) != len(x_array):
             raise ValueError("Dependent and independent variables must have the same length")
+        
+        # For large datasets, process in chunks to reduce memory usage
+        if len(y_array) > 5000:
+            return self._process_gregory_hansen_parallel(y_array, x_array, model, original_index)
         
         # Use unitroot_adf test with rolling windows to detect structural breaks
         n = len(y_array)
@@ -641,8 +815,232 @@ class StructuralBreakTester:
             except (IndexError, TypeError) as e:
                 logger.warning(f"Could not determine breakpoint date: {e}")
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
         logger.info(
             f"Gregory-Hansen test: ADF stat={gh_result['adf_stat']:.4f}, "
-            f"breakpoint={gh_result['breakpoint']}, cointegrated={gh_result['cointegrated']}"
+            f"breakpoint={gh_result['breakpoint']}, cointegrated={gh_result['cointegrated']}. "
+            f"Memory usage: {memory_diff:.2f} MB"
         )
+        
+        # Force garbage collection
+        gc.collect()
+        
         return gh_result
+    
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def _process_gregory_hansen_parallel(
+        self,
+        y_array: np.ndarray,
+        x_array: np.ndarray,
+        model: str,
+        original_index: Optional[pd.DatetimeIndex] = None
+    ) -> Dict[str, Any]:
+        """
+        Process Gregory-Hansen test in parallel for large datasets.
+        
+        Parameters
+        ----------
+        y_array : np.ndarray
+            Dependent variable array
+        x_array : np.ndarray
+            Independent variable(s) array
+        model : str
+            Model type
+        original_index : pd.DatetimeIndex, optional
+            Original datetime index
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Test results
+        """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Get dimensions
+        n = len(y_array)
+        trim = int(0.15 * n)  # Trim 15% from each end
+        test_range = list(range(trim, n - trim))
+        
+        # Split test range into batches for parallel processing
+        batch_size = max(100, len(test_range) // (self.n_workers * 2))  # Ensure enough tasks
+        batches = [test_range[i:i + batch_size] for i in range(0, len(test_range), batch_size)]
+        
+        logger.info(f"Processing Gregory-Hansen test in {len(batches)} batches")
+        
+        # Initialize UnitRootTester outside loop to avoid repeated initialization
+        ur_tester = UnitRootTester()
+        
+        # Process batches in parallel
+        all_results = []
+        
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit batch tasks
+            futures = []
+            for i, batch in enumerate(batches):
+                futures.append(executor.submit(
+                    self._process_gh_batch,
+                    y_array=y_array,
+                    x_array=x_array,
+                    model=model,
+                    breakpoints=batch,
+                    batch_idx=i,
+                    ur_tester=ur_tester
+                ))
+            
+            # Collect results
+            for future in as_completed(futures):
+                try:
+                    batch_results = future.result()
+                    if batch_results:
+                        all_results.extend(batch_results)
+                except Exception as e:
+                    logger.warning(f"Error in Gregory-Hansen batch: {e}")
+        
+        # Find minimum ADF statistic
+        min_result = min(all_results, key=lambda x: x['adf_stat']) if all_results else None
+        
+        if min_result is None:
+            logger.warning("No valid Gregory-Hansen results found")
+            return {
+                'adf_stat': None,
+                'breakpoint': None,
+                'cointegrated': False,
+                'model': model,
+                'all_tests': []
+            }
+        
+        min_adf = min_result['adf_stat']
+        breakpoint = min_result['breakpoint']
+        
+        # Format final result
+        critical_values = {
+            'cc': {'1%': -5.13, '5%': -4.61, '10%': -4.34},
+            'ct': {'1%': -5.45, '5%': -4.99, '10%': -4.72},
+            'ctt': {'1%': -5.47, '5%': -4.95, '10%': -4.68}
+        }.get(model, {'1%': -5.13, '5%': -4.61, '10%': -4.34})
+        
+        # Determine if cointegrated (stationary residuals)
+        cointegrated = min_adf < critical_values['5%']
+        
+        gh_result = {
+            'adf_stat': min_adf,
+            'breakpoint': breakpoint,
+            'critical_values': critical_values,
+            'cointegrated': cointegrated,
+            'model': model,
+            'all_tests': all_results
+        }
+        
+        # Add breakpoint_date if datetime index is available
+        if original_index is not None and breakpoint is not None:
+            try:
+                gh_result['breakpoint_date'] = original_index[breakpoint]
+            except (IndexError, TypeError) as e:
+                logger.warning(f"Could not determine breakpoint date: {e}")
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(
+            f"Gregory-Hansen test (parallel): ADF stat={gh_result['adf_stat']:.4f}, "
+            f"breakpoint={gh_result['breakpoint']}, cointegrated={gh_result['cointegrated']}. "
+            f"Memory usage: {memory_diff:.2f} MB"
+        )
+        
+        # Force garbage collection
+        gc.collect()
+        
+        return gh_result
+    
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def _process_gh_batch(
+        self,
+        y_array: np.ndarray,
+        x_array: np.ndarray,
+        model: str,
+        breakpoints: List[int],
+        batch_idx: int,
+        ur_tester: Optional[UnitRootTester] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Process a batch of Gregory-Hansen tests.
+        
+        Parameters
+        ----------
+        y_array : np.ndarray
+            Dependent variable array
+        x_array : np.ndarray
+            Independent variable(s) array
+        model : str
+            Model type
+        breakpoints : List[int]
+            Breakpoints to test in this batch
+        batch_idx : int
+            Batch index for logging
+        ur_tester : UnitRootTester, optional
+            Unit root tester instance
+            
+        Returns
+        -------
+        List[Dict[str, Any]]
+            Batch test results
+        """
+        # Create UnitRootTester if not provided
+        if ur_tester is None:
+            ur_tester = UnitRootTester()
+        
+        n = len(y_array)
+        batch_results = []
+        
+        # Test each possible breakpoint in this batch
+        for i, breakpoint in enumerate(breakpoints):
+            if i % 50 == 0:
+                logger.debug(f"Processing breakpoint {i}/{len(breakpoints)} in batch {batch_idx}")
+            
+            # Create dummy variable for break
+            dummy = np.zeros(n)
+            dummy[breakpoint:] = 1
+            
+            # Create regressor matrix based on model type
+            try:
+                if model == 'cc':
+                    # Level shift only
+                    X = np.column_stack((np.ones(n), dummy, x_array))
+                elif model == 'ct':
+                    # Level shift with trend
+                    trend = np.arange(n)
+                    X = np.column_stack((np.ones(n), dummy, trend, x_array))
+                elif model == 'ctt':
+                    # Regime shift (intercept and slope)
+                    X_with_dummy = x_array * dummy.reshape(-1, 1)
+                    X = np.column_stack((np.ones(n), dummy, x_array, X_with_dummy))
+                else:
+                    raise ValueError(f"Unknown model type: {model}")
+                
+                # OLS regression
+                from statsmodels.regression.linear_model import OLS
+                model_fit = OLS(y_array, X).fit()
+                residuals = model_fit.resid
+                
+                # Test for cointegration (stationarity of residuals)
+                adf_result = ur_tester.test_adf(residuals, regression='nc')
+                
+                # Store results
+                batch_results.append({
+                    'breakpoint': breakpoint,
+                    'adf_stat': adf_result['statistic'],
+                    'pvalue': adf_result['pvalue']
+                })
+                
+            except Exception as e:
+                logger.debug(f"Error testing breakpoint {breakpoint} in batch {batch_idx}: {e}")
+                continue
+        
+        logger.debug(f"Completed batch {batch_idx}: processed {len(batch_results)}/{len(breakpoints)} breakpoints")
+        return batch_results

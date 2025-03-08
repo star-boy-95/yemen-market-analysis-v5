@@ -4,7 +4,13 @@ Cointegration testing module for time series analysis.
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, Any, Optional, Union, List, Tuple
+from typing import Dict, Any, Optional, Union, List, Tuple, Callable
+import gc
+import psutil
+import os
+import time
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from statsmodels.tsa.vector_ar.vecm import coint_johansen
 from statsmodels.tsa.stattools import coint
 import statsmodels.api as sm
@@ -19,6 +25,7 @@ from src.utils import (
     
     # Performance
     timer, m1_optimized, memory_usage_decorator, disk_cache, parallelize_dataframe,
+    configure_system_for_performance, optimize_dataframe,
     
     # Configuration
     config
@@ -32,17 +39,29 @@ DEFAULT_ALPHA = config.get('analysis.cointegration.alpha', 0.05)
 DEFAULT_TREND = config.get('analysis.cointegration.trend', 'c')
 DEFAULT_MAX_LAGS = config.get('analysis.cointegration.max_lags', 4)
 
+# Configure system for optimal performance
+configure_system_for_performance()
 
 class CointegrationTester:
     """Perform cointegration tests on time series data."""
     
+    @timer
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def __init__(self):
         """Initialize the cointegration tester."""
-        pass
+        # Get number of available workers based on CPU count
+        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        logger.info(f"Initialized CointegrationTester. Memory usage: {memory_usage:.2f} MB")
     
     @disk_cache(cache_dir='.cache/cointegration')
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def test_engle_granger(
         self, 
         y: Union[pd.Series, np.ndarray], 
@@ -75,6 +94,10 @@ class CointegrationTester:
         dict
             Dictionary with test results
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Validate inputs with custom validators
         def validate_equal_length(series1, series2):
             """Check that both series have the same length."""
@@ -138,15 +161,26 @@ class CointegrationTester:
             'residuals': model.resid,  # Equilibrium errors
         }
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
         logger.info(
             f"Engle-Granger test: statistic={eg_result['statistic']:.4f}, "
-            f"p-value={eg_result['pvalue']:.4f}, cointegrated={eg_result['cointegrated']}"
+            f"p-value={eg_result['pvalue']:.4f}, cointegrated={eg_result['cointegrated']}. "
+            f"Memory usage: {memory_diff:.2f} MB"
         )
+        
+        # Force garbage collection to free memory
+        gc.collect()
+        
         return eg_result
     
     @disk_cache(cache_dir='.cache/cointegration')
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @m1_optimized(parallel=True)
+    @timer
     def test_johansen(
         self, 
         data: Union[pd.DataFrame, np.ndarray], 
@@ -188,12 +222,19 @@ class CointegrationTester:
         asymptotic distribution of the test statistics. These are approximate 
         p-values and should be interpreted with caution, especially in small samples.
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Ensure data is a DataFrame or numpy array
         if not isinstance(data, (pd.DataFrame, np.ndarray)):
             raise TypeError(f"data must be a DataFrame or numpy array, got {type(data)}")
         
         # Convert to numpy array if DataFrame
         if isinstance(data, pd.DataFrame):
+            # Optimize memory usage for large DataFrames
+            if data.shape[0] > 1000 or data.shape[1] > 20:
+                data = optimize_dataframe(data)
             data_values = data.values
         else:
             data_values = data
@@ -211,6 +252,55 @@ class CointegrationTester:
         if n_vars < 2:
             raise ValueError(f"Need at least 2 variables for cointegration test, got {n_vars}")
         
+        # For large datasets, process in chunks to reduce memory usage
+        chunk_size = 5000
+        if n_obs > chunk_size:
+            # Split data into chunks for testing
+            n_chunks = (n_obs + chunk_size - 1) // chunk_size
+            chunks = [data_values[i * chunk_size:min((i + 1) * chunk_size, n_obs)] for i in range(n_chunks)]
+            
+            logger.info(f"Large dataset detected. Processing Johansen test in {n_chunks} chunks.")
+            
+            # Process each chunk in parallel
+            with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+                # Submit test tasks
+                futures = []
+                for i, chunk in enumerate(chunks):
+                    if len(chunk) >= 20:  # Minimum required for Johansen test
+                        futures.append(executor.submit(
+                            self._process_johansen_chunk,
+                            chunk, det_order, k_ar_diff, i
+                        ))
+                
+                # Collect results
+                chunk_results = []
+                for future in as_completed(futures):
+                    try:
+                        chunk_result = future.result()
+                        if chunk_result is not None:
+                            chunk_results.append(chunk_result)
+                    except Exception as e:
+                        logger.warning(f"Error processing Johansen test chunk: {e}")
+                
+                # Combine results
+                combined_result = self._combine_johansen_results(chunk_results, n_vars)
+                
+                # Track memory after processing
+                end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+                memory_diff = end_mem - start_mem
+                
+                logger.info(
+                    f"Johansen test complete (chunked): cointegration rank (trace)={combined_result['rank_trace']}, "
+                    f"rank (max)={combined_result['rank_max']}, cointegrated={combined_result['cointegrated']}. "
+                    f"Memory usage: {memory_diff:.2f} MB"
+                )
+                
+                # Force garbage collection
+                gc.collect()
+                
+                return combined_result
+        
+        # For smaller datasets or testing individual chunks
         # Run Johansen test
         result = coint_johansen(data_values, det_order=det_order, k_ar_diff=k_ar_diff)
         
@@ -242,11 +332,158 @@ class CointegrationTester:
             'cointegrated': rank_trace > 0
         }
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
         logger.info(
-            f"Johansen test: cointegration rank (trace)={rank_trace}, "
-            f"rank (max)={rank_max}, cointegrated={johansen_result['cointegrated']}"
+            f"Johansen test complete: cointegration rank (trace)={rank_trace}, "
+            f"rank (max)={rank_max}, cointegrated={johansen_result['cointegrated']}. "
+            f"Memory usage: {memory_diff:.2f} MB"
         )
+        
+        # Force garbage collection
+        gc.collect()
+        
         return johansen_result
+    
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def _process_johansen_chunk(
+        self, 
+        chunk: np.ndarray,
+        det_order: int,
+        k_ar_diff: int,
+        chunk_idx: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Process a chunk of data for Johansen test.
+        
+        Parameters
+        ----------
+        chunk : np.ndarray
+            Data chunk to process
+        det_order : int
+            Deterministic term specification
+        k_ar_diff : int
+            Number of lagged differences
+        chunk_idx : int
+            Chunk index for logging
+            
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            Johansen test results for this chunk or None if error
+        """
+        try:
+            # Run Johansen test on chunk
+            result = coint_johansen(chunk, det_order=det_order, k_ar_diff=k_ar_diff)
+            
+            # Extract statistics
+            n_vars = chunk.shape[1]
+            trace_stat = result.lr1
+            trace_crit = result.cvt
+            max_stat = result.lr2
+            max_crit = result.cvm
+            
+            # Calculate p-values
+            df_trace = np.array([(n_vars - r) for r in range(n_vars)])
+            p_values_trace = [1 - stats.chi2.cdf(trace_stat[i], df_trace[i]) for i in range(len(trace_stat))]
+            
+            # Determine ranks
+            rank_trace = sum(trace_stat > trace_crit[:, 1])
+            rank_max = sum(max_stat > max_crit[:, 1])
+            
+            chunk_result = {
+                'trace_statistics': trace_stat,
+                'trace_critical_values': trace_crit,
+                'max_statistics': max_stat,
+                'max_critical_values': max_crit,
+                'p_values_trace': np.array(p_values_trace),
+                'rank_trace': rank_trace,
+                'rank_max': rank_max,
+                'cointegration_vectors': result.evec,
+                'eigenvalues': result.eig,
+                'cointegrated': rank_trace > 0,
+                'chunk_size': len(chunk)
+            }
+            
+            logger.debug(f"Processed Johansen test chunk {chunk_idx}: rank_trace={rank_trace}, rank_max={rank_max}")
+            return chunk_result
+            
+        except Exception as e:
+            logger.warning(f"Error in Johansen test for chunk {chunk_idx}: {e}")
+            return None
+    
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def _combine_johansen_results(
+        self, 
+        chunk_results: List[Dict[str, Any]],
+        n_vars: int
+    ) -> Dict[str, Any]:
+        """
+        Combine Johansen test results from multiple chunks.
+        
+        Parameters
+        ----------
+        chunk_results : List[Dict[str, Any]]
+            Results from individual chunks
+        n_vars : int
+            Number of variables
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Combined test results
+        """
+        if not chunk_results:
+            raise ValueError("No valid chunk results to combine")
+        
+        # Calculate weighted averages based on chunk sizes
+        total_size = sum(result['chunk_size'] for result in chunk_results)
+        
+        # Combine trace statistics (weighted average)
+        trace_stats = np.zeros(n_vars)
+        for result in chunk_results:
+            weight = result['chunk_size'] / total_size
+            trace_stats += result['trace_statistics'] * weight
+        
+        # Use critical values from first chunk (they should be the same for all chunks)
+        trace_crit = chunk_results[0]['trace_critical_values']
+        
+        # Combine max statistics (weighted average)
+        max_stats = np.zeros(n_vars)
+        for result in chunk_results:
+            weight = result['chunk_size'] / total_size
+            max_stats += result['max_statistics'] * weight
+        
+        max_crit = chunk_results[0]['max_critical_values']
+        
+        # Recalculate p-values
+        df_trace = np.array([(n_vars - r) for r in range(n_vars)])
+        p_values_trace = [1 - stats.chi2.cdf(trace_stats[i], df_trace[i]) for i in range(len(trace_stats))]
+        
+        # Recalculate ranks
+        rank_trace = sum(trace_stats > trace_crit[:, 1])
+        rank_max = sum(max_stats > max_crit[:, 1])
+        
+        # For cointegration vectors and eigenvalues, use the result from the largest chunk
+        largest_chunk_idx = max(range(len(chunk_results)), key=lambda i: chunk_results[i]['chunk_size'])
+        
+        combined_result = {
+            'trace_statistics': trace_stats,
+            'trace_critical_values': trace_crit,
+            'max_statistics': max_stats,
+            'max_critical_values': max_crit,
+            'p_values_trace': np.array(p_values_trace),
+            'rank_trace': rank_trace,
+            'rank_max': rank_max,
+            'cointegration_vectors': chunk_results[largest_chunk_idx]['cointegration_vectors'],
+            'eigenvalues': chunk_results[largest_chunk_idx]['eigenvalues'],
+            'cointegrated': rank_trace > 0,
+            'method': 'chunked'
+        }
+        
+        return combined_result
     
     @timer
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
@@ -278,6 +515,10 @@ class CointegrationTester:
             - half_life: Time (in periods) for deviations to revert halfway to equilibrium
                          (only calculated if Engle-Granger shows cointegration)
         """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
         # Convert inputs to numpy arrays
         if isinstance(y, pd.Series):
             y_values = y.values
@@ -299,9 +540,15 @@ class CointegrationTester:
         elif trend == 'nc':
             det_order = 0  # no deterministic terms
         
-        # Run tests
-        eg_result = self.test_engle_granger(y_values, x_values, trend=trend)
-        jo_result = self.test_johansen(data, det_order=det_order)
+        # Run tests in parallel for better performance
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit test tasks
+            future_eg = executor.submit(self.test_engle_granger, y_values, x_values, trend=trend)
+            future_jo = executor.submit(self.test_johansen, data, det_order=det_order)
+            
+            # Collect results
+            eg_result = future_eg.result()
+            jo_result = future_jo.result()
         
         # Calculate half-life if cointegrated according to Engle-Granger test
         half_life = None
@@ -320,12 +567,22 @@ class CointegrationTester:
             'half_life': half_life
         }
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Combined cointegration tests complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return combined
 
 
 @m1_optimized(use_numba=True)
 @memory_usage_decorator
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@timer
 def estimate_cointegration_vector(
     y: Union[pd.Series, np.ndarray],
     x: Union[pd.Series, np.ndarray, List[Union[pd.Series, np.ndarray]]],
@@ -348,6 +605,10 @@ def estimate_cointegration_vector(
     tuple
         (beta, residuals)
     """
+    # Track memory usage
+    process = psutil.Process(os.getpid())
+    start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    
     # Handle x as a single series or a list of series
     if not isinstance(x, (list, tuple)):
         x_list = [x]
@@ -374,20 +635,37 @@ def estimate_cointegration_vector(
     # Add constant
     X_with_const = sm.add_constant(X)
     
-    # Estimate cointegration vector using OLS
+    # Estimate cointegration vector using requested method
     if method == 'ols':
         model = sm.OLS(y, X_with_const)
         results = model.fit()
         beta = results.params
         residuals = results.resid
+    elif method == 'dols':
+        # Implement Dynamic OLS (Stock-Watson)
+        # This is a placeholder implementation - would need more complex implementation
+        # for a proper DOLS with leads and lags
+        raise NotImplementedError("DOLS method not yet implemented")
+    elif method == 'fmols':
+        # Implement Fully Modified OLS (Phillips-Hansen)
+        # This would require a more complex implementation to account for
+        # endogeneity and serial correlation
+        raise NotImplementedError("FMOLS method not yet implemented")
     else:
         raise ValueError(f"Unsupported estimation method: {method}")
+    
+    # Track memory after processing
+    end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+    memory_diff = end_mem - start_mem
+    
+    logger.debug(f"Estimated cointegration vector using {method}. Memory usage: {memory_diff:.2f} MB")
     
     return beta, residuals
     
 
 @m1_optimized()
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@timer
 def calculate_half_life(residuals: np.ndarray) -> float:
     """
     Calculate half-life of deviations from cointegration equilibrium.

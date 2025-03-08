@@ -9,7 +9,12 @@ import logging
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from typing import Dict, Any, Union, Optional, List, Tuple
+from typing import Dict, Any, Union, Optional, List, Tuple, Callable
+import gc
+import psutil
+import os
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from src.models.threshold import ThresholdCointegration, test_mtar_adjustment
 from src.models.diagnostics import ModelDiagnostics
@@ -26,7 +31,7 @@ from src.utils import (
     config,
     
     # Data processing
-    compute_price_differentials, normalize_columns,
+    compute_price_differentials, normalize_columns, optimize_dataframe,
     
     # Spatial utilities
     create_conflict_adjusted_weights, calculate_distances,
@@ -35,10 +40,14 @@ from src.utils import (
     test_cointegration, estimate_threshold_model,
     
     # Performance
-    m1_optimized
+    m1_optimized, timer, memory_usage_decorator, disk_cache, memoize,
+    parallelize_dataframe, configure_system_for_performance
 )
 
 logger = logging.getLogger(__name__)
+
+# Configure system for optimal performance
+configure_system_for_performance()
 
 class MarketIntegrationSimulation:
     """
@@ -49,6 +58,9 @@ class MarketIntegrationSimulation:
     of these policy interventions.
     """
     
+    @timer
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def __init__(
         self, 
         data: gpd.GeoDataFrame, 
@@ -74,18 +86,25 @@ class MarketIntegrationSimulation:
         # Validate input data
         self._validate_input_data(data)
         
-        # Store data and models
-        self.data = data.copy()
+        # Store data and models (optimize memory usage)
+        self.data = optimize_dataframe(data.copy())
         self.threshold_model = threshold_model
         self.spatial_model = spatial_model
         
-        # Store original data for comparison
-        self.original_data = data.copy()
+        # Store original data for comparison (optimize memory usage)
+        self.original_data = optimize_dataframe(data.copy())
         
         # Initialize results storage
         self.results = {}
         
-        logger.info("MarketIntegrationSimulation initialized with data of shape %s", data.shape)
+        # Get number of available workers based on CPU count
+        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        logger.info(f"MarketIntegrationSimulation initialized with data of shape {data.shape}, memory: {memory_usage:.2f} MB")
     
     @handle_errors(logger=logger, error_type=ValidationError)
     def _validate_input_data(self, data: gpd.GeoDataFrame) -> None:
@@ -122,6 +141,8 @@ class MarketIntegrationSimulation:
         if not all(regime in ['north', 'south'] for regime in valid_regimes):
             raise ValidationError(f"Exchange rate regime must be 'north' or 'south', got {valid_regimes}")
     
+    @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def simulate_exchange_rate_unification(
         self, 
@@ -156,15 +177,20 @@ class MarketIntegrationSimulation:
             - 'price_changes': DataFrame of price changes by region
             - 'threshold_model': Re-estimated threshold model
         """
-        # Copy data for simulation
-        sim_data = self.data.copy()
+        # Process input data in chunks for memory efficiency
+        chunk_size = config.get('data.max_chunk_size', 10000)
+        sim_data = optimize_dataframe(self.data.copy())
+        
+        # Track initial memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
         
         # Convert all prices to USD
         self._convert_to_usd(sim_data)
         
         # Determine unified exchange rate
         unified_rate = self._determine_unified_rate(target_rate, reference_date)
-        logger.info("Using unified exchange rate: %.2f", unified_rate)
+        logger.info(f"Using unified exchange rate: {unified_rate:.2f}")
         
         # Apply unified exchange rate to convert back to YER
         sim_data['simulated_price'] = sim_data['usd_price'] * unified_rate
@@ -180,6 +206,15 @@ class MarketIntegrationSimulation:
         threshold_model = None
         if self.threshold_model is not None:
             threshold_model = self._reestimate_threshold_model(sim_data)
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Exchange rate unification simulation complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
         
         # Store results
         results = {
@@ -212,6 +247,7 @@ class MarketIntegrationSimulation:
         
         logger.debug("Converted prices to USD")
     
+    @memoize
     @handle_errors(logger=logger)
     def _determine_unified_rate(
         self, 
@@ -322,6 +358,8 @@ class MarketIntegrationSimulation:
         # Otherwise return all changes
         return changes_df
 
+    @disk_cache(cache_dir='.cache/simulations')
+    @timer
     @handle_errors(logger=logger)
     def _reestimate_threshold_model(self, simulated_data: gpd.GeoDataFrame) -> Any:
         """
@@ -376,6 +414,8 @@ class MarketIntegrationSimulation:
         
         return reestimated_model
     
+    @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def simulate_improved_connectivity(
         self, 
@@ -411,18 +451,19 @@ class MarketIntegrationSimulation:
         if conflict_col not in self.data.columns:
             raise ValidationError(f"Data must contain '{conflict_col}' column")
         
-        # Copy data for simulation
-        sim_data = self.data.copy()
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Copy data for simulation (with memory optimization)
+        sim_data = optimize_dataframe(self.data.copy())
         
         # Reduce conflict intensity
         original_conflict = sim_data[conflict_col].copy()
         sim_data[conflict_col] = original_conflict * (1 - reduction_factor)
         
         logger.info(
-            "Reduced conflict intensity by factor %.2f (mean: %.4f -> %.4f)",
-            reduction_factor,
-            original_conflict.mean(),
-            sim_data[conflict_col].mean()
+            f"Reduced conflict intensity by factor {reduction_factor:.2f} (mean: {original_conflict.mean():.4f} -> {sim_data[conflict_col].mean():.4f})"
         )
         
         # Recalculate spatial weights
@@ -432,6 +473,15 @@ class MarketIntegrationSimulation:
         spatial_model = None
         if self.spatial_model is not None:
             spatial_model = self._reestimate_spatial_model(sim_data, spatial_weights)
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Connectivity improvement simulation complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
         
         # Store results
         results = {
@@ -446,6 +496,7 @@ class MarketIntegrationSimulation:
         
         return results
     
+    @disk_cache(cache_dir='.cache/simulations')
     @handle_errors(logger=logger)
     @m1_optimized(use_numba=True)
     def _recalculate_spatial_weights(
@@ -476,7 +527,7 @@ class MarketIntegrationSimulation:
         conflict_weight = params.get('conflict_weight', 0.5)
         
         # Check if there's a regime boundary to consider
-        regime_boundary_penalty = 1.5  # Default penalty multiplier for cross-regime connections
+        regime_boundary_penalty = config.get('analysis.simulation.regime_boundary_penalty', 1.5)
         
         # Create conflict-adjusted weights with regime boundary consideration
         if 'exchange_rate_regime' in data.columns:
@@ -511,6 +562,75 @@ class MarketIntegrationSimulation:
         
         return weights
     
+    @timer
+    @handle_errors(logger=logger)
+    def _reestimate_spatial_model(
+        self, 
+        data: gpd.GeoDataFrame, 
+        weights: Any
+    ) -> Any:
+        """
+        Re-estimate spatial model with simulated data.
+        
+        Parameters
+        ----------
+        data : gpd.GeoDataFrame
+            Simulated data with modified conflict levels
+        weights : Any
+            Recalculated spatial weights
+            
+        Returns
+        -------
+        Any
+            Re-estimated spatial model
+        """
+        # This method is placeholder if not implemented in the provided code
+        # We'll implement basic functionality based on similar methods
+        
+        logger.info("Re-estimating spatial model with simulated data")
+        
+        try:
+            # Import SpatialEconometrics from spatial.py
+            from src.models.spatial import SpatialEconometrics
+            
+            # Create a new model instance
+            spatial_model = SpatialEconometrics(data)
+            
+            # Set the weights directly
+            spatial_model.weights = weights
+            
+            # Run basic tests
+            if 'price' in data.columns:
+                moran_result = spatial_model.moran_i_test('price')
+                logger.info(f"Moran's I for simulated data: {moran_result['I']:.4f}, p-value: {moran_result['p_norm']:.4f}")
+            
+            # Estimate models if price column is available
+            if 'price' in data.columns or 'simulated_price' in data.columns:
+                price_col = 'simulated_price' if 'simulated_price' in data.columns else 'price'
+                
+                # Find variables that might be predictors
+                potential_predictors = [col for col in data.columns if col not in 
+                                        [price_col, 'geometry', 'date', 'market_id']]
+                
+                if len(potential_predictors) > 0:
+                    # Take a subset of predictors to avoid overfitting
+                    predictors = potential_predictors[:min(3, len(potential_predictors))]
+                    
+                    # Estimate spatial lag model
+                    lag_model = spatial_model.spatial_lag_model(price_col, predictors)
+                    spatial_model.lag_model = lag_model
+                    
+                    # Estimate spatial error model
+                    error_model = spatial_model.spatial_error_model(price_col, predictors)
+                    spatial_model.error_model = error_model
+            
+            return spatial_model
+            
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"Could not re-estimate spatial model: {e}")
+            return None
+    
+    @timer
     @handle_errors(logger=logger)
     def calculate_integration_index(
         self,
@@ -609,6 +729,8 @@ class MarketIntegrationSimulation:
         self.results[f'{policy_scenario}_integration'] = integration_indices
         return integration_indices
 
+    @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def simulate_combined_policy(
         self, 
@@ -635,8 +757,12 @@ class MarketIntegrationSimulation:
         """
         logger.info("Simulating combined policy effects")
         
-        # Copy data for simulation
-        sim_data = self.data.copy()
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Copy data for simulation (optimize memory usage)
+        sim_data = optimize_dataframe(self.data.copy())
         
         # Apply exchange rate unification
         sim_data = self._apply_exchange_unification(
@@ -668,6 +794,15 @@ class MarketIntegrationSimulation:
             'threshold_model': results.get('threshold_model'),
             'spatial_model': results.get('spatial_model')
         }
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Combined policy simulation complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
         
         # Store in instance results
         self.results['combined_policy'] = combined_results
@@ -784,6 +919,7 @@ class MarketIntegrationSimulation:
         
         return results
     
+    @timer
     @handle_errors(logger=logger)
     def calculate_welfare_effects(
         self, 
@@ -869,6 +1005,7 @@ class MarketIntegrationSimulation:
         
         return welfare_results
     
+    @timer
     @handle_errors(logger=logger)
     def calculate_policy_asymmetry_effects(
         self,
@@ -1241,6 +1378,7 @@ class MarketIntegrationSimulation:
             'relative_convergence': rel_convergence
         }
     
+    @timer
     @handle_errors(logger=logger)
     def test_robustness(
         self, 
@@ -1427,6 +1565,8 @@ class MarketIntegrationSimulation:
         
         return comparison
     
+    @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def run_sensitivity_analysis(
         self,
@@ -1458,7 +1598,8 @@ class MarketIntegrationSimulation:
         # Initialize default parameter values if not provided
         if param_values is None:
             if sensitivity_type == 'conflict_reduction':
-                param_values = [0.1, 0.25, 0.5, 0.75, 0.9]
+                param_values = config.get('analysis.simulation.sensitivity_conflict_levels', 
+                                         [0.1, 0.25, 0.5, 0.75, 0.9])
             elif sensitivity_type == 'exchange_rate':
                 # Get percentiles of exchange rates
                 if 'exchange_rate' in self.data.columns:
@@ -1478,7 +1619,12 @@ class MarketIntegrationSimulation:
         
         # Initialize default metrics if not provided
         if metrics is None:
-            metrics = ['price_convergence', 'integration_index', 'asymmetry']
+            metrics = config.get('analysis.simulation.sensitivity_metrics', 
+                                ['price_convergence', 'integration_index', 'asymmetry'])
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
         
         # Initialize results storage
         sensitivity_results = {
@@ -1488,50 +1634,27 @@ class MarketIntegrationSimulation:
             'results': {}
         }
         
-        # Run simulations for each parameter value
-        for param_value in param_values:
-            logger.info(f"Running {sensitivity_type} simulation with parameter value: {param_value}")
-            
-            # Run appropriate simulation based on sensitivity type
-            if sensitivity_type == 'conflict_reduction':
-                sim_result = self.simulate_improved_connectivity(reduction_factor=param_value)
-                scenario_name = f"improved_connectivity_{param_value}"
-            elif sensitivity_type == 'exchange_rate':
-                sim_result = self.simulate_exchange_rate_unification(target_rate=str(param_value))
-                scenario_name = f"exchange_rate_{param_value}"
-            
-            # Store simulation result
-            self.results[scenario_name] = sim_result
-            
-            # Calculate metrics
-            metric_results = {}
-            
-            if 'price_convergence' in metrics:
-                # Calculate price convergence metrics
-                convergence = self._calculate_price_convergence(
-                    self.data, 
-                    sim_result['simulated_data'], 
-                    'price', 
-                    'simulated_price', 
-                    'exchange_rate_regime'
+        # Run simulations in parallel for better performance
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            # Submit sensitivity analysis tasks
+            futures = {}
+            for param_value in param_values:
+                future = executor.submit(
+                    self._run_sensitivity_analysis_for_param,
+                    sensitivity_type, param_value, metrics
                 )
-                metric_results['price_convergence'] = convergence.get('relative_convergence', 0)
+                futures[future] = param_value
             
-            if 'integration_index' in metrics:
-                # Calculate integration index
-                integration = self.calculate_integration_index(scenario_name)
-                metric_results['integration_index'] = integration.get('percentage_improvement', 0)
-            
-            if 'asymmetry' in metrics and 'threshold_model' in sim_result:
-                # Calculate asymmetry effect
-                asymmetry = self.calculate_policy_asymmetry_effects(scenario_name)
-                
-                # Extract a numerical metric from asymmetry results
-                if 'tar_comparison' in asymmetry:
-                    metric_results['asymmetry'] = asymmetry['tar_comparison'].get('change', 0)
-            
-            # Store metric results for this parameter value
-            sensitivity_results['results'][param_value] = metric_results
+            # Collect results as they complete
+            for future in as_completed(futures):
+                param_value = futures[future]
+                try:
+                    result = future.result()
+                    sensitivity_results['results'][param_value] = result
+                    logger.info(f"Completed sensitivity analysis for {sensitivity_type}={param_value}")
+                except Exception as e:
+                    logger.error(f"Error in sensitivity analysis for {param_value}: {e}")
+                    sensitivity_results['results'][param_value] = {'error': str(e)}
         
         # Calculate summary statistics
         sensitivity_results['summary'] = self._calculate_sensitivity_summary(
@@ -1539,10 +1662,87 @@ class MarketIntegrationSimulation:
             metrics
         )
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Sensitivity analysis complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         # Store in instance results
         self.results['sensitivity_analysis'] = sensitivity_results
         
         return sensitivity_results
+    
+    @handle_errors(logger=logger)
+    def _run_sensitivity_analysis_for_param(
+        self,
+        sensitivity_type: str,
+        param_value: float,
+        metrics: List[str]
+    ) -> Dict[str, float]:
+        """
+        Run a single sensitivity analysis simulation for a specific parameter value.
+        
+        Parameters
+        ----------
+        sensitivity_type : str
+            Type of sensitivity analysis
+        param_value : float
+            Parameter value to test
+        metrics : List[str]
+            Metrics to calculate
+            
+        Returns
+        -------
+        Dict[str, float]
+            Metrics for this parameter value
+        """
+        logger.info(f"Running {sensitivity_type} simulation with parameter value: {param_value}")
+        
+        # Run appropriate simulation based on sensitivity type
+        if sensitivity_type == 'conflict_reduction':
+            sim_result = self.simulate_improved_connectivity(reduction_factor=param_value)
+            scenario_name = f"improved_connectivity_{param_value}"
+        elif sensitivity_type == 'exchange_rate':
+            sim_result = self.simulate_exchange_rate_unification(target_rate=str(param_value))
+            scenario_name = f"exchange_rate_{param_value}"
+        else:
+            raise ValueError(f"Unknown sensitivity_type: {sensitivity_type}")
+        
+        # Store simulation result
+        self.results[scenario_name] = sim_result
+        
+        # Calculate metrics
+        metric_results = {}
+        
+        if 'price_convergence' in metrics:
+            # Calculate price convergence metrics
+            convergence = self._calculate_price_convergence(
+                self.data, 
+                sim_result['simulated_data'], 
+                'price', 
+                'simulated_price', 
+                'exchange_rate_regime'
+            )
+            metric_results['price_convergence'] = convergence.get('relative_convergence', 0)
+        
+        if 'integration_index' in metrics:
+            # Calculate integration index
+            integration = self.calculate_integration_index(scenario_name)
+            metric_results['integration_index'] = integration.get('percentage_improvement', 0)
+        
+        if 'asymmetry' in metrics and 'threshold_model' in sim_result:
+            # Calculate asymmetry effect
+            asymmetry = self.calculate_policy_asymmetry_effects(scenario_name)
+            
+            # Extract a numerical metric from asymmetry results
+            if 'tar_comparison' in asymmetry:
+                metric_results['asymmetry'] = asymmetry['tar_comparison'].get('change', 0)
+        
+        return metric_results
     
     @handle_errors(logger=logger)
     def _calculate_sensitivity_summary(
@@ -1572,7 +1772,9 @@ class MarketIntegrationSimulation:
             values = [
                 result.get(metric, np.nan) 
                 for result in sensitivity_results.values()
-                if metric in result
+                if metric in result and not isinstance(result, dict) or (
+                    isinstance(result, dict) and 'error' not in result
+                )
             ]
             
             if not values or all(np.isnan(values)):
@@ -1616,11 +1818,14 @@ class MarketIntegrationSimulation:
             if not np.isnan(stats['coefficient_of_variation'])
         ]
         
+        # Get sensitivity threshold from config
+        high_sensitivity_threshold = config.get('analysis.simulation.high_sensitivity_threshold', 0.5)
+        
         if valid_cvs:
             summary['overall'] = {
                 'mean_cv': np.mean(valid_cvs),
                 'max_cv': np.max(valid_cvs),
-                'high_sensitivity': np.mean(valid_cvs) > 0.5
+                'high_sensitivity': np.mean(valid_cvs) > high_sensitivity_threshold
             }
         else:
             summary['overall'] = {

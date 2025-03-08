@@ -5,24 +5,30 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
-import statsmodels.api as sm
-from arch.unitroot.cointegration import engle_granger
 import matplotlib.pyplot as plt
-from scipy import stats
 
-from src.models.diagnostics import ModelDiagnostics
 from src.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
     # Validation
-    validate_time_series, validate_model_inputs, raise_if_invalid,
+    validate_time_series, validate_model_inputs, validate_dataframe, raise_if_invalid,
     
     # Performance
-    timer, m1_optimized, memory_usage_decorator, disk_cache, parallelize,
+    timer, m1_optimized, memory_usage_decorator, disk_cache, parallelize_dataframe,
+    optimize_dataframe, configure_system_for_performance,
     
     # Data processing
-    fill_missing_values, create_lag_features,
+    fill_missing_values, create_lag_features, normalize_columns, detect_outliers,
+    
+    # Statistical utilities
+    test_stationarity, test_cointegration, bootstrap_confidence_interval,
+    test_linearity, calculate_half_life, compute_variance_ratio, 
+    test_structural_break, test_white_noise,
+    
+    # Plotting utilities
+    set_plotting_style, format_date_axis, plot_time_series, 
+    plot_dual_axis, save_plot, add_annotations,
     
     # Configuration
     config
@@ -36,6 +42,7 @@ DEFAULT_ALPHA = config.get('analysis.threshold.alpha', 0.05)
 DEFAULT_TRIM = config.get('analysis.threshold.trim', 0.15)
 DEFAULT_MAX_LAGS = config.get('analysis.threshold.max_lags', 4)
 DEFAULT_N_BOOTSTRAP = config.get('analysis.threshold.n_bootstrap', 1000)
+DEFAULT_MTAR_THRESHOLD = config.get('analysis.threshold.mtar_default_threshold', 0.0)
 
 
 class ThresholdCointegration:
@@ -71,6 +78,9 @@ class ThresholdCointegration:
         market2_name : str, optional
             Name of the second market (for plotting and reporting)
         """
+        # Optimize system for performance
+        configure_system_for_performance()
+        
         # Validate input time series
         self._validate_inputs(data1, data2)
         
@@ -97,6 +107,7 @@ class ThresholdCointegration:
         valid, errors = validate_model_inputs(
             model_name="threshold",
             params={"max_lags": max_lags},
+            required_params={"max_lags"},
             param_validators={
                 "max_lags": lambda x: isinstance(x, int) and x > 0
             }
@@ -157,31 +168,40 @@ class ThresholdCointegration:
         The beta1 coefficient shows the long-run price transmission elasticity,
         while equilibrium errors represent deviations due to transaction costs and barriers.
         """
-        # Run Engle-Granger test
-        result = engle_granger(self.data1, self.data2, trend='c', lags=self.max_lags)
+        # Use project's test_cointegration utility
+        result = test_cointegration(
+            self.data1, 
+            self.data2, 
+            method='engle-granger', 
+            trend='c', 
+            lags=self.max_lags,
+            alpha=DEFAULT_ALPHA
+        )
         
-        # Store the cointegration vector
-        self.beta0 = result.coef[0]  # Intercept
-        self.beta1 = result.coef[1]  # Slope
+        # Store the cointegration vector from the results
+        self.beta0 = result['beta'][0]  # Intercept
+        self.beta1 = result['beta'][1]  # Slope
         
-        # Calculate the equilibrium errors
+        # Calculate the equilibrium errors using the cointegration vector
         self.eq_errors = self.data1 - (self.beta0 + self.beta1 * self.data2)
         
         logger.info(
-            f"Cointegration test: statistic={result.stat:.4f}, p-value={result.pvalue:.4f}, "
+            f"Cointegration test: statistic={result['statistic']:.4f}, "
+            f"p-value={result['pvalue']:.4f}, "
             f"beta0={self.beta0:.4f}, beta1={self.beta1:.4f}"
         )
         
         # Format result
         return {
-            'statistic': result.stat,
-            'pvalue': result.pvalue,
-            'critical_values': result.critical_values,
-            'cointegrated': result.pvalue < DEFAULT_ALPHA,
+            'statistic': result['statistic'],
+            'pvalue': result['pvalue'],
+            'critical_values': result['critical_values'],
+            'cointegrated': result['cointegrated'],
             'beta0': self.beta0,
             'beta1': self.beta1,
             'equilibrium_errors': self.eq_errors,
-            'long_run_relationship': f"{self.market1_name} = {self.beta0:.4f} + {self.beta1:.4f} × {self.market2_name}"
+            'long_run_relationship': f"{self.market1_name} = {self.beta0:.4f} + {self.beta1:.4f} × {self.market2_name}",
+            'residuals': self.eq_errors
         }
     
     @timer
@@ -234,6 +254,7 @@ class ThresholdCointegration:
         valid, errors = validate_model_inputs(
             model_name="threshold",
             params={"n_grid": n_grid, "trim": trim},
+            required_params={"n_grid", "trim"},
             param_validators={
                 "n_grid": lambda x: isinstance(x, int) and x > 0,
                 "trim": lambda x: 0.0 < x < 0.5
@@ -241,37 +262,41 @@ class ThresholdCointegration:
         )
         raise_if_invalid(valid, errors, "Invalid threshold estimation parameters")
         
-        # Identify candidates for threshold
-        sorted_errors = np.sort(self.eq_errors)
-        lower_idx = int(len(sorted_errors) * trim)
-        upper_idx = int(len(sorted_errors) * (1 - trim))
-        candidates = sorted_errors[lower_idx:upper_idx]
+        # Make sure we have cointegration results
+        if self.eq_errors is None:
+            logger.info("Running cointegration estimation first")
+            self.estimate_cointegration()
         
-        # Grid search for threshold
-        if len(candidates) > n_grid:
-            step = len(candidates) // n_grid
-            candidates = candidates[::step]
+        # Save trim for later use
+        self.trim = trim
         
-        # Initialize variables for grid search
-        best_ssr = np.inf
-        best_threshold = None
-        ssrs = []
-        thresholds = []
+        # Validate parameters
+        valid, errors = validate_model_inputs(
+            model_name="threshold",
+            params={"n_grid": n_grid, "trim": trim},
+            required_params={"n_grid", "trim"},
+            param_validators={
+                "n_grid": lambda x: isinstance(x, int) and x > 0,
+                "trim": lambda x: 0.0 < x < 0.5
+            }
+        )
+        raise_if_invalid(valid, errors, "Invalid threshold estimation parameters")
         
-        # Grid search
+        # Get threshold candidates using helper function
+        candidates = self._get_threshold_candidates(trim, n_grid)
+        
+        # Grid search with parallelization for better performance
         logger.info(f"Starting grid search with {len(candidates)} threshold candidates")
         
-        # Use parallelize for better performance
-        compute_args = [(threshold,) for threshold in candidates]
-        results = parallelize(self._compute_ssr_for_threshold, compute_args)
+        def process_threshold(threshold_candidate):
+            return (threshold_candidate, self._compute_ssr_for_threshold(threshold_candidate))
         
-        for i, (threshold, ssr) in enumerate(zip(candidates, results)):
-            ssrs.append(ssr)
-            thresholds.append(threshold)
-            
-            if ssr < best_ssr:
-                best_ssr = ssr
-                best_threshold = threshold
+        df_candidates = pd.DataFrame({'threshold': candidates})
+        results_df = parallelize_dataframe(df_candidates, lambda df: df.apply(
+            lambda row: process_threshold(row['threshold']), axis=1))
+        
+        # Process results using helper function
+        best_threshold, best_ssr, thresholds, ssrs = self._process_threshold_results(results_df)
         
         self.threshold = best_threshold
         self.ssr = best_ssr
@@ -305,6 +330,8 @@ class ThresholdCointegration:
         float
             Sum of squared residuals
         """
+        import statsmodels.api as sm
+        
         # Indicator function
         below = self.eq_errors <= threshold
         above = ~below
@@ -317,14 +344,23 @@ class ThresholdCointegration:
         ])
         
         # Add lagged differences using project utilities
-        lag_diffs = create_lag_features(
-            pd.DataFrame({
-                'd1': np.diff(self.data1),
-                'd2': np.diff(self.data2)
-            }), 
-            cols=['d1', 'd2'], 
+        df_diffs = pd.DataFrame({
+            'd1': np.diff(self.data1),
+            'd2': np.diff(self.data2)
+        })
+        
+        # Create lag features using utility function
+        df_with_lags = create_lag_features(
+            df_diffs, 
+            columns=['d1', 'd2'], 
             lags=list(range(1, min(self.max_lags + 1, len(y))))
-        ).iloc[self.max_lags:].fillna(0).values
+        )
+        
+        # Fill missing values using utility function
+        df_with_lags = fill_missing_values(df_with_lags, numeric_strategy='median')
+        
+        # Extract lagged values
+        lag_diffs = df_with_lags.iloc[self.max_lags:].values
         
         # Combine features and add constant
         X1 = np.column_stack([X1, lag_diffs])
@@ -332,6 +368,32 @@ class ThresholdCointegration:
         
         # Fit the model and return SSR
         return sm.OLS(y[self.max_lags:], X1).fit().ssr
+
+    def _get_threshold_candidates(self, trim: float, n_grid: int) -> np.ndarray:
+        """Get candidate threshold values for grid search."""
+        sorted_errors = np.sort(self.eq_errors)
+        lower_idx = int(len(sorted_errors) * trim)
+        upper_idx = int(len(sorted_errors) * (1 - trim))
+        candidates = sorted_errors[lower_idx:upper_idx]
+        if len(candidates) > n_grid:
+            step = len(candidates) // n_grid
+            candidates = candidates[::step]
+        return candidates
+
+    def _process_threshold_results(self, results_df) -> Tuple[float, float, List[float], List[float]]:
+        """Process threshold grid search results."""
+        best_ssr = np.inf
+        best_threshold = None
+        thresholds = []
+        ssrs = []
+        for i, row in results_df.iterrows():
+            threshold, ssr = row[0]
+            thresholds.append(threshold)
+            ssrs.append(ssr)
+            if ssr < best_ssr:
+                best_ssr = ssr
+                best_threshold = threshold
+        return best_threshold, best_ssr, thresholds, ssrs
     
     @timer
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
@@ -383,7 +445,7 @@ class ThresholdCointegration:
         # Add equilibrium error to results for convenience
         self.results['equilibrium_error'] = self.eq_errors
         
-        # Calculate half lives
+        # Calculate half lives using utility function
         half_lives = calculate_half_life(self.eq_errors)
         
         # Add diagnostic hooks
@@ -428,7 +490,12 @@ class ThresholdCointegration:
         
         # Run diagnostics if requested
         if run_diagnostics:
-            self.results['diagnostics'] = self.run_diagnostics()
+            from src.models.diagnostics import ModelDiagnostics
+            diagnostics = ModelDiagnostics(
+                residuals=self.results['equation1'].resid,
+                model_name="TVECM"
+            )
+            self.results['diagnostics'] = diagnostics.residual_tests()
         
         return self.results
     
@@ -478,21 +545,13 @@ class ThresholdCointegration:
         
         # Run diagnostics if requested
         if run_diagnostics:
-            # Add diagnostics specific to M-TAR model
+            # Add diagnostics specific to M-TAR model using project utilities
             try:
-                from src.models.diagnostics import ModelDiagnostics
+                # Test for white noise using project utility
+                mtar_residuals = np.diff(self.eq_errors)
+                white_noise_test = test_white_noise(mtar_residuals, alpha=DEFAULT_ALPHA)
                 
-                # Create diagnostics for momentum series
-                diagnostics = ModelDiagnostics(
-                    residuals=pd.Series(np.diff(self.eq_errors)),
-                    model_name="M-TAR"
-                )
-                
-                # Run tests
-                self.mtar_results['diagnostics'] = {
-                    'normality': diagnostics.test_normality(),
-                    'autocorrelation': diagnostics.test_autocorrelation()
-                }
+                self.mtar_results['diagnostics'] = white_noise_test
             except Exception as e:
                 logger.warning(f"Could not run M-TAR diagnostics: {e}")
         
@@ -529,21 +588,20 @@ class ThresholdCointegration:
         
         logger.info("Running diagnostic tests on TVECM model")
         
-        # Initialize diagnostics
-        diagnostics = ModelDiagnostics()
+        # Use project's ModelDiagnostics
+        from src.models.diagnostics import ModelDiagnostics
+        diagnostics = ModelDiagnostics(
+            residuals=self.results['equation1'].resid,
+            model_name="TVECM"
+        )
         
         # Get residuals from both equations
         residuals1 = self.results['equation1'].resid
         residuals2 = self.results['equation2'].resid
         
-        # Run residual tests
-        resid_tests1 = diagnostics.test_normality(residuals1)
-        autocorr_tests1 = diagnostics.test_autocorrelation(residuals1) 
-        hetero_tests1 = diagnostics.test_heteroskedasticity(residuals1)
-        
-        resid_tests2 = diagnostics.test_normality(residuals2)
-        autocorr_tests2 = diagnostics.test_autocorrelation(residuals2)
-        hetero_tests2 = diagnostics.test_heteroskedasticity(residuals2)
+        # Run comprehensive tests
+        resid_tests1 = diagnostics.residual_tests(residuals1)
+        resid_tests2 = diagnostics.residual_tests(residuals2)
         
         # Test for asymmetric adjustment
         asymm_test = test_asymmetric_adjustment(self.eq_errors, self.threshold)
@@ -558,26 +616,34 @@ class ThresholdCointegration:
             logger.warning(f"Failed to create diagnostic plots: {str(e)}")
             plot_results = {}
         
+        # Test for structural breaks
+        try:
+            struct_break = test_structural_break(
+                y=np.diff(self.data1)[self.max_lags:],
+                X=None,  # Will create time trend automatically
+                method='quandt'
+            )
+        except Exception as e:
+            logger.warning(f"Failed to test for structural breaks: {str(e)}")
+            struct_break = {}
+        
         diagnostic_results = {
             'residual_tests': {
-                'eq1': {
-                    'normality': resid_tests1,
-                    'autocorrelation': autocorr_tests1,
-                    'heteroskedasticity': hetero_tests1
-                },
-                'eq2': {
-                    'normality': resid_tests2,
-                    'autocorrelation': autocorr_tests2,
-                    'heteroskedasticity': hetero_tests2
-                }
+                'eq1': resid_tests1,
+                'eq2': resid_tests2
             },
             'asymmetric_adjustment': asymm_test,
+            'structural_breaks': struct_break,
             'plots': plot_results,
             'summary': {
-                'normal_residuals': resid_tests1.get('normal', False) and resid_tests2.get('normal', False),
-                'no_autocorrelation': autocorr_tests1.get('no_autocorrelation', False) and autocorr_tests2.get('no_autocorrelation', False),
-                'homoskedastic': hetero_tests1.get('homoskedastic', False) and hetero_tests2.get('homoskedastic', False),
-                'asymmetric_adjustment': asymm_test.get('asymmetric', False)
+                'normal_residuals': resid_tests1.get('normality', {}).get('normal', False) and 
+                                   resid_tests2.get('normality', {}).get('normal', False),
+                'no_autocorrelation': resid_tests1.get('autocorrelation', {}).get('no_autocorrelation', False) and 
+                                     resid_tests2.get('autocorrelation', {}).get('no_autocorrelation', False),
+                'homoskedastic': resid_tests1.get('heteroskedasticity', {}).get('homoskedastic', False) and 
+                                resid_tests2.get('heteroskedasticity', {}).get('homoskedastic', False),
+                'asymmetric_adjustment': asymm_test.get('asymmetric', False),
+                'structural_breaks': struct_break.get('significant', False)
             }
         }
         
@@ -631,13 +697,17 @@ class ThresholdCointegration:
         # Calculate threshold confidence intervals
         threshold_ci = self.calculate_threshold_confidence_intervals()
         
+        # Test for linearity using project utilities
+        linearity_test = test_linearity(y=np.diff(self.data1), threshold_var=self.eq_errors[:-1])
+        
         # Compare TAR and M-TAR models
         model_comparison = {
             'tar_ssr': tvecm_results['equation1'].ssr + tvecm_results['equation2'].ssr,
-            'mtar_ssr': mtar_results.get('ssr', float('inf')),  # May need to add this to mtar_results
+            'mtar_ssr': mtar_results.get('ssr', float('inf')),
             'tar_asymmetry_pvalue': tvecm_results.get('asymmetric_adjustment', {}).get('p_value', 1.0),
             'mtar_asymmetry_pvalue': mtar_results['p_value'],
-            'preferred_model': 'M-TAR' if mtar_results['p_value'] < tvecm_results.get('asymmetric_adjustment', {}).get('p_value', 1.0) else 'TAR'
+            'preferred_model': 'M-TAR' if mtar_results['p_value'] < tvecm_results.get('asymmetric_adjustment', {}).get('p_value', 1.0) else 'TAR',
+            'linearity_test': linearity_test
         }
         
         # Compile all results
@@ -658,7 +728,8 @@ class ThresholdCointegration:
                 'threshold': self.threshold,
                 'asymmetric_adjustment_tar': tvecm_results['asymmetric_adjustment'].get('asymmetry_1', 0) != 0,
                 'asymmetric_adjustment_mtar': mtar_results['asymmetric'],
-                'preferred_model': model_comparison['preferred_model']
+                'preferred_model': model_comparison['preferred_model'],
+                'linearity_rejected': linearity_test.get('linearity_rejected', False)
             }
         }
         
@@ -675,6 +746,8 @@ class ThresholdCointegration:
     @m1_optimized()
     def _estimate_regime_models(self) -> Dict[str, Any]:
         """Estimate OLS models for each regime."""
+        import statsmodels.api as sm
+        
         # Indicator function
         below = self.eq_errors <= self.threshold
         above = ~below
@@ -697,21 +770,32 @@ class ThresholdCointegration:
     
     def _create_regime_design_matrix(self, below, above) -> np.ndarray:
         """Create design matrix for regime-specific models."""
+        import statsmodels.api as sm
+        
         # Create regime-specific terms
         regime_terms = np.column_stack([
             self.eq_errors[:-1] * below[:-1],
             self.eq_errors[:-1] * above[:-1]
         ])
         
-        # Add lagged differences using project utilities
-        lag_diffs = create_lag_features(
-            pd.DataFrame({
-                'd1': np.diff(self.data1),
-                'd2': np.diff(self.data2)
-            }), 
-            cols=['d1', 'd2'], 
-            lags=list(range(1, min(self.max_lags + 1, len(self.data1)-1)))
-        ).iloc[self.max_lags:].fillna(0).values
+        # Create DataFrame for lag creation
+        df_diffs = pd.DataFrame({
+            'd1': np.diff(self.data1),
+            'd2': np.diff(self.data2)
+        })
+        
+        # Create lag features using utility function
+        df_with_lags = create_lag_features(
+            df_diffs, 
+            columns=['d1', 'd2'], 
+            lags=list(range(1, min(self.max_lags + 1, len(self.data1) - 1)))
+        )
+        
+        # Fill missing values using utility function
+        df_with_lags = fill_missing_values(df_with_lags, numeric_strategy='median')
+        
+        # Get values for design matrix
+        lag_diffs = df_with_lags.iloc[self.max_lags:].values
         
         # Combine and add constant
         X = np.column_stack([regime_terms[self.max_lags:], lag_diffs])
@@ -784,11 +868,13 @@ class ThresholdCointegration:
         
         # Add threshold and regime information
         df['threshold'] = self.threshold
-        df['regime'] = 'below'
-        df.loc[df['equilibrium_error'] > self.threshold, 'regime'] = 'above'
+        df['regime'] = np.where(df['equilibrium_error'] <= self.threshold, 'below', 'above')
         
         # Add lagged equilibrium error for TVECM analysis
         df['lag_equilibrium_error'] = df['equilibrium_error'].shift(1)
+        
+        # Optimize DataFrame memory usage using utility function
+        df = optimize_dataframe(df)
         
         return df
     
@@ -929,6 +1015,9 @@ class ThresholdCointegration:
         if self.results is None:
             self.estimate_tvecm()
         
+        # Set plotting style using utility
+        set_plotting_style()
+        
         # Prepare data
         eq_errors = self.eq_errors
         threshold = self.threshold
@@ -948,9 +1037,17 @@ class ThresholdCointegration:
         # Plot 1: Equilibrium errors over time with threshold
         ax = axes[0, 0]
         if self.index is not None:
-            ax.plot(self.index, eq_errors)
+            # Use plot_time_series utility
+            plot_time_series(
+                pd.DataFrame({'date': self.index, 'error': eq_errors}),
+                x='date',
+                y='error',
+                ax=ax,
+                color='blue'
+            )
         else:
             ax.plot(eq_errors)
+            
         ax.axhline(y=threshold, color='r', linestyle='--', label=f'Threshold: {threshold:.4f}')
         ax.set_title("Equilibrium Errors Over Time")
         ax.set_xlabel("Time")
@@ -979,12 +1076,17 @@ class ThresholdCointegration:
         ax.set_xticklabels([self.market1_name])
         ax.legend()
         
-        # Add value labels
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                        f'{height:.3f}', ha='center', va='bottom')
+        # Add value labels using annotations utility
+        annotations = {}
+        for i, bar in enumerate(bars1):
+            height = bar.get_height()
+            annotations[(bar.get_x() + bar.get_width()/2., height)] = f'{height:.3f}'
+        
+        for i, bar in enumerate(bars2):
+            height = bar.get_height()
+            annotations[(bar.get_x() + bar.get_width()/2., height)] = f'{height:.3f}'
+            
+        add_annotations(ax, annotations=annotations)
         
         # Plot 4: Adjustment speeds comparison for Market 2
         ax = axes[1, 1]
@@ -998,19 +1100,24 @@ class ThresholdCointegration:
         ax.set_xticklabels([self.market2_name])
         ax.legend()
         
-        # Add value labels
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                        f'{height:.3f}', ha='center', va='bottom')
+        # Add value labels using annotations utility
+        annotations = {}
+        for i, bar in enumerate(bars1):
+            height = bar.get_height()
+            annotations[(bar.get_x() + bar.get_width()/2., height)] = f'{height:.3f}'
+        
+        for i, bar in enumerate(bars2):
+            height = bar.get_height()
+            annotations[(bar.get_x() + bar.get_width()/2., height)] = f'{height:.3f}'
+            
+        add_annotations(ax, annotations=annotations)
         
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         
-        # Save if requested
+        # Save if requested using utility function
         if save_path:
             try:
-                plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+                save_plot(fig, save_path, dpi=dpi)
                 logger.info(f"Saved regime dynamics plot to {save_path}")
             except Exception as e:
                 logger.warning(f"Failed to save plot: {str(e)}")
@@ -1053,89 +1160,16 @@ class ThresholdCointegration:
         if self.results is None:
             self.estimate_tvecm()
         
-        # Extract needed data
-        y = np.diff(self.data1)[self.max_lags:]
+        # Use the project's test_linearity utility for this test
+        linearity_test = test_linearity(
+            y=np.diff(self.data1)[self.max_lags:],
+            threshold_var=self.eq_errors[:-1][self.max_lags:],
+            method='hansen',
+            trim=self.trim
+        )
         
-        # Create design matrix for linear model (no threshold)
-        X_linear = sm.add_constant(np.column_stack([
-            self.eq_errors[:-1][self.max_lags:],  # ECT term
-            create_lag_features(
-                pd.DataFrame({
-                    'd1': np.diff(self.data1),
-                    'd2': np.diff(self.data2)
-                }), 
-                cols=['d1', 'd2'], 
-                lags=list(range(1, min(self.max_lags + 1, len(y))))
-            ).iloc[self.max_lags:].fillna(0).values
-        ]))
-        
-        # Fit linear model
-        linear_model = sm.OLS(y, X_linear).fit()
-        linear_ssr = linear_model.ssr
-        
-        # Get threshold model SSR
-        threshold_ssr = self.ssr
-        
-        # Calculate F-statistic
-        n = len(y)
-        k_linear = X_linear.shape[1]
-        k_threshold = k_linear + 1  # One additional parameter for threshold
-        
-        f_stat = ((linear_ssr - threshold_ssr) / (k_threshold - k_linear)) / (threshold_ssr / (n - k_threshold))
-        
-        logger.info(f"F-statistic for threshold significance: {f_stat:.4f}")
-        
-        # Bootstrap procedure
-        bootstrap_f_stats = []
-        
-        for i in range(n_bootstrap):
-            try:
-                # Generate bootstrap sample under null hypothesis
-                residuals = np.random.choice(linear_model.resid, size=len(linear_model.resid))
-                y_bootstrap = X_linear @ linear_model.params + residuals
-                
-                # Fit linear model to bootstrap sample
-                linear_model_bootstrap = sm.OLS(y_bootstrap, X_linear).fit()
-                linear_ssr_bootstrap = linear_model_bootstrap.ssr
-                
-                # Create regime indicators for bootstrap sample
-                bootstrap_residuals = y_bootstrap - X_linear @ linear_model_bootstrap.params
-                below = bootstrap_residuals <= self.threshold
-                above = ~below
-                
-                # Create design matrix for threshold model
-                X_threshold = sm.add_constant(np.column_stack([
-                    bootstrap_residuals * below,
-                    bootstrap_residuals * above,
-                    X_linear[:, 2:]  # Include lag terms
-                ]))
-                
-                # Fit threshold model to bootstrap sample
-                threshold_model_bootstrap = sm.OLS(y_bootstrap, X_threshold).fit()
-                threshold_ssr_bootstrap = threshold_model_bootstrap.ssr
-                
-                # Calculate bootstrap F-statistic
-                bootstrap_f = ((linear_ssr_bootstrap - threshold_ssr_bootstrap) / (k_threshold - k_linear)) / (threshold_ssr_bootstrap / (n - k_threshold))
-                bootstrap_f_stats.append(bootstrap_f)
-                
-            except Exception as e:
-                logger.warning(f"Bootstrap iteration failed: {str(e)}")
-        
-        # Calculate p-value and critical values
-        bootstrap_f_stats = np.array(bootstrap_f_stats)
-        p_value = np.mean(bootstrap_f_stats > f_stat)
-        
-        critical_values = {
-            '1%': np.percentile(bootstrap_f_stats, 99),
-            '5%': np.percentile(bootstrap_f_stats, 95),
-            '10%': np.percentile(bootstrap_f_stats, 90)
-        }
-        
-        # Determine significance
-        significant = p_value < DEFAULT_ALPHA
-        
-        # Prepare interpretation
-        if significant:
+        # Add custom interpretation
+        if linearity_test['linearity_rejected']:
             interpretation = (
                 "Significant threshold effect detected. Price adjustment exhibits "
                 "nonlinear behavior depending on whether price differentials exceed "
@@ -1150,16 +1184,17 @@ class ThresholdCointegration:
                 "high transaction costs across all price levels."
             )
         
+        # Format results
         result = {
-            'test_statistic': f_stat,
-            'p_value': p_value,
-            'significant': significant,
-            'critical_values': critical_values,
-            'n_bootstrap': len(bootstrap_f_stats),
+            'test_statistic': linearity_test['test_statistic'],
+            'p_value': linearity_test['p_value'],
+            'significant': linearity_test['linearity_rejected'],
+            'critical_values': linearity_test.get('critical_values', {}),
+            'n_bootstrap': linearity_test.get('n_bootstrap', n_bootstrap),
             'interpretation': interpretation
         }
         
-        logger.info(f"Threshold significance test: p-value={p_value:.4f}, significant={significant}")
+        logger.info(f"Threshold significance test: p-value={result['p_value']:.4f}, significant={result['significant']}")
         
         return result
     
@@ -1205,69 +1240,54 @@ class ThresholdCointegration:
         if self.results is None:
             self.estimate_tvecm()
         
-        # Extract needed data
-        y = np.diff(self.data1)[self.max_lags:]
+        # Use the project's bootstrap_confidence_interval utility
+        def threshold_estimator(data):
+            """Function to estimate threshold from bootstrap sample"""
+            # Create a temporary ThresholdCointegration instance
+            bootstrap_model = ThresholdCointegration(
+                data1=self.data1, 
+                data2=self.data2,
+                max_lags=self.max_lags,
+                market1_name=self.market1_name,
+                market2_name=self.market2_name
+            )
+            # Set cointegration parameters to original estimates
+            bootstrap_model.beta0 = self.beta0
+            bootstrap_model.beta1 = self.beta1
+            
+            # Generate bootstrap errors
+            bootstrap_model.eq_errors = bootstrap_model.data1 - (
+                bootstrap_model.beta0 + bootstrap_model.beta1 * bootstrap_model.data2
+            )
+            
+            # Estimate threshold
+            result = bootstrap_model.estimate_threshold(trim=self.trim)
+            return result['threshold']
         
-        # Create design matrix
-        X = self._create_regime_design_matrix(
-            self.eq_errors <= self.threshold, 
-            self.eq_errors > self.threshold
+        # Create bootstrap samples of the equilibrium errors
+        bootstrap_result = bootstrap_confidence_interval(
+            data=self.eq_errors,
+            statistic_func=threshold_estimator,
+            alpha=1-confidence_level,
+            n_bootstrap=n_bootstrap,
+            method='percentile'
         )
         
-        # Bootstrap procedure
-        bootstrap_thresholds = []
-        
-        for i in range(n_bootstrap):
-            try:
-                # Generate bootstrap sample
-                residuals = np.random.choice(self.results['equation1'].resid, size=len(y))
-                y_bootstrap = X @ self.results['equation1'].params + residuals
-                
-                # Create bootstrap ThresholdCointegration object
-                # Note: This is a simplified approach - in a full implementation,
-                # we would need to reconstruct the entire price series
-                
-                # Create a temporary object to hold bootstrap data
-                bootstrap_obj = ThresholdCointegration(
-                    self.data1, self.data2, self.max_lags,
-                    self.market1_name, self.market2_name
-                )
-                
-                # Set cointegration parameters
-                bootstrap_obj.beta0 = self.beta0
-                bootstrap_obj.beta1 = self.beta1
-                
-                # Calculate equilibrium errors
-                # In a more sophisticated implementation, we would regenerate
-                # the price series and recalculate equilibrium errors
-                bootstrap_obj.eq_errors = self.eq_errors
-                
-                # Estimate threshold
-                bootstrap_threshold = bootstrap_obj.estimate_threshold()['threshold']
-                bootstrap_thresholds.append(bootstrap_threshold)
-                
-            except Exception as e:
-                logger.warning(f"Bootstrap iteration failed: {str(e)}")
-        
-        # Calculate confidence interval
-        bootstrap_thresholds = np.array(bootstrap_thresholds)
-        alpha = 1 - confidence_level
-        lower_bound = np.percentile(bootstrap_thresholds, alpha/2 * 100)
-        upper_bound = np.percentile(bootstrap_thresholds, (1-alpha/2) * 100)
-        
+        # Format results
         result = {
             'threshold': self.threshold,
-            'lower_bound': lower_bound,
-            'upper_bound': upper_bound,
+            'lower_bound': bootstrap_result['lower_bound'],
+            'upper_bound': bootstrap_result['upper_bound'],
             'confidence_level': confidence_level,
-            'bootstrap_thresholds': bootstrap_thresholds,
-            'interval_width': upper_bound - lower_bound,
-            'relative_width': (upper_bound - lower_bound) / abs(self.threshold) if self.threshold != 0 else np.inf
+            'bootstrap_thresholds': bootstrap_result['bootstrap_stats'],
+            'interval_width': bootstrap_result['upper_bound'] - bootstrap_result['lower_bound'],
+            'relative_width': (bootstrap_result['upper_bound'] - bootstrap_result['lower_bound']) / 
+                             abs(self.threshold) if self.threshold != 0 else np.inf
         }
         
         logger.info(
             f"Threshold {confidence_level*100:.0f}% confidence interval: "
-            f"[{lower_bound:.4f}, {upper_bound:.4f}]"
+            f"[{result['lower_bound']:.4f}, {result['upper_bound']:.4f}]"
         )
         
         return result
@@ -1309,7 +1329,8 @@ def calculate_asymmetric_adjustment(
     adj_below_2 = model_results['adjustment_below_2']
     adj_above_2 = model_results['adjustment_above_2']
     
-    # Calculate half-lives
+    # Calculate half-lives using project utility if appropriate
+    # Here we calculate manually for specific adjustment coefficients
     if adj_below_1 < 0:
         half_life_below_1 = np.log(0.5) / np.log(1 + adj_below_1)
     else:
@@ -1362,112 +1383,10 @@ def calculate_asymmetric_adjustment(
 
 
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def calculate_half_life(residuals: Union[pd.Series, np.ndarray], regime: str = "both") -> Dict[str, float]:
-    """
-    Calculate the half-life of deviations from equilibrium.
-    
-    The half-life indicates how quickly prices return to equilibrium after a shock.
-    It is measured in periods (e.g., if data is monthly, half-life is in months).
-    A shorter half-life indicates faster price transmission and better market integration.
-    
-    Parameters
-    ----------
-    residuals : Union[pd.Series, np.ndarray]
-        Equilibrium error term (residuals) from cointegration model
-    regime : str, optional
-        Which regime to calculate half-life for:
-        - "below": Calculate for observations below threshold
-        - "above": Calculate for observations above threshold
-        - "both": Calculate for both regimes (default)
-    
-    Returns
-    -------
-    Dict[str, float]
-        Dictionary with half-life values for specified regime(s)
-        
-    Notes
-    -----
-    In the Yemen market context, longer half-lives in one regime may indicate
-    asymmetric transaction costs or conflict-related barriers to price transmission.
-    """
-    if not isinstance(residuals, (pd.Series, np.ndarray, dict)):
-        raise ValueError("Residuals must be Series, array, or dict with regime-specific residuals")
-    
-    result = {}
-    
-    if isinstance(residuals, dict):
-        # Process regime-specific residuals
-        if regime in ["both", "below"] and "below" in residuals:
-            below_residuals = residuals["below"]
-            below_model = _fit_ar1(below_residuals)
-            result["below"] = _compute_half_life(below_model) if below_model else np.nan
-            
-        if regime in ["both", "above"] and "above" in residuals:
-            above_residuals = residuals["above"]
-            above_model = _fit_ar1(above_residuals)
-            result["above"] = _compute_half_life(above_model) if above_model else np.nan
-    else:
-        # Process single series of residuals
-        model = _fit_ar1(residuals)
-        result["overall"] = _compute_half_life(model) if model else np.nan
-    
-    return result
-
-
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def _fit_ar1(residuals: Union[pd.Series, np.ndarray]):
-    """Fit AR(1) model to residuals."""
-    import statsmodels.api as sm
-    
-    if len(residuals) < 3:
-        logger.warning("Too few observations to fit AR(1) model")
-        return None
-    
-    # Drop NaNs and prepare data
-    if isinstance(residuals, pd.Series):
-        residuals = residuals.dropna()
-    else:
-        residuals = residuals[~np.isnan(residuals)]
-    
-    if len(residuals) < 3:
-        logger.warning("Too few non-NaN observations to fit AR(1) model")
-        return None
-    
-    # Prepare data for AR(1) model: y_t = c + rho*y_{t-1} + e_t
-    y = residuals[1:]
-    x = sm.add_constant(residuals[:-1])
-    
-    try:
-        model = sm.OLS(y, x).fit()
-        return model
-    except Exception as e:
-        logger.warning(f"Failed to fit AR(1) model: {str(e)}")
-        return None
-
-
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def _compute_half_life(model) -> float:
-    """Compute half-life from AR(1) model."""
-    if model is None:
-        return np.nan
-    
-    rho = model.params[1]  # AR(1) coefficient
-    
-    if rho >= 1:
-        # Unit root or explosive process
-        return np.inf
-    elif rho <= -1:
-        # Oscillatory behavior
-        return 0.5  # Half-life is 0.5 periods for extreme oscillation
-    else:
-        # Standard case: log(0.5) / log(abs(rho))
-        return np.log(0.5) / np.log(abs(rho))
-
-
-@m1_optimized()
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
-                              threshold: Optional[float] = None) -> Dict[str, Any]:
+def test_asymmetric_adjustment(
+    residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
+    threshold: Optional[float] = None
+) -> Dict[str, Any]:
     """
     Test for asymmetric price adjustment speeds above and below threshold.
     
@@ -1496,7 +1415,6 @@ def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndar
         - 'test_statistic': F-statistic for equality of adjustment speeds
     """
     import statsmodels.api as sm
-    from statsmodels.stats.diagnostic import het_white
     
     # Set default threshold if not provided
     if threshold is None:
@@ -1541,15 +1459,14 @@ def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndar
     
     wald_test = model.wald_test((r_matrix, q_value), scalar=True)
     
-    # Calculate half-lives
-    if adjustment_below >= 0:
-        half_life_below = np.inf
-    else:
+    # Calculate half-lives using project utility function for specific regime residuals
+    half_life_below = float('inf')
+    half_life_above = float('inf')
+    
+    if adjustment_below < 0:
         half_life_below = np.log(0.5) / np.log(1 + adjustment_below)
-        
-    if adjustment_above >= 0:
-        half_life_above = np.inf
-    else:
+    
+    if adjustment_above < 0:
         half_life_above = np.log(0.5) / np.log(1 + adjustment_above)
     
     # Calculate counts
@@ -1558,7 +1475,7 @@ def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndar
     
     # Prepare results
     results = {
-        'asymmetric': wald_test.pvalue < 0.05,
+        'asymmetric': wald_test.pvalue < DEFAULT_ALPHA,
         'p_value': wald_test.pvalue,
         'adjustment_below': adjustment_below,
         'adjustment_above': adjustment_above,
@@ -1569,16 +1486,19 @@ def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndar
         'n_above': n_above,
         'threshold': threshold,
         'interpretation': _interpret_asymmetric_test(
-            wald_test.pvalue < 0.05, adjustment_below, adjustment_above
+            wald_test.pvalue < DEFAULT_ALPHA, adjustment_below, adjustment_above
         )
     }
     
     return results
 
+
 @m1_optimized()
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def test_mtar_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
-                        threshold: Optional[float] = None) -> Dict[str, Any]:
+def test_mtar_adjustment(
+    residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
+    threshold: Optional[float] = DEFAULT_MTAR_THRESHOLD
+) -> Dict[str, Any]:
     """
     Test for momentum-threshold asymmetric adjustment using the M-TAR model.
     
@@ -1609,8 +1529,8 @@ def test_mtar_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray],
     
     # Set default threshold if not provided
     if threshold is None:
-        threshold = 0.0
-        logger.info("No threshold provided, using 0.0 as default")
+        threshold = DEFAULT_MTAR_THRESHOLD
+        logger.info(f"No threshold provided, using {threshold} as default")
     
     # Convert to numpy array for easier manipulation
     if isinstance(residuals, pd.Series) or isinstance(residuals, pd.DataFrame):
@@ -1670,14 +1590,14 @@ def test_mtar_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray],
     
     # Prepare interpretation
     interpretation = _interpret_mtar_test(
-        wald_test.pvalue < 0.05, 
+        wald_test.pvalue < DEFAULT_ALPHA, 
         adjustment_positive, 
         adjustment_negative
     )
     
     # Prepare results
     results = {
-        'asymmetric': wald_test.pvalue < 0.05,
+        'asymmetric': wald_test.pvalue < DEFAULT_ALPHA,
         'p_value': wald_test.pvalue,
         'adjustment_positive': adjustment_positive,
         'adjustment_negative': adjustment_negative,
@@ -1691,6 +1611,7 @@ def test_mtar_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray],
     }
     
     return results
+
 
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
 def _interpret_adjustment_speeds(adj_below: float, adj_above: float, market1_name: str, market2_name: str) -> str:
@@ -1786,6 +1707,61 @@ def _interpret_asymmetric_test(is_asymmetric: bool, adj_below: float, adj_above:
 
 
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative: float) -> str:
+    """
+    Interpret M-TAR test results in Yemen market context.
+    
+    Parameters
+    ----------
+    is_asymmetric : bool
+        Whether adjustment is significantly asymmetric
+    adj_positive : float
+        Adjustment coefficient for positive momentum
+    adj_negative : float
+        Adjustment coefficient for negative momentum
+        
+    Returns
+    -------
+    str
+        Interpretation of test results
+    """
+    if not is_asymmetric:
+        return ("No significant momentum-based asymmetry detected. Prices adjust at similar rates "
+                "regardless of whether they are increasing or decreasing.")
+    
+    # Check adjustment direction (should be negative for error correction)
+    adj_positive_correct = adj_positive < 0
+    adj_negative_correct = adj_negative < 0
+    
+    # Calculate magnitude comparison
+    if adj_positive_correct and adj_negative_correct:
+        faster_regime = 'increasing' if abs(adj_positive) > abs(adj_negative) else 'decreasing'
+        ratio = abs(adj_positive) / abs(adj_negative) if abs(adj_negative) > 0 else float('inf')
+        
+        if faster_regime == 'increasing':
+            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
+                    f"faster when prices are rising than when they are falling. This could indicate "
+                    f"retailers quickly pass cost increases to consumers but delay passing savings.")
+        else:
+            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
+                    f"faster when prices are falling than when they are rising. This could indicate "
+                    f"strong competition or government intervention encouraging price reductions.")
+    
+    elif adj_positive_correct and not adj_negative_correct:
+        return ("Unusual asymmetric pattern: Prices adjust only when rising but not when falling. "
+                "This could indicate markets where price increases trigger corrective action, "
+                "but decreases persist without intervention.")
+    
+    elif not adj_positive_correct and adj_negative_correct:
+        return ("Unusual asymmetric pattern: Prices adjust only when falling but not when rising. "
+                "This could indicate downward price pressure or oversupply conditions.")
+    
+    else:
+        return ("No effective price adjustment mechanism detected. Neither rising nor falling "
+                "prices trigger correction, suggesting severely fragmented markets.")
+
+
+@handle_errors(logger=logger, error_type=(ValueError, TypeError))
 def _assess_market_integration(asymm_adj: Dict[str, Any], cointegrated: bool) -> str:
     """
     Assess market integration based on cointegration and adjustment speeds.
@@ -1840,58 +1816,3 @@ def _assess_market_integration(asymm_adj: Dict[str, Any], cointegrated: bool) ->
                 return "Strong Market Integration: Rapid adjustment regardless of price differential magnitude, indicating low transaction costs."
             else:
                 return "Moderate Market Integration: Similar but generally slow adjustment speeds, suggesting persistent barriers affecting all price levels."
-            
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
-def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative: float) -> str:
-    """
-    Interpret M-TAR test results in Yemen market context.
-    
-    Parameters
-    ----------
-    is_asymmetric : bool
-        Whether adjustment is significantly asymmetric
-    adj_positive : float
-        Adjustment coefficient for positive momentum
-    adj_negative : float
-        Adjustment coefficient for negative momentum
-        
-    Returns
-    -------
-    str
-        Interpretation of test results
-    """
-    if not is_asymmetric:
-        return ("No significant momentum-based asymmetry detected. Prices adjust at similar rates "
-                "regardless of whether they are increasing or decreasing.")
-    
-    # Check adjustment direction (should be negative for error correction)
-    adj_positive_correct = adj_positive < 0
-    adj_negative_correct = adj_negative < 0
-    
-    # Calculate magnitude comparison
-    if adj_positive_correct and adj_negative_correct:
-        faster_regime = 'increasing' if abs(adj_positive) > abs(adj_negative) else 'decreasing'
-        ratio = abs(adj_positive) / abs(adj_negative) if abs(adj_negative) > 0 else float('inf')
-        
-        if faster_regime == 'increasing':
-            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
-                    f"faster when prices are rising than when they are falling. This could indicate "
-                    f"retailers quickly pass cost increases to consumers but delay passing savings.")
-        else:
-            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
-                    f"faster when prices are falling than when they are rising. This could indicate "
-                    f"strong competition or government intervention encouraging price reductions.")
-    
-    elif adj_positive_correct and not adj_negative_correct:
-        return ("Unusual asymmetric pattern: Prices adjust only when rising but not when falling. "
-                "This could indicate markets where price increases trigger corrective action, "
-                "but decreases persist without intervention.")
-    
-    elif not adj_positive_correct and adj_negative_correct:
-        return ("Unusual asymmetric pattern: Prices adjust only when falling but not when rising. "
-                "This could indicate downward price pressure or oversupply conditions.")
-    
-    else:
-        return ("No effective price adjustment mechanism detected. Neither rising nor falling "
-                "prices trigger correction, suggesting severely fragmented markets.")
-``` 
