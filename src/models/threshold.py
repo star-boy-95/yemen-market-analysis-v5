@@ -434,6 +434,79 @@ class ThresholdCointegration:
     
     @timer
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def estimate_mtar(self, run_diagnostics: bool = False) -> Dict[str, Any]:
+        """
+        Estimate the Momentum-Threshold model for asymmetric price adjustment.
+        
+        This method implements the Enders & Siklos approach by focusing on the
+        momentum (change) in equilibrium errors rather than just their levels.
+        
+        Parameters
+        ----------
+        run_diagnostics : bool, optional
+            Whether to run diagnostic tests on the model
+            
+        Returns
+        -------
+        dict
+            M-TAR model estimation results
+            
+        Notes
+        -----
+        In Yemen's fragmented markets, momentum-based thresholds may detect
+        different asymmetries than level-based thresholds, particularly when:
+        - Exchange rate fluctuations cause rapid price changes
+        - Conflict escalations create sudden transaction cost spikes
+        - Political barriers affect the direction of price transmission
+        """
+        # Make sure we have cointegration results
+        if self.eq_errors is None:
+            logger.info("Running cointegration estimation first")
+            self.estimate_cointegration()
+        
+        # Test for M-TAR adjustment
+        mtar_results = test_mtar_adjustment(self.eq_errors, threshold=self.threshold)
+        
+        # Calculate additional metrics
+        mtar_results['eq_errors_momentum'] = np.diff(self.eq_errors)
+        
+        # Add model type for reference
+        mtar_results['model_type'] = 'mtar'
+        
+        # Store results for later use
+        self.mtar_results = mtar_results
+        
+        # Run diagnostics if requested
+        if run_diagnostics:
+            # Add diagnostics specific to M-TAR model
+            try:
+                from src.models.diagnostics import ModelDiagnostics
+                
+                # Create diagnostics for momentum series
+                diagnostics = ModelDiagnostics(
+                    residuals=pd.Series(np.diff(self.eq_errors)),
+                    model_name="M-TAR"
+                )
+                
+                # Run tests
+                self.mtar_results['diagnostics'] = {
+                    'normality': diagnostics.test_normality(),
+                    'autocorrelation': diagnostics.test_autocorrelation()
+                }
+            except Exception as e:
+                logger.warning(f"Could not run M-TAR diagnostics: {e}")
+        
+        logger.info(
+            f"M-TAR estimation complete: asymmetric={mtar_results['asymmetric']}, "
+            f"p-value={mtar_results['p_value']:.4f}, "
+            f"adj_positive={mtar_results['adjustment_positive']:.4f}, "
+            f"adj_negative={mtar_results['adjustment_negative']:.4f}"
+        )
+        
+        return mtar_results
+    
+    @timer
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def run_diagnostics(self) -> Dict[str, Any]:
         """
         Run diagnostic tests on the TVECM model.
@@ -529,6 +602,7 @@ class ThresholdCointegration:
         3. Estimate threshold VECM with regime-specific adjustment speeds
         4. Run comprehensive diagnostics
         5. Calculate asymmetric adjustment metrics
+        6. Run M-TAR analysis and compare with TAR model
         
         Returns
         -------
@@ -537,38 +611,67 @@ class ThresholdCointegration:
         """
         logger.info("Starting complete threshold cointegration analysis")
         
-        # Step 1: Estimate cointegration
-        cointegration_results = self.estimate_cointegration()
+        # Run cointegration test
+        coint_results = self.estimate_cointegration()
         
-        # Step 2: Estimate threshold
+        # Check if series are cointegrated
+        if not coint_results['cointegrated']:
+            logger.warning("Series are not cointegrated, threshold estimation may not be valid")
+        
+        # Estimate threshold and TVECM
         threshold_results = self.estimate_threshold()
-        
-        # Step 3: Estimate TVECM with diagnostics
         tvecm_results = self.estimate_tvecm(run_diagnostics=True)
         
-        # Step 4: Test threshold significance
+        # Run M-TAR analysis
+        mtar_results = self.estimate_mtar(run_diagnostics=True)
+        
+        # Test threshold significance
         threshold_significance = self.test_threshold_significance()
         
-        # Step 5: Calculate threshold confidence intervals
+        # Calculate threshold confidence intervals
         threshold_ci = self.calculate_threshold_confidence_intervals()
         
-        # Combine results
-        full_results = {
-            'cointegration': cointegration_results,
-            'threshold': threshold_results,
-            'tvecm': tvecm_results,
-            'threshold_significance': threshold_significance,
-            'threshold_confidence_intervals': threshold_ci,
-            'market_integration_assessment': _assess_market_integration(
-                tvecm_results['asymmetric_adjustment'],
-                cointegration_results['cointegrated']
-            )
+        # Compare TAR and M-TAR models
+        model_comparison = {
+            'tar_ssr': tvecm_results['equation1'].ssr + tvecm_results['equation2'].ssr,
+            'mtar_ssr': mtar_results.get('ssr', float('inf')),  # May need to add this to mtar_results
+            'tar_asymmetry_pvalue': tvecm_results.get('asymmetric_adjustment', {}).get('p_value', 1.0),
+            'mtar_asymmetry_pvalue': mtar_results['p_value'],
+            'preferred_model': 'M-TAR' if mtar_results['p_value'] < tvecm_results.get('asymmetric_adjustment', {}).get('p_value', 1.0) else 'TAR'
         }
         
-        logger.info("Complete analysis workflow finished")
+        # Compile all results
+        full_results = {
+            'cointegration': coint_results,
+            'threshold': threshold_results,
+            'tvecm': tvecm_results,
+            'mtar': mtar_results,
+            'threshold_significance': threshold_significance,
+            'threshold_confidence_intervals': threshold_ci,
+            'model_comparison': model_comparison,
+            'market_integration_assessment': _assess_market_integration(
+                tvecm_results['asymmetric_adjustment'],
+                coint_results['cointegrated']
+            ),
+            'summary': {
+                'cointegrated': coint_results['cointegrated'],
+                'threshold': self.threshold,
+                'asymmetric_adjustment_tar': tvecm_results['asymmetric_adjustment'].get('asymmetry_1', 0) != 0,
+                'asymmetric_adjustment_mtar': mtar_results['asymmetric'],
+                'preferred_model': model_comparison['preferred_model']
+            }
+        }
+        
+        logger.info(
+            f"Full analysis complete: cointegrated={coint_results['cointegrated']}, "
+            f"threshold={self.threshold:.4f}, "
+            f"asymmetric_tar={tvecm_results['asymmetric_adjustment'].get('asymmetry_1', 0) != 0}, "
+            f"asymmetric_mtar={mtar_results['asymmetric']}, "
+            f"preferred_model={model_comparison['preferred_model']}"
+        )
         
         return full_results
-        
+    
     @m1_optimized()
     def _estimate_regime_models(self) -> Dict[str, Any]:
         """Estimate OLS models for each regime."""
@@ -1472,6 +1575,122 @@ def test_asymmetric_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndar
     
     return results
 
+@m1_optimized()
+@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+def test_mtar_adjustment(residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
+                        threshold: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Test for momentum-threshold asymmetric adjustment using the M-TAR model.
+    
+    The M-TAR model (Enders & Siklos) uses changes in residuals rather than levels
+    to test for asymmetric price transmission based on price momentum.
+    
+    Parameters
+    ----------
+    residuals : Union[pd.DataFrame, pd.Series, np.ndarray]
+        Equilibrium error term (residuals) from cointegration model
+    threshold : float, optional
+        Threshold value separating regimes. If None, uses 0 as threshold.
+    
+    Returns
+    -------
+    Dict[str, Any]
+        Dictionary containing M-TAR test results:
+        - 'asymmetric': bool indicating if adjustment is asymmetric
+        - 'p_value': p-value for asymmetry test
+        - 'adjustment_positive': adjustment speed for positive momentum
+        - 'adjustment_negative': adjustment speed for negative momentum
+        - 'half_life_positive': half-life for positive momentum deviations
+        - 'half_life_negative': half-life for negative momentum deviations
+        - 'test_statistic': F-statistic for equality of adjustment speeds
+        - 'interpretation': Text interpretation of results
+    """
+    import statsmodels.api as sm
+    
+    # Set default threshold if not provided
+    if threshold is None:
+        threshold = 0.0
+        logger.info("No threshold provided, using 0.0 as default")
+    
+    # Convert to numpy array for easier manipulation
+    if isinstance(residuals, pd.Series) or isinstance(residuals, pd.DataFrame):
+        residuals = residuals.values.flatten()
+    
+    # Calculate changes in residuals (momentum)
+    d_residuals = np.diff(residuals)
+    
+    # Prepare data for the model
+    y = np.diff(residuals[1:])  # Second difference for dependent variable
+    X_positive = np.zeros_like(d_residuals[:-1])
+    X_negative = np.zeros_like(d_residuals[:-1])
+    
+    # Split observations by momentum direction
+    positive_mask = d_residuals[:-1] > threshold
+    negative_mask = d_residuals[:-1] <= threshold
+    
+    X_positive[positive_mask] = residuals[1:-1][positive_mask]  # Level of residuals for regime classification
+    X_negative[negative_mask] = residuals[1:-1][negative_mask]
+    
+    # Create design matrix
+    X = np.column_stack([X_positive, X_negative])
+    
+    # Add constant (intercept)
+    X = sm.add_constant(X)
+    
+    # Fit the model
+    model = sm.OLS(y, X).fit()
+    
+    # Extract adjustment speeds
+    adjustment_positive = model.params[1]
+    adjustment_negative = model.params[2]
+    
+    # Test for equality of parameters (H₀: ρ₁ = ρ₂)
+    restriction = np.zeros((1, model.params.shape[0]))
+    restriction[0, 1] = 1
+    restriction[0, 2] = -1
+    r_matrix = restriction
+    q_value = 0
+    
+    wald_test = model.wald_test((r_matrix, q_value), scalar=True)
+    
+    # Calculate half-lives
+    if adjustment_positive >= 0:
+        half_life_positive = np.inf
+    else:
+        half_life_positive = np.log(0.5) / np.log(1 + adjustment_positive)
+        
+    if adjustment_negative >= 0:
+        half_life_negative = np.inf
+    else:
+        half_life_negative = np.log(0.5) / np.log(1 + adjustment_negative)
+    
+    # Calculate counts
+    n_positive = np.sum(positive_mask)
+    n_negative = np.sum(negative_mask)
+    
+    # Prepare interpretation
+    interpretation = _interpret_mtar_test(
+        wald_test.pvalue < 0.05, 
+        adjustment_positive, 
+        adjustment_negative
+    )
+    
+    # Prepare results
+    results = {
+        'asymmetric': wald_test.pvalue < 0.05,
+        'p_value': wald_test.pvalue,
+        'adjustment_positive': adjustment_positive,
+        'adjustment_negative': adjustment_negative,
+        'half_life_positive': half_life_positive,
+        'half_life_negative': half_life_negative,
+        'test_statistic': wald_test.statistic,
+        'n_positive': n_positive,
+        'n_negative': n_negative,
+        'threshold': threshold,
+        'interpretation': interpretation
+    }
+    
+    return results
 
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
 def _interpret_adjustment_speeds(adj_below: float, adj_above: float, market1_name: str, market2_name: str) -> str:
@@ -1621,3 +1840,58 @@ def _assess_market_integration(asymm_adj: Dict[str, Any], cointegrated: bool) ->
                 return "Strong Market Integration: Rapid adjustment regardless of price differential magnitude, indicating low transaction costs."
             else:
                 return "Moderate Market Integration: Similar but generally slow adjustment speeds, suggesting persistent barriers affecting all price levels."
+            
+@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative: float) -> str:
+    """
+    Interpret M-TAR test results in Yemen market context.
+    
+    Parameters
+    ----------
+    is_asymmetric : bool
+        Whether adjustment is significantly asymmetric
+    adj_positive : float
+        Adjustment coefficient for positive momentum
+    adj_negative : float
+        Adjustment coefficient for negative momentum
+        
+    Returns
+    -------
+    str
+        Interpretation of test results
+    """
+    if not is_asymmetric:
+        return ("No significant momentum-based asymmetry detected. Prices adjust at similar rates "
+                "regardless of whether they are increasing or decreasing.")
+    
+    # Check adjustment direction (should be negative for error correction)
+    adj_positive_correct = adj_positive < 0
+    adj_negative_correct = adj_negative < 0
+    
+    # Calculate magnitude comparison
+    if adj_positive_correct and adj_negative_correct:
+        faster_regime = 'increasing' if abs(adj_positive) > abs(adj_negative) else 'decreasing'
+        ratio = abs(adj_positive) / abs(adj_negative) if abs(adj_negative) > 0 else float('inf')
+        
+        if faster_regime == 'increasing':
+            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
+                    f"faster when prices are rising than when they are falling. This could indicate "
+                    f"retailers quickly pass cost increases to consumers but delay passing savings.")
+        else:
+            return (f"Significant momentum-based asymmetry detected. Price adjustment is {ratio:.2f}x "
+                    f"faster when prices are falling than when they are rising. This could indicate "
+                    f"strong competition or government intervention encouraging price reductions.")
+    
+    elif adj_positive_correct and not adj_negative_correct:
+        return ("Unusual asymmetric pattern: Prices adjust only when rising but not when falling. "
+                "This could indicate markets where price increases trigger corrective action, "
+                "but decreases persist without intervention.")
+    
+    elif not adj_positive_correct and adj_negative_correct:
+        return ("Unusual asymmetric pattern: Prices adjust only when falling but not when rising. "
+                "This could indicate downward price pressure or oversupply conditions.")
+    
+    else:
+        return ("No effective price adjustment mechanism detected. Neither rising nor falling "
+                "prices trigger correction, suggesting severely fragmented markets.")
+``` 

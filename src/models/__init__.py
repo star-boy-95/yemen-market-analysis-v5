@@ -25,7 +25,8 @@ from src.models.threshold import (
     ThresholdCointegration,
     calculate_asymmetric_adjustment,
     calculate_half_life,
-    test_asymmetric_adjustment
+    test_asymmetric_adjustment,
+    test_mtar_adjustment
 )
 
 from src.models.threshold_vecm import (
@@ -44,6 +45,11 @@ from src.models.spatial import (
     find_nearest_points,
     simulate_improved_connectivity,
     market_integration_index
+)
+
+# Simulation models
+from src.models.simulation import (
+    MarketIntegrationSimulation
 )
 
 # Define complete public API
@@ -67,6 +73,7 @@ __all__ = [
     'ThresholdCointegration',
     'calculate_asymmetric_adjustment',
     'test_asymmetric_adjustment',
+    'test_mtar_adjustment',
     'ThresholdVECM',
     'calculate_regime_transition_matrix',
     'calculate_half_lives',
@@ -79,5 +86,8 @@ __all__ = [
     'calculate_market_isolation',
     'find_nearest_points',
     'simulate_improved_connectivity',
-    'market_integration_index'
+    'market_integration_index',
+    
+    # Simulation models
+    'MarketIntegrationSimulation'
 ]

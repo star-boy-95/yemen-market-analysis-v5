@@ -9,6 +9,7 @@ This guide explains how to use each model in the Yemen Market Integration projec
 - [Threshold VECM Models](#threshold-vecm-models)
 - [Spatial Econometrics](#spatial-econometrics)
 - [Model Diagnostics](#model-diagnostics)
+- [Market Integration Simulation](#market-integration-simulation)
 - [Configuration Guidelines](#configuration-guidelines)
 
 ## Unit Root Testing
@@ -82,6 +83,7 @@ The `threshold.py` module implements threshold cointegration models for nonlinea
 - `ThresholdCointegration`: Implements two-regime threshold cointegration
 - `calculate_asymmetric_adjustment()`: Quantifies asymmetric price transmission
 - `test_asymmetric_adjustment()`: Tests for asymmetry in price adjustment
+- `test_mtar_adjustment()`: Tests for Momentum-Threshold Autoregressive adjustment (M-TAR)
 
 ### Usage Example:
 ```python
@@ -105,6 +107,12 @@ print(f"Threshold: {threshold_result['threshold']}")
 tvecm_result = model.estimate_tvecm(run_diagnostics=True)
 print(f"Adjustment below threshold: {tvecm_result['adjustment_below_1']}")
 print(f"Adjustment above threshold: {tvecm_result['adjustment_above_1']}")
+
+# Estimate M-TAR model for directional asymmetry
+mtar_result = model.estimate_mtar()
+print(f"M-TAR asymmetric: {mtar_result['asymmetric']}")
+print(f"Rising price adjustment: {mtar_result['adjustment_positive']}")
+print(f"Falling price adjustment: {mtar_result['adjustment_negative']}")
 
 # Plot results
 model.plot_regime_dynamics(save_path="results/threshold_dynamics.png")
@@ -274,6 +282,69 @@ print(f"R-squared: {fit_stats['r_squared']}")
 print(f"RMSE: {fit_stats['rmse']}")
 ```
 
+## Market Integration Simulation
+
+The `simulation.py` module provides tools to simulate policy interventions and assess their impact on market integration.
+
+### Key Classes and Functions:
+- `MarketIntegrationSimulation`: Simulates policy effects on market integration
+- Key methods include exchange rate unification, improved connectivity, and combined policy simulations
+- Advanced analytical methods for asymmetry effects, robustness testing, and sensitivity analysis
+
+### Usage Example:
+```python
+from src.models.simulation import MarketIntegrationSimulation
+
+# Initialize with market data and models
+sim = MarketIntegrationSimulation(
+    data=markets_data,
+    threshold_model=threshold_model,
+    spatial_model=spatial_model
+)
+
+# Simulate exchange rate unification
+er_results = sim.simulate_exchange_rate_unification(
+    target_rate='official'  # Options: 'official', 'market', or specific value
+)
+print(f"Unified exchange rate: {er_results['unified_rate']}")
+
+# Simulate improved connectivity (reduced conflict)
+conn_results = sim.simulate_improved_connectivity(
+    reduction_factor=0.5  # 50% reduction in conflict intensity
+)
+
+# Simulate combined policies
+combined_results = sim.simulate_combined_policy(
+    exchange_rate_target='official',
+    conflict_reduction=0.5
+)
+
+# Calculate welfare effects
+welfare = sim.calculate_welfare_effects('combined_policy')
+print(f"Price convergence: {welfare['price_convergence']['relative_convergence']}%")
+
+# Analyze asymmetric price adjustment effects
+asymm = sim.calculate_policy_asymmetry_effects('combined_policy')
+print(f"Asymmetry interpretation: {asymm['interpretation']}")
+
+# Test robustness of results
+robustness = sim.test_robustness('combined_policy')
+print(f"Structural changes detected: {robustness['break_comparison']['structural_change']}")
+print(f"Diagnostic improvements: {robustness['diagnostic_comparison']['overall']['improvements']}")
+
+# Run sensitivity analysis
+sensitivity = sim.run_sensitivity_analysis(
+    sensitivity_type='conflict_reduction',
+    param_values=[0.1, 0.3, 0.5, 0.7, 0.9]
+)
+print(f"Results highly sensitive: {sensitivity['summary']['overall']['high_sensitivity']}")
+```
+
+### Configurable Parameters:
+- Set `analysis.simulation.exchange_rate_default` for default exchange rate target
+- Set `analysis.simulation.conflict_reduction_default` for default conflict reduction factor
+- Set `analysis.simulation.regime_boundary_penalty` for cross-regime connection penalty
+
 ## Configuration Guidelines
 
 The `settings.yaml` file controls parameters across all models. Here's how to configure it:
@@ -305,6 +376,15 @@ analysis:
     knn: 5           # Number of nearest neighbors
     conflict_weight: 0.5  # Weight of conflict in distance adjustment
     crs: 32638       # Coordinate reference system (UTM Zone 38N for Yemen)
+```
+
+### Simulation Settings
+```yaml
+analysis:
+  simulation:
+    exchange_rate_default: "official"  # Default exchange rate target
+    conflict_reduction_default: 0.5    # Default conflict reduction factor
+    regime_boundary_penalty: 1.5      # Cross-regime connection penalty
 ```
 
 ### Visualization Settings
