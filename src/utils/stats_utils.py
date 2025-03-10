@@ -987,18 +987,23 @@ def compute_rolling_correlation(
     
     return rolling_corr
 
+@timer
 @handle_errors(logger=logger)
 @m1_optimized(use_numba=True)
-def estimate_threshold_tar(
+def estimate_threshold_tar3(
     y: Union[pd.Series, np.ndarray],
     threshold_var: Optional[Union[pd.Series, np.ndarray]] = None,
     lags: int = 1,
-    n_regimes: int = 2,
     threshold_range: Optional[Tuple[float, float]] = None,
-    trim: float = 0.15
+    trim: float = 0.15,
+    n_grid: int = 100
 ) -> Dict[str, Any]:
     """
-    Estimate a Threshold Autoregressive (TAR) model
+    Estimate a three-regime Threshold Autoregressive (TAR) model.
+    
+    This model identifies two threshold values dividing the data into three regimes,
+    each with its own AR dynamics. In Yemen's conflict context, this can represent
+    different market behaviors under varying intensities of barriers.
     
     Parameters
     ----------
@@ -1007,18 +1012,35 @@ def estimate_threshold_tar(
     threshold_var : array_like, optional
         Threshold variable (defaults to lagged y)
     lags : int, optional
-        Number of lags
-    n_regimes : int, optional
-        Number of regimes
+        Number of lags for the AR model in each regime
     threshold_range : tuple, optional
-        Range for threshold search
+        Range for threshold search as (min, max)
     trim : float, optional
-        Trimming percentage
+        Trimming percentage to ensure sufficient observations in each regime
+    n_grid : int, optional
+        Number of grid points for threshold search
         
     Returns
     -------
     dict
-        Model results
+        Model results including:
+        - thresholds: Two optimal threshold values
+        - regimes: Model parameters for each regime
+        - ssr: Sum of squared residuals
+        - adjustment_speeds: Speed of adjustment in each regime
+        - f_statistic: Test for threshold effect
+        - p_value: Significance of threshold effect
+        - n_obs: Number of observations in each regime
+    
+    Notes
+    -----
+    In Yemen's conflict-affected markets, three regimes can represent:
+    1. Low regime: Little to no arbitrage (price diff below transport costs)
+    2. Middle regime: Partial arbitrage (moderate barriers)
+    3. High regime: Active arbitrage (price diff exceeds conflict-related costs)
+    
+    The different adjustment speeds in each regime reveal how conflict intensity
+    affects market integration.
     """
     # Convert to numpy arrays
     if isinstance(y, pd.Series):
@@ -1065,91 +1087,397 @@ def estimate_threshold_tar(
         max_idx = int(len(sorted_thresh) * (1 - trim))
         threshold_range = (sorted_thresh[min_idx], sorted_thresh[max_idx])
     
-    # Grid search for optimal threshold
-    if n_regimes == 2:
-        # Single threshold
-        thresholds = np.linspace(threshold_range[0], threshold_range[1], 100)
-        best_ssr = float('inf')
-        best_threshold = None
-        best_ar_params = None
-        
-        for threshold in thresholds:
-            # Split data based on threshold
-            below_mask = threshold_var_adjusted <= threshold
-            above_mask = ~below_mask
+    # Create grid of potential thresholds
+    thresholds = np.linspace(threshold_range[0], threshold_range[1], n_grid)
+    
+    # Grid search for two optimal thresholds
+    best_ssr = float('inf')
+    best_thresholds = None
+    best_params = None
+    
+    # Minimum number of observations required in each regime
+    min_obs = lags + 2  # Number of parameters + 1
+    
+    # Loop through all possible pairs of thresholds
+    for i in range(n_grid - 1):
+        for j in range(i + 1, n_grid):
+            thresh1 = thresholds[i]
+            thresh2 = thresholds[j]
             
-            # Add constant
-            X_below = sm.add_constant(X[below_mask])
-            X_above = sm.add_constant(X[above_mask])
+            # Define regimes
+            lower_mask = threshold_var_adjusted <= thresh1
+            middle_mask = (threshold_var_adjusted > thresh1) & (threshold_var_adjusted <= thresh2)
+            upper_mask = threshold_var_adjusted > thresh2
+            
+            # Check if enough observations in each regime
+            if (np.sum(lower_mask) < min_obs or 
+                np.sum(middle_mask) < min_obs or 
+                np.sum(upper_mask) < min_obs):
+                continue
+            
+            # Add constant to design matrices
+            X_lower = sm.add_constant(X[lower_mask])
+            X_middle = sm.add_constant(X[middle_mask])
+            X_upper = sm.add_constant(X[upper_mask])
             
             # Estimate AR parameters for each regime
-            if np.sum(below_mask) > lags + 1 and np.sum(above_mask) > lags + 1:
-                model_below = sm.OLS(y_adjusted[below_mask], X_below)
-                model_above = sm.OLS(y_adjusted[above_mask], X_above)
+            try:
+                model_lower = sm.OLS(y_adjusted[lower_mask], X_lower)
+                model_middle = sm.OLS(y_adjusted[middle_mask], X_middle)
+                model_upper = sm.OLS(y_adjusted[upper_mask], X_upper)
                 
-                try:
-                    results_below = model_below.fit()
-                    results_above = model_above.fit()
-                    
-                    # Calculate overall SSR
-                    ssr = results_below.ssr + results_above.ssr
-                    
-                    if ssr < best_ssr:
-                        best_ssr = ssr
-                        best_threshold = threshold
-                        best_ar_params = {
-                            'below': results_below.params,
-                            'above': results_above.params
-                        }
-                except:
-                    continue
+                results_lower = model_lower.fit()
+                results_middle = model_middle.fit()
+                results_upper = model_upper.fit()
+                
+                # Calculate overall SSR
+                ssr = results_lower.ssr + results_middle.ssr + results_upper.ssr
+                
+                if ssr < best_ssr:
+                    best_ssr = ssr
+                    best_thresholds = (thresh1, thresh2)
+                    best_params = {
+                        'lower': results_lower.params,
+                        'middle': results_middle.params,
+                        'upper': results_upper.params
+                    }
+            except:
+                continue
+    
+    if best_thresholds is None:
+        raise ValueError("Failed to find optimal thresholds. Try adjusting trim parameter.")
+    
+    # Final model using best thresholds
+    thresh1, thresh2 = best_thresholds
+    
+    lower_mask = threshold_var_adjusted <= thresh1
+    middle_mask = (threshold_var_adjusted > thresh1) & (threshold_var_adjusted <= thresh2)
+    upper_mask = threshold_var_adjusted > thresh2
+    
+    X_lower = sm.add_constant(X[lower_mask])
+    X_middle = sm.add_constant(X[middle_mask])
+    X_upper = sm.add_constant(X[upper_mask])
+    
+    model_lower = sm.OLS(y_adjusted[lower_mask], X_lower)
+    model_middle = sm.OLS(y_adjusted[middle_mask], X_middle)
+    model_upper = sm.OLS(y_adjusted[upper_mask], X_upper)
+    
+    results_lower = model_lower.fit()
+    results_middle = model_middle.fit()
+    results_upper = model_upper.fit()
+    
+    # Estimate linear model for comparison
+    X_with_const = sm.add_constant(X)
+    linear_model = sm.OLS(y_adjusted, X_with_const)
+    linear_results = linear_model.fit()
+    ssr_linear = linear_results.ssr
+    
+    # Calculate F-statistic for threshold effect
+    n = len(y_adjusted)
+    k = lags + 1  # Number of parameters per regime (including constant)
+    df1 = 2 * k  # Additional parameters in three-regime model vs. linear model
+    df2 = n - 3 * k  # Degrees of freedom in three-regime model
+    
+    f_stat = ((ssr_linear - best_ssr) / df1) / (best_ssr / df2)
+    p_value = 1 - stats.f.cdf(f_stat, df1, df2)
+    
+    # Calculate adjustment speeds
+    # In AR models, adjustment speed is (1 - AR coefficient)
+    # For simplicity, use the first lag coefficient
+    adjustment_speeds = {
+        'lower': 1 - results_lower.params[1] if lags > 0 else 1,
+        'middle': 1 - results_middle.params[1] if lags > 0 else 1,
+        'upper': 1 - results_upper.params[1] if lags > 0 else 1
+    }
+    
+    # Calculate half-lives
+    half_lives = {
+        'lower': calculate_half_life(results_lower.params[1], regime='threshold') if lags > 0 else 0,
+        'middle': calculate_half_life(results_middle.params[1], regime='threshold') if lags > 0 else 0,
+        'upper': calculate_half_life(results_upper.params[1], regime='threshold') if lags > 0 else 0
+    }
+    
+    # Create result dictionary
+    result = {
+        'thresholds': best_thresholds,
+        'n_regimes': 3,
+        'lags': lags,
+        'ssr': {
+            'three_regime': best_ssr,
+            'linear': ssr_linear
+        },
+        'regimes': {
+            'lower': {
+                'params': results_lower.params,
+                'bse': results_lower.bse,
+                'tvalues': results_lower.tvalues,
+                'pvalues': results_lower.pvalues,
+                'nobs': results_lower.nobs
+            },
+            'middle': {
+                'params': results_middle.params,
+                'bse': results_middle.bse,
+                'tvalues': results_middle.tvalues,
+                'pvalues': results_middle.pvalues,
+                'nobs': results_middle.nobs
+            },
+            'upper': {
+                'params': results_upper.params,
+                'bse': results_upper.bse,
+                'tvalues': results_upper.tvalues,
+                'pvalues': results_upper.pvalues,
+                'nobs': results_upper.nobs
+            }
+        },
+        'adjustment_speeds': adjustment_speeds,
+        'half_lives': half_lives,
+        'f_statistic': f_stat,
+        'p_value': p_value,
+        'threshold_effect': p_value < 0.05,
+        'n_obs': {
+            'lower': np.sum(lower_mask),
+            'middle': np.sum(middle_mask),
+            'upper': np.sum(upper_mask),
+            'total': n
+        }
+    }
+    
+    # Add interpretation of results
+    result['interpretation'] = _interpret_three_regime_tar(result)
+    
+    return result
+
+
+@handle_errors(logger=logger)
+@m1_optimized(use_numba=True)
+def estimate_threshold_tar(
+    y: Union[pd.Series, np.ndarray],
+    threshold_var: Optional[Union[pd.Series, np.ndarray]] = None,
+    lags: int = 1,
+    n_regimes: int = 2,
+    threshold_range: Optional[Tuple[float, float]] = None,
+    trim: float = 0.15,
+    n_grid: int = 100
+) -> Dict[str, Any]:
+    """
+    Estimate a Threshold Autoregressive (TAR) model
+    
+    Parameters
+    ----------
+    y : array_like
+        Time series data
+    threshold_var : array_like, optional
+        Threshold variable (defaults to lagged y)
+    lags : int, optional
+        Number of lags
+    n_regimes : int, optional
+        Number of regimes (2 or 3)
+    threshold_range : tuple, optional
+        Range for threshold search
+    trim : float, optional
+        Trimming percentage
+    n_grid : int, optional
+        Number of grid points for threshold search
         
-        if best_threshold is None:
-            raise ValueError("Failed to find optimal threshold")
+    Returns
+    -------
+    dict
+        Model results including:
+        - thresholds: Optimal threshold value(s)
+        - regimes: Model parameters for each regime
+        - ssr: Sum of squared residuals
+        - adjustment_speeds: Speed of adjustment in each regime (3-regime model)
+        - half_lives: Half-life of shocks in each regime (3-regime model)
+        - f_statistic: Test for threshold effect (3-regime model)
+        - p_value: Significance of threshold effect (3-regime model)
+        - n_obs: Number of observations in each regime
+        - interpretation: Context-specific explanation of results (3-regime model)
+    
+    Notes
+    -----
+    For Yemen market analysis, the 3-regime model can capture:
+    - Lower regime: Markets separated by severe conflict barriers
+    - Middle regime: Partial market integration with moderate barriers
+    - Upper regime: Strong integration when price differentials overcome barriers
+    """
+    # Validate n_regimes
+    if n_regimes not in [2, 3]:
+        raise ValueError("n_regimes must be 2 or 3")
         
-        # Final model using best threshold
-        below_mask = threshold_var_adjusted <= best_threshold
+    # For three-regime model, delegate to specialized function
+    if n_regimes == 3:
+        return estimate_threshold_tar3(
+            y=y,
+            threshold_var=threshold_var,
+            lags=lags,
+            threshold_range=threshold_range,
+            trim=trim,
+            n_grid=n_grid
+        )
+    
+    # Two-regime model implementation
+    # Convert to numpy arrays
+    if isinstance(y, pd.Series):
+        y = y.values
+    if threshold_var is not None and isinstance(threshold_var, pd.Series):
+        threshold_var = threshold_var.values
+    
+    # Check for missing values
+    if np.any(np.isnan(y)):
+        logger.warning("y contains missing values, removing them")
+        y = y[~np.isnan(y)]
+    
+    if threshold_var is not None and np.any(np.isnan(threshold_var)):
+        logger.warning("threshold_var contains missing values, removing corresponding observations")
+        mask = ~np.isnan(threshold_var)
+        y = y[mask]
+        threshold_var = threshold_var[mask]
+    
+    # Use lagged y as threshold variable if not provided
+    if threshold_var is None:
+        threshold_var = np.roll(y, 1)
+        # Avoid using the first observation (due to lag)
+        threshold_var = threshold_var[1:]
+        y = y[1:]
+    
+    # Check lengths
+    if len(y) != len(threshold_var):
+        raise ValueError("y and threshold_var must have the same length")
+    
+    # Create lagged variables for the AR part
+    X = np.zeros((len(y) - lags, lags))
+    for i in range(lags):
+        X[:, i] = y[lags - i - 1:-i - 1] if i < lags - 1 else y[lags - i - 1:]
+    
+    # Adjust dependent variable and threshold variable
+    y_adjusted = y[lags:]
+    threshold_var_adjusted = threshold_var[lags:]
+    
+    # Set threshold range
+    if threshold_range is None:
+        # Use trimmed range of threshold variable
+        sorted_thresh = np.sort(threshold_var_adjusted)
+        min_idx = int(len(sorted_thresh) * trim)
+        max_idx = int(len(sorted_thresh) * (1 - trim))
+        threshold_range = (sorted_thresh[min_idx], sorted_thresh[max_idx])
+    
+    # Grid search for optimal threshold
+    # Single threshold
+    thresholds = np.linspace(threshold_range[0], threshold_range[1], n_grid)
+    best_ssr = float('inf')
+    best_threshold = None
+    best_ar_params = None
+    
+    for threshold in thresholds:
+        # Split data based on threshold
+        below_mask = threshold_var_adjusted <= threshold
         above_mask = ~below_mask
         
+        # Add constant
         X_below = sm.add_constant(X[below_mask])
         X_above = sm.add_constant(X[above_mask])
         
-        model_below = sm.OLS(y_adjusted[below_mask], X_below)
-        model_above = sm.OLS(y_adjusted[above_mask], X_above)
-        
-        results_below = model_below.fit()
-        results_above = model_above.fit()
-        
-        # Save results
-        result = {
-            'thresholds': [best_threshold],
-            'n_regimes': 2,
-            'lags': lags,
-            'ssr': best_ssr,
-            'regimes': {
-                'below': {
-                    'params': results_below.params,
-                    'bse': results_below.bse,
-                    'tvalues': results_below.tvalues,
-                    'pvalues': results_below.pvalues,
-                    'nobs': results_below.nobs
-                },
-                'above': {
-                    'params': results_above.params,
-                    'bse': results_above.bse,
-                    'tvalues': results_above.tvalues,
-                    'pvalues': results_above.pvalues,
-                    'nobs': results_above.nobs
-                }
+        # Estimate AR parameters for each regime
+        if np.sum(below_mask) > lags + 1 and np.sum(above_mask) > lags + 1:
+            model_below = sm.OLS(y_adjusted[below_mask], X_below)
+            model_above = sm.OLS(y_adjusted[above_mask], X_above)
+            
+            try:
+                results_below = model_below.fit()
+                results_above = model_above.fit()
+                
+                # Calculate overall SSR
+                ssr = results_below.ssr + results_above.ssr
+                
+                if ssr < best_ssr:
+                    best_ssr = ssr
+                    best_threshold = threshold
+                    best_ar_params = {
+                        'below': results_below.params,
+                        'above': results_above.params
+                    }
+            except:
+                continue
+    
+    if best_threshold is None:
+        raise ValueError("Failed to find optimal threshold")
+    
+    # Final model using best threshold
+    below_mask = threshold_var_adjusted <= best_threshold
+    above_mask = ~below_mask
+    
+    X_below = sm.add_constant(X[below_mask])
+    X_above = sm.add_constant(X[above_mask])
+    
+    model_below = sm.OLS(y_adjusted[below_mask], X_below)
+    model_above = sm.OLS(y_adjusted[above_mask], X_above)
+    
+    results_below = model_below.fit()
+    results_above = model_above.fit()
+    
+    # Estimate linear model for comparison
+    X_with_const = sm.add_constant(X)
+    linear_model = sm.OLS(y_adjusted, X_with_const)
+    linear_results = linear_model.fit()
+    ssr_linear = linear_results.ssr
+    
+    # Calculate F-statistic for threshold effect
+    n = len(y_adjusted)
+    k = lags + 1  # Number of parameters per regime (including constant)
+    df1 = k  # Additional parameters in two-regime model vs. linear model
+    df2 = n - 2 * k  # Degrees of freedom in two-regime model
+    
+    f_stat = ((ssr_linear - best_ssr) / df1) / (best_ssr / df2)
+    p_value = 1 - stats.f.cdf(f_stat, df1, df2)
+    
+    # Calculate half-lives
+    half_lives = {
+        'below': calculate_half_life(results_below.params[1], regime='threshold') if lags > 0 else 0,
+        'above': calculate_half_life(results_above.params[1], regime='threshold') if lags > 0 else 0
+    }
+    
+    # Calculate adjustment speeds
+    adjustment_speeds = {
+        'below': 1 - results_below.params[1] if lags > 0 else 1,
+        'above': 1 - results_above.params[1] if lags > 0 else 1
+    }
+    
+    # Save results
+    result = {
+        'thresholds': [best_threshold],
+        'n_regimes': 2,
+        'lags': lags,
+        'ssr': {
+            'two_regime': best_ssr,
+            'linear': ssr_linear
+        },
+        'regimes': {
+            'below': {
+                'params': results_below.params,
+                'bse': results_below.bse,
+                'tvalues': results_below.tvalues,
+                'pvalues': results_below.pvalues,
+                'nobs': results_below.nobs
+            },
+            'above': {
+                'params': results_above.params,
+                'bse': results_above.bse,
+                'tvalues': results_above.tvalues,
+                'pvalues': results_above.pvalues,
+                'nobs': results_above.nobs
             }
+        },
+        'half_lives': half_lives,
+        'adjustment_speeds': adjustment_speeds,
+        'f_statistic': f_stat,
+        'p_value': p_value,
+        'threshold_effect': p_value < 0.05,
+        'n_obs': {
+            'below': np.sum(below_mask),
+            'above': np.sum(above_mask),
+            'total': n
         }
-        
-    elif n_regimes == 3:
-        # Two thresholds (three regimes)
-        raise NotImplementedError("Three-regime TAR model not implemented")
-        
-    else:
-        raise ValueError("n_regimes must be 2 or 3")
+    }
     
     return result
 

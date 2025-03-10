@@ -1613,6 +1613,8 @@ def test_mtar_adjustment(
     return results
 
 
+
+
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
 def _interpret_adjustment_speeds(adj_below: float, adj_above: float, market1_name: str, market2_name: str) -> str:
     """
@@ -1760,6 +1762,98 @@ def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative:
         return ("No effective price adjustment mechanism detected. Neither rising nor falling "
                 "prices trigger correction, suggesting severely fragmented markets.")
 
+@handle_errors(logger=logger)
+def _interpret_three_regime_tar(result: Dict[str, Any]) -> str:
+    """
+    Generate interpretation of three-regime TAR model results.
+    
+    Parameters
+    ----------
+    result : dict
+        Three-regime TAR model results
+        
+    Returns
+    -------
+    str
+        Text interpretation of results
+    """
+    thresholds = result['thresholds']
+    half_lives = result['half_lives']
+    adjustment_speeds = result['adjustment_speeds']
+    threshold_effect = result['threshold_effect']
+    
+    # Initialize interpretation
+    parts = []
+    
+    # Interpret threshold effect
+    if threshold_effect:
+        parts.append(
+            f"The three-regime threshold model is statistically significant (p={result['p_value']:.4f}), "
+            f"indicating nonlinear price adjustment dynamics with thresholds at {thresholds[0]:.4f} and {thresholds[1]:.4f}."
+        )
+    else:
+        parts.append(
+            f"The three-regime threshold model does not show a statistically significant improvement "
+            f"over a linear model (p={result['p_value']:.4f}), suggesting that nonlinear adjustment "
+            f"dynamics are not strongly present."
+        )
+    
+    # Interpret regime observations
+    n_obs = result['n_obs']
+    parts.append(
+        f"The data is distributed across regimes as follows: {n_obs['lower']} observations ({n_obs['lower']/n_obs['total']:.1%}) "
+        f"in the lower regime, {n_obs['middle']} observations ({n_obs['middle']/n_obs['total']:.1%}) in the middle regime, "
+        f"and {n_obs['upper']} observations ({n_obs['upper']/n_obs['total']:.1%}) in the upper regime."
+    )
+    
+    # Interpret adjustment speeds
+    if threshold_effect:
+        # Compare adjustment speeds across regimes
+        if adjustment_speeds['upper'] > adjustment_speeds['middle'] > adjustment_speeds['lower']:
+            parts.append(
+                f"Adjustment speeds increase monotonically across regimes (lower: {adjustment_speeds['lower']:.3f}, "
+                f"middle: {adjustment_speeds['middle']:.3f}, upper: {adjustment_speeds['upper']:.3f}), indicating "
+                f"that price convergence accelerates as the threshold variable increases. This pattern is consistent "
+                f"with market arbitrage becoming more active as price differentials exceed transaction cost barriers."
+            )
+        elif adjustment_speeds['upper'] < adjustment_speeds['middle'] < adjustment_speeds['lower']:
+            parts.append(
+                f"Adjustment speeds decrease monotonically across regimes (lower: {adjustment_speeds['lower']:.3f}, "
+                f"middle: {adjustment_speeds['middle']:.3f}, upper: {adjustment_speeds['upper']:.3f}), showing "
+                f"an unusual pattern where price convergence slows as the threshold variable increases. This may "
+                f"indicate structural impediments to arbitrage in high-threshold situations, possibly due to severe "
+                f"conflict barriers."
+            )
+        else:
+            # Non-monotonic pattern
+            fastest = max(adjustment_speeds.items(), key=lambda x: x[1])[0]
+            slowest = min(adjustment_speeds.items(), key=lambda x: x[1])[0]
+            
+            parts.append(
+                f"Adjustment speeds show a non-monotonic pattern across regimes (lower: {adjustment_speeds['lower']:.3f}, "
+                f"middle: {adjustment_speeds['middle']:.3f}, upper: {adjustment_speeds['upper']:.3f}), with "
+                f"the fastest adjustment in the {fastest} regime and slowest in the {slowest} regime. This suggests "
+                f"complex market dynamics where different factors affect price transmission in each regime."
+            )
+    
+    # Interpret half-lives
+    parts.append(
+        f"The estimated half-lives for shocks are {half_lives['lower']:.1f} periods in the lower regime, "
+        f"{half_lives['middle']:.1f} periods in the middle regime, and {half_lives['upper']:.1f} periods "
+        f"in the upper regime, providing a quantitative measure of market integration strength in each regime."
+    )
+    
+    # Add Yemen-specific context
+    parts.append(
+        "In Yemen's conflict context, these regimes likely reflect how different intensities of barriers "
+        "(checkpoints, conflict zones, exchange rate differentials) affect market integration. The thresholds "
+        "represent critical levels where price transmission behavior changes significantly."
+    )
+    
+    # Combine all parts
+    interpretation = " ".join(parts)
+    
+    return interpretation
 
 @handle_errors(logger=logger, error_type=(ValueError, TypeError))
 def _assess_market_integration(asymm_adj: Dict[str, Any], cointegrated: bool) -> str:
