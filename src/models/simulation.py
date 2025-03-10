@@ -15,6 +15,9 @@ import psutil
 import os
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+from collections import defaultdict
+import itertools
 
 from src.models.threshold import ThresholdCointegration, test_mtar_adjustment
 from src.models.diagnostics import ModelDiagnostics
@@ -360,6 +363,7 @@ class MarketIntegrationSimulation:
 
     @disk_cache(cache_dir='.cache/simulations')
     @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def _reestimate_threshold_model(self, simulated_data: gpd.GeoDataFrame) -> Any:
         """
@@ -377,17 +381,39 @@ class MarketIntegrationSimulation:
         """
         logger.info("Re-estimating threshold model with simulated prices")
         
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Optimize input data for memory efficiency
+        simulated_data = optimize_dataframe(simulated_data.copy())
+        
         # Get north and south prices
         north_prices = simulated_data[simulated_data['exchange_rate_regime'] == 'north']['simulated_price']
         south_prices = simulated_data[simulated_data['exchange_rate_regime'] == 'south']['simulated_price']
         
-        # Re-estimate threshold model
-        threshold_params = config.get_section('analysis.threshold')
-        reestimated_model = estimate_threshold_model(
-            north_prices, 
-            south_prices,
-            threshold_params=threshold_params
-        )
+        # Check for large datasets that need chunking
+        large_dataset = len(north_prices) > config.get('data.large_dataset_threshold', 10000)
+        
+        if large_dataset:
+            logger.info(f"Processing large dataset with {len(north_prices)} observations using chunking")
+            
+            # Process in chunks
+            chunk_size = config.get('data.chunk_size', 5000)
+            reestimated_model = self._process_threshold_model_in_chunks(
+                north_prices, south_prices, chunk_size
+            )
+        else:
+            # Standard processing for smaller datasets
+            logger.info(f"Processing dataset with {len(north_prices)} observations")
+            
+            # Re-estimate threshold model
+            threshold_params = config.get_section('analysis.threshold')
+            reestimated_model = estimate_threshold_model(
+                north_prices, 
+                south_prices,
+                threshold_params=threshold_params
+            )
         
         # Add M-TAR estimation if original model had it
         if self.threshold_model and hasattr(self.threshold_model, 'mtar_results'):
@@ -412,7 +438,132 @@ class MarketIntegrationSimulation:
             except Exception as e:
                 logger.warning(f"Could not estimate M-TAR model: {e}")
         
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Threshold model re-estimation complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
         return reestimated_model
+    
+    @m1_optimized(parallel=True)
+    @handle_errors(logger=logger)
+    def _process_threshold_model_in_chunks(
+        self, 
+        north_prices: pd.Series, 
+        south_prices: pd.Series, 
+        chunk_size: int
+    ) -> Any:
+        """
+        Process threshold model estimation in chunks for large datasets.
+        
+        Parameters
+        ----------
+        north_prices : pd.Series
+            Price series for northern markets
+        south_prices : pd.Series
+            Price series for southern markets
+        chunk_size : int
+            Size of each chunk for processing
+        
+        Returns
+        -------
+        Any
+            Re-estimated threshold model
+        """
+        # Convert to numpy arrays if not already
+        north_array = north_prices.values if isinstance(north_prices, pd.Series) else north_prices
+        south_array = south_prices.values if isinstance(south_prices, pd.Series) else south_prices
+        
+        # Calculate number of chunks
+        n = len(north_array)
+        n_chunks = (n + chunk_size - 1) // chunk_size  # Ceiling division
+        
+        logger.info(f"Processing data in {n_chunks} chunks of size {chunk_size}")
+        
+        # Process chunks in parallel
+        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+            futures = []
+            for i in range(0, n, chunk_size):
+                end = min(i + chunk_size, n)
+                futures.append(executor.submit(
+                    self._estimate_threshold_for_chunk,
+                    north_array[i:end],
+                    south_array[i:end],
+                    i,
+                    end
+                ))
+            
+            # Collect results as they complete
+            chunk_results = []
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        chunk_results.append(result)
+                except Exception as e:
+                    logger.error(f"Error processing chunk: {e}")
+        
+        # Combine results from all chunks
+        if not chunk_results:
+            raise ValueError("No valid threshold model estimations from any chunk")
+        
+        # Strategy 1: Return the model with the lowest SSR
+        best_model = min(chunk_results, key=lambda x: x.get('ssr', float('inf')))
+        
+        logger.info(f"Selected best model from {len(chunk_results)} chunks based on SSR")
+        
+        return best_model
+    
+    @handle_errors(logger=logger)
+    def _estimate_threshold_for_chunk(
+        self, 
+        north_chunk: np.ndarray, 
+        south_chunk: np.ndarray, 
+        start_idx: int, 
+        end_idx: int
+    ) -> Any:
+        """
+        Estimate threshold model for a data chunk.
+        
+        Parameters
+        ----------
+        north_chunk : np.ndarray
+            Chunk of north prices
+        south_chunk : np.ndarray
+            Chunk of south prices
+        start_idx : int
+            Start index of chunk
+        end_idx : int
+            End index of chunk
+        
+        Returns
+        -------
+        Any
+            Threshold model for this chunk
+        """
+        logger.debug(f"Estimating threshold model for chunk {start_idx}:{end_idx}")
+        
+        threshold_params = config.get_section('analysis.threshold')
+        
+        try:
+            # Estimate threshold model for this chunk
+            chunk_model = estimate_threshold_model(
+                north_chunk,
+                south_chunk,
+                threshold_params=threshold_params
+            )
+            
+            # Store chunk indices in model for reference
+            chunk_model.chunk_indices = (start_idx, end_idx)
+            
+            return chunk_model
+        except Exception as e:
+            logger.warning(f"Error estimating threshold model for chunk {start_idx}:{end_idx}: {e}")
+            return None
     
     @timer
     @memory_usage_decorator
@@ -920,6 +1071,349 @@ class MarketIntegrationSimulation:
         return results
     
     @timer
+    @memory_usage_decorator
+    @handle_errors(logger=logger)
+    def simulate_combined_policies(
+        self, 
+        policy_combinations: List[Dict[str, Any]],
+        parallelize: bool = True
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Simulate multiple policy combinations to analyze interactions.
+        
+        This enhanced method allows for simulating multiple policy combinations 
+        simultaneously and analyzing their interactions. It can process different
+        scenarios in parallel for improved performance.
+        
+        Parameters
+        ----------
+        policy_combinations : List[Dict[str, Any]]
+            List of policy parameter dictionaries, each containing:
+            - 'exchange_rate_target': str or float (optional)
+            - 'conflict_reduction': float (optional)
+            - 'policy_name': str (optional, for labeling)
+        parallelize : bool, optional
+            Whether to process policy combinations in parallel
+            
+        Returns
+        -------
+        Dict[str, Dict[str, Any]]
+            Results for each policy combination and their interactions
+        """
+        logger.info(f"Simulating {len(policy_combinations)} policy combinations")
+        
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # If no policy combinations provided, use defaults
+        if not policy_combinations:
+            default_exchange = config.get('analysis.simulation.exchange_rate_default', 'official')
+            default_conflict = config.get('analysis.simulation.conflict_reduction_default', 0.5)
+            
+            policy_combinations = [
+                {'exchange_rate_target': default_exchange, 'policy_name': 'exchange_rate_only'},
+                {'conflict_reduction': default_conflict, 'policy_name': 'connectivity_only'},
+                {'exchange_rate_target': default_exchange, 'conflict_reduction': default_conflict, 
+                 'policy_name': 'combined'}
+            ]
+        
+        # Generate names for unnamed policy combinations
+        for i, policy in enumerate(policy_combinations):
+            if 'policy_name' not in policy:
+                components = []
+                if 'exchange_rate_target' in policy:
+                    components.append(f"er_{policy['exchange_rate_target']}")
+                if 'conflict_reduction' in policy:
+                    components.append(f"cr_{policy['conflict_reduction']}")
+                
+                policy['policy_name'] = f"policy_{i}_{'-'.join(components)}"
+        
+        # Create folder for results
+        all_results = {}
+        
+        # Process policy combinations
+        if parallelize and len(policy_combinations) > 1:
+            # Use parallel processing for multiple policy combinations
+            with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
+                # Submit tasks
+                futures = {}
+                for policy in policy_combinations:
+                    future = executor.submit(
+                        self._simulate_single_policy_combination,
+                        policy
+                    )
+                    futures[future] = policy['policy_name']
+                
+                # Collect results and monitor progress
+                total_policies = len(policy_combinations)
+                completed = 0
+                
+                for future in as_completed(futures):
+                    policy_name = futures[future]
+                    try:
+                        result = future.result()
+                        all_results[policy_name] = result
+                        
+                        # Log progress
+                        completed += 1
+                        progress_pct = (completed / total_policies) * 100
+                        logger.info(f"Completed policy simulation for '{policy_name}' ({completed}/{total_policies}, {progress_pct:.1f}%)")
+                    except Exception as e:
+                        logger.error(f"Error in policy simulation '{policy_name}': {e}")
+        else:
+            # Process sequentially
+            for i, policy in enumerate(policy_combinations):
+                policy_name = policy['policy_name']
+                try:
+                    logger.info(f"Processing policy combination {i+1}/{len(policy_combinations)}: '{policy_name}'")
+                    result = self._simulate_single_policy_combination(policy)
+                    all_results[policy_name] = result
+                except Exception as e:
+                    logger.error(f"Error in policy simulation '{policy_name}': {e}")
+        
+        # Calculate interaction effects if multiple policies
+        if len(all_results) >= 2:
+            interaction_results = self._analyze_policy_interactions(all_results)
+            all_results['interaction_analysis'] = interaction_results
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        
+        logger.info(f"Multi-policy simulation complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
+        # Store all results
+        self.results['combined_policies'] = all_results
+        
+        return all_results
+    
+    @handle_errors(logger=logger)
+    def _simulate_single_policy_combination(self, policy: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Simulate a single policy combination.
+        
+        Parameters
+        ----------
+        policy : Dict[str, Any]
+            Policy parameters
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Simulation results for this policy
+        """
+        # Extract parameters with defaults
+        exchange_rate_target = policy.get('exchange_rate_target', None)
+        conflict_reduction = policy.get('conflict_reduction', None)
+        reference_date = policy.get('reference_date', None)
+        
+        # Determine which simulation to run
+        if exchange_rate_target is not None and conflict_reduction is not None:
+            # Combined policy
+            result = self.simulate_combined_policy(
+                exchange_rate_target=exchange_rate_target,
+                conflict_reduction=conflict_reduction,
+                reference_date=reference_date
+            )
+        elif exchange_rate_target is not None:
+            # Exchange rate unification only
+            result = self.simulate_exchange_rate_unification(
+                target_rate=exchange_rate_target,
+                reference_date=reference_date
+            )
+        elif conflict_reduction is not None:
+            # Improved connectivity only
+            result = self.simulate_improved_connectivity(
+                reduction_factor=conflict_reduction
+            )
+        else:
+            raise ValueError("Policy must specify at least one of: exchange_rate_target, conflict_reduction")
+        
+        # Calculate welfare effects
+        policy_name = policy.get('policy_name', 'unnamed_policy')
+        welfare_key = f"{policy_name}_welfare"
+        
+        # Store policy parameters in result
+        result['policy_parameters'] = policy
+        
+        return result
+    
+    @handle_errors(logger=logger)
+    def _analyze_policy_interactions(self, policy_results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Analyze interactions between multiple policy interventions.
+        
+        Parameters
+        ----------
+        policy_results : Dict[str, Dict[str, Any]]
+            Results from multiple policy simulations
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Interaction analysis
+        """
+        logger.info("Analyzing policy interactions")
+        
+        # Extract individual and combined policies
+        exchange_only = None
+        connectivity_only = None
+        combined_policy = None
+        
+        for name, result in policy_results.items():
+            params = result.get('policy_parameters', {})
+            
+            # Check if this is an exchange rate only policy
+            if 'exchange_rate_target' in params and 'conflict_reduction' not in params:
+                exchange_only = (name, result)
+            
+            # Check if this is a connectivity only policy
+            elif 'conflict_reduction' in params and 'exchange_rate_target' not in params:
+                connectivity_only = (name, result)
+            
+            # Check if this is a combined policy
+            elif 'exchange_rate_target' in params and 'conflict_reduction' in params:
+                combined_policy = (name, result)
+        
+        # If we have all three policy types, analyze interactions
+        interaction_results = {}
+        
+        if exchange_only and connectivity_only and combined_policy:
+            # Extract policy names for reference
+            ex_name, ex_result = exchange_only
+            con_name, con_result = connectivity_only
+            comb_name, comb_result = combined_policy
+            
+            # Calculate expected combined effect (additive)
+            expected_combined = {}
+            
+            # Compare price changes
+            if all(key in policy_results for key in [ex_name, con_name, comb_name]):
+                # Extract price changes
+                try:
+                    ex_changes = ex_result.get('price_changes', None)
+                    con_changes = con_result.get('price_changes', None)
+                    comb_changes = comb_result.get('price_changes', None)
+                    
+                    # If all have price changes, analyze interactions
+                    if ex_changes is not None and con_changes is not None and comb_changes is not None:
+                        # Calculate mean price changes
+                        if isinstance(ex_changes, pd.DataFrame) and 'pct_change' in ex_changes.columns:
+                            ex_mean = ex_changes['pct_change'].mean()
+                            con_mean = con_changes['pct_change'].mean()
+                            comb_mean = comb_changes['pct_change'].mean()
+                            
+                            # Expected combined effect (additive)
+                            expected_mean = ex_mean + con_mean
+                            
+                            # Calculate interaction effect
+                            interaction_effect = comb_mean - expected_mean
+                            
+                            interaction_results['price_changes'] = {
+                                'exchange_only': ex_mean,
+                                'connectivity_only': con_mean,
+                                'combined_actual': comb_mean,
+                                'combined_expected': expected_mean,
+                                'interaction_effect': interaction_effect,
+                                'synergy': interaction_effect > 0,
+                                'percent_difference': (interaction_effect / abs(expected_mean) * 100) if expected_mean != 0 else np.nan
+                            }
+                except Exception as e:
+                    logger.warning(f"Error calculating price change interactions: {e}")
+            
+            # Compare integration indices
+            try:
+                # Calculate integration indices if not already done
+                for name, result in policy_results.items():
+                    if f"{name}_integration" not in self.results:
+                        self.calculate_integration_index(name)
+                
+                # Extract integration improvements
+                ex_integration = self.results.get(f"{ex_name}_integration", {}).get('percentage_improvement', 0)
+                con_integration = self.results.get(f"{con_name}_integration", {}).get('percentage_improvement', 0)
+                comb_integration = self.results.get(f"{comb_name}_integration", {}).get('percentage_improvement', 0)
+                
+                # Expected combined effect (additive)
+                expected_integration = ex_integration + con_integration
+                
+                # Calculate interaction effect
+                interaction_effect = comb_integration - expected_integration
+                
+                interaction_results['integration_index'] = {
+                    'exchange_only': ex_integration,
+                    'connectivity_only': con_integration,
+                    'combined_actual': comb_integration,
+                    'combined_expected': expected_integration,
+                    'interaction_effect': interaction_effect,
+                    'synergy': interaction_effect > 0,
+                    'percent_difference': (interaction_effect / abs(expected_integration) * 100) if expected_integration != 0 else np.nan
+                }
+            except Exception as e:
+                logger.warning(f"Error calculating integration index interactions: {e}")
+            
+            # Generate interpretation of interactions
+            interaction_results['interpretation'] = self._interpret_policy_interactions(interaction_results)
+        
+        return interaction_results
+    
+    @handle_errors(logger=logger)
+    def _interpret_policy_interactions(self, interaction_results: Dict[str, Dict[str, float]]) -> str:
+        """
+        Generate interpretation of policy interaction effects.
+        
+        Parameters
+        ----------
+        interaction_results : Dict[str, Dict[str, float]]
+            Results of interaction analysis
+            
+        Returns
+        -------
+        str
+            Interpretation of interaction effects
+        """
+        price_synergy = interaction_results.get('price_changes', {}).get('synergy', False)
+        price_effect = interaction_results.get('price_changes', {}).get('interaction_effect', 0)
+        
+        integration_synergy = interaction_results.get('integration_index', {}).get('synergy', False)
+        integration_effect = interaction_results.get('integration_index', {}).get('interaction_effect', 0)
+        
+        # Generate interpretation based on results
+        if price_synergy and integration_synergy:
+            interpretation = (
+                "The combined policy shows strong positive synergies. "
+                f"Price changes are {abs(price_effect):.2f}% better than expected, "
+                f"and market integration is {abs(integration_effect):.2f}% better than the sum of individual policies. "
+                "This suggests complementary effects between exchange rate unification and connectivity improvements."
+            )
+        elif price_synergy and not integration_synergy:
+            interpretation = (
+                "The combined policy shows mixed effects. "
+                f"Price changes are {abs(price_effect):.2f}% better than expected, "
+                f"but market integration is {abs(integration_effect):.2f}% worse than the sum of individual policies. "
+                "This suggests that while prices converge more, market efficiency may be hindered by other factors."
+            )
+        elif not price_synergy and integration_synergy:
+            interpretation = (
+                "The combined policy shows mixed effects. "
+                f"Price changes are {abs(price_effect):.2f}% worse than expected, "
+                f"but market integration is {abs(integration_effect):.2f}% better than the sum of individual policies. "
+                "This suggests improved efficiency despite smaller price convergence."
+            )
+        else:
+            interpretation = (
+                "The combined policy shows negative interactions. "
+                f"Price changes are {abs(price_effect):.2f}% worse than expected, "
+                f"and market integration is {abs(integration_effect):.2f}% worse than the sum of individual policies. "
+                "This suggests conflicting effects between exchange rate unification and connectivity improvements."
+            )
+        
+        return interpretation
+    
+    @timer
     @handle_errors(logger=logger)
     def calculate_welfare_effects(
         self, 
@@ -1379,6 +1873,7 @@ class MarketIntegrationSimulation:
         }
     
     @timer
+    @memory_usage_decorator
     @handle_errors(logger=logger)
     def test_robustness(
         self, 
@@ -1402,9 +1897,9 @@ class MarketIntegrationSimulation:
         Dict[str, Any]
             Robustness test results
         """
-        # Import necessary classes
-        from src.models.diagnostics import ModelDiagnostics
-        from src.models.unit_root import StructuralBreakTester
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
         
         # Determine which results to use
         if policy_scenario is not None:
@@ -1421,73 +1916,474 @@ class MarketIntegrationSimulation:
         logger.info(f"Testing robustness of '{policy_scenario}' scenario")
         
         # Get original and simulated data
-        original_data = self.original_data
-        simulated_data = results['simulated_data']
+        original_data = optimize_dataframe(self.original_data.copy())
+        simulated_data = optimize_dataframe(results['simulated_data'].copy())
         
-        # Initialize robustness results dictionary
-        robustness_results = {}
+        # Split robustness testing into smaller, focused tasks
+        structural_break_results = self._test_structural_breaks(original_data, simulated_data)
+        diagnostic_results = self._test_residual_diagnostics(results)
+        stability_results = self._test_model_stability(original_data, simulated_data, results)
         
-        # 1. Test for structural breaks using Bai-Perron tests
-        structural_break_tester = StructuralBreakTester()
-        
-        # Test for structural breaks in original price series
-        if 'price' in original_data.columns:
-            original_breaks = structural_break_tester.test_bai_perron(
-                original_data['price'], 
-                min_size=10,
-                n_breaks=3
+        # Compile all results
+        robustness_results = {
+            'structural_breaks': structural_break_results,
+            'diagnostics': diagnostic_results,
+            'stability': stability_results,
+            'overall_assessment': self._assess_overall_robustness(
+                structural_break_results, diagnostic_results, stability_results
             )
-            robustness_results['original_structural_breaks'] = original_breaks
+        }
         
-        # Test for structural breaks in simulated price series
-        if 'simulated_price' in simulated_data.columns:
-            simulated_breaks = structural_break_tester.test_bai_perron(
-                simulated_data['simulated_price'], 
-                min_size=10,
-                n_breaks=3
-            )
-            robustness_results['simulated_structural_breaks'] = simulated_breaks
-            
-            # Compare break dates/locations to see if policy changed market structure
-            original_bps = original_breaks.get('breakpoints', [])
-            simulated_bps = simulated_breaks.get('breakpoints', [])
-            
-            robustness_results['break_comparison'] = {
-                'original_breakpoints': original_bps,
-                'simulated_breakpoints': simulated_bps,
-                'structural_change': len(original_bps) != len(simulated_bps) or not all(abs(o - s) < 5 for o, s in zip(original_bps, simulated_bps))
-            }
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
         
-        # 2. Perform residual diagnostics on threshold model results
-        if 'threshold_model' in results and self.threshold_model is not None:
-            # Create diagnostics object
-            diagnostics = ModelDiagnostics(
-                model_name=f"{policy_scenario}_threshold",
-                original_data=original_data
-            )
-            
-            # Get residuals from original and simulated models
-            if hasattr(self.threshold_model, 'eq_errors') and hasattr(results['threshold_model'], 'eq_errors'):
-                original_residuals = self.threshold_model.eq_errors
-                simulated_residuals = results['threshold_model'].eq_errors
-                
-                # Run diagnostics on original residuals
-                original_diagnostics = diagnostics.residual_tests(original_residuals)
-                robustness_results['original_residual_diagnostics'] = original_diagnostics
-                
-                # Run diagnostics on simulated residuals
-                diagnostics.residuals = simulated_residuals
-                simulated_diagnostics = diagnostics.residual_tests(simulated_residuals)
-                robustness_results['simulated_residual_diagnostics'] = simulated_diagnostics
-                
-                # Compare diagnostic results
-                robustness_results['diagnostic_comparison'] = self._compare_diagnostics(
-                    original_diagnostics, simulated_diagnostics
-                )
+        logger.info(f"Robustness testing complete. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
         
         # Store results and return
         self.results[f'{policy_scenario}_robustness'] = robustness_results
         return robustness_results
+    
+    @handle_errors(logger=logger)
+    def _test_structural_breaks(
+        self, 
+        original_data: gpd.GeoDataFrame, 
+        simulated_data: gpd.GeoDataFrame
+    ) -> Dict[str, Any]:
+        """
+        Test for structural breaks in price series before and after simulation.
+        
+        Parameters
+        ----------
+        original_data : gpd.GeoDataFrame
+            Original data
+        simulated_data : gpd.GeoDataFrame
+            Simulated data
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Structural break test results
+        """
+        # Import necessary class
+        from src.models.unit_root import StructuralBreakTester
+        
+        logger.info("Testing for structural breaks")
+        
+        # Initialize results dictionary
+        structural_break_results = {}
+        
+        # Create break tester
+        structural_break_tester = StructuralBreakTester()
+        
+        try:
+            # Test for structural breaks in original price series
+            if 'price' in original_data.columns:
+                original_breaks = structural_break_tester.test_bai_perron(
+                    original_data['price'], 
+                    min_size=10,
+                    n_breaks=3
+                )
+                structural_break_results['original_structural_breaks'] = original_breaks
+            
+            # Test for structural breaks in simulated price series
+            if 'simulated_price' in simulated_data.columns:
+                simulated_breaks = structural_break_tester.test_bai_perron(
+                    simulated_data['simulated_price'], 
+                    min_size=10,
+                    n_breaks=3
+                )
+                structural_break_results['simulated_structural_breaks'] = simulated_breaks
+                
+                # Compare break dates/locations to see if policy changed market structure
+                original_bps = original_breaks.get('breakpoints', [])
+                simulated_bps = simulated_breaks.get('breakpoints', [])
+                
+                structural_break_results['break_comparison'] = {
+                    'original_breakpoints': original_bps,
+                    'simulated_breakpoints': simulated_bps,
+                    'structural_change': len(original_bps) != len(simulated_bps) or not all(abs(o - s) < 5 for o, s in zip(original_bps, simulated_bps))
+                }
+                
+                # Calculate break significance
+                original_significance = original_breaks.get('significant', False)
+                simulated_significance = simulated_breaks.get('significant', False)
+                
+                structural_break_results['break_significance'] = {
+                    'original_significant': original_significance,
+                    'simulated_significant': simulated_significance,
+                    'significance_changed': original_significance != simulated_significance
+                }
+                
+            logger.info("Structural break testing complete")
+            
+        except Exception as e:
+            logger.error(f"Error in structural break testing: {e}")
+            structural_break_results['error'] = str(e)
+        
+        return structural_break_results
+    
+    @handle_errors(logger=logger)
+    def _test_residual_diagnostics(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Run diagnostic tests on model residuals.
+        
+        Parameters
+        ----------
+        results : Dict[str, Any]
+            Simulation results with models
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Residual diagnostic test results
+        """
+        # Import necessary class
+        from src.models.diagnostics import ModelDiagnostics
+        
+        logger.info("Running residual diagnostics")
+        
+        # Initialize results
+        diagnostic_results = {}
+        
+        try:
+            # Check if threshold model is available
+            if 'threshold_model' in results and self.threshold_model is not None:
+                # Create diagnostics object
+                diagnostics = ModelDiagnostics(
+                    model_name=f"threshold",
+                    original_data=self.original_data
+                )
+                
+                # Get residuals from original and simulated models
+                if hasattr(self.threshold_model, 'eq_errors') and hasattr(results['threshold_model'], 'eq_errors'):
+                    original_residuals = self.threshold_model.eq_errors
+                    simulated_residuals = results['threshold_model'].eq_errors
+                    
+                    # Run diagnostics on original residuals
+                    original_diagnostics = diagnostics.residual_tests(original_residuals)
+                    diagnostic_results['original_residual_diagnostics'] = original_diagnostics
+                    
+                    # Run diagnostics on simulated residuals
+                    diagnostics.residuals = simulated_residuals
+                    simulated_diagnostics = diagnostics.residual_tests(simulated_residuals)
+                    diagnostic_results['simulated_residual_diagnostics'] = simulated_diagnostics
+                    
+                    # Compare diagnostic results
+                    diagnostic_results['diagnostic_comparison'] = self._compare_diagnostics(
+                        original_diagnostics, simulated_diagnostics
+                    )
+                else:
+                    logger.warning("Threshold models missing residuals for diagnostics")
+            
+            logger.info("Residual diagnostics complete")
+            
+        except Exception as e:
+            logger.error(f"Error in residual diagnostics: {e}")
+            diagnostic_results['error'] = str(e)
+        
+        return diagnostic_results
+    
+    @handle_errors(logger=logger)
+    def _test_model_stability(
+        self, 
+        original_data: gpd.GeoDataFrame, 
+        simulated_data: gpd.GeoDataFrame, 
+        results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Test model stability across different subsamples.
+        
+        Parameters
+        ----------
+        original_data : gpd.GeoDataFrame
+            Original data
+        simulated_data : gpd.GeoDataFrame
+            Simulated data
+        results : Dict[str, Any]
+            Simulation results with models
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Model stability test results
+        """
+        logger.info("Testing model stability")
+        
+        # Initialize results
+        stability_results = {}
+        
+        try:
+            # Check if data has time information for subsample testing
+            if 'date' in original_data.columns:
+                # Test stability across time periods
+                stability_results['time_stability'] = self._test_time_stability(
+                    original_data, simulated_data, results
+                )
+            
+            # Test stability across regions if exchange regime column exists
+            if 'exchange_rate_regime' in original_data.columns:
+                stability_results['regional_stability'] = self._test_regional_stability(
+                    original_data, simulated_data, results
+                )
+            
+            # Test parameter stability if threshold model is available
+            if 'threshold_model' in results and self.threshold_model is not None:
+                stability_results['parameter_stability'] = self._test_parameter_stability(
+                    self.threshold_model, results['threshold_model']
+                )
+            
+            logger.info("Model stability testing complete")
+            
+        except Exception as e:
+            logger.error(f"Error in model stability testing: {e}")
+            stability_results['error'] = str(e)
+        
+        return stability_results
+    
+    @handle_errors(logger=logger)
+    def _test_time_stability(
+        self, 
+        original_data: gpd.GeoDataFrame, 
+        simulated_data: gpd.GeoDataFrame, 
+        results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Test model stability across different time periods.
+        
+        Parameters
+        ----------
+        original_data : gpd.GeoDataFrame
+            Original data
+        simulated_data : gpd.GeoDataFrame
+            Simulated data
+        results : Dict[str, Any]
+            Simulation results with models
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Time stability test results
+        """
+        # Get dates and sort
+        dates = sorted(original_data['date'].unique())
+        
+        # Skip if too few time periods
+        if len(dates) < 3:
+            return {'sufficient_data': False, 'periods': len(dates)}
+        
+        # Split into early, middle, late periods
+        early_dates = dates[:len(dates)//3]
+        late_dates = dates[-len(dates)//3:]
+        
+        # Calculate price differentials for early and late periods
+        early_original = original_data[original_data['date'].isin(early_dates)]
+        early_simulated = simulated_data[simulated_data['date'].isin(early_dates)]
+        
+        late_original = original_data[original_data['date'].isin(late_dates)]
+        late_simulated = simulated_data[simulated_data['date'].isin(late_dates)]
+        
+        # Calculate convergence for early and late periods
+        early_convergence = self._calculate_price_convergence(
+            early_original, early_simulated, 'price', 'simulated_price', 'exchange_rate_regime'
+        )
+        
+        late_convergence = self._calculate_price_convergence(
+            late_original, late_simulated, 'price', 'simulated_price', 'exchange_rate_regime'
+        )
+        
+        # Compare convergence across periods
+        early_rel_conv = early_convergence.get('relative_convergence', 0)
+        late_rel_conv = late_convergence.get('relative_convergence', 0)
+        
+        # Calculate stability metrics
+        abs_diff = abs(late_rel_conv - early_rel_conv)
+        rel_diff = abs_diff / abs(early_rel_conv) * 100 if early_rel_conv != 0 else float('inf')
+        
+        # Determine if results are stable across time
+        # (Below stability threshold from config)
+        stability_threshold = config.get('analysis.simulation.stability_threshold', 20)  # 20% default
+        is_stable = rel_diff < stability_threshold
+        
+        return {
+            'early_period': {
+                'dates': early_dates,
+                'convergence': early_rel_conv
+            },
+            'late_period': {
+                'dates': late_dates,
+                'convergence': late_rel_conv
+            },
+            'stability_metrics': {
+                'absolute_difference': abs_diff,
+                'relative_difference': rel_diff,
+                'is_stable': is_stable
+            }
+        }
+    
+    @handle_errors(logger=logger)
+    def _test_regional_stability(
+        self, 
+        original_data: gpd.GeoDataFrame, 
+        simulated_data: gpd.GeoDataFrame, 
+        results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Test model stability across different regions.
+        
+        Parameters
+        ----------
+        original_data : gpd.GeoDataFrame
+            Original data
+        simulated_data : gpd.GeoDataFrame
+            Simulated data
+        results : Dict[str, Any]
+            Simulation results with models
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Regional stability test results
+        """
+        # Check for commodity column for further stratification
+        if 'commodity' in original_data.columns:
+            commodities = original_data['commodity'].unique()
+            
+            # Skip if too few commodities
+            if len(commodities) < 2:
+                return {'sufficient_commodities': False}
+            
+            # Calculate price changes by commodity
+            regional_results = {}
+            
+            for commodity in commodities:
+                commodity_orig = original_data[original_data['commodity'] == commodity]
+                commodity_sim = simulated_data[simulated_data['commodity'] == commodity]
+                
+                # Calculate price changes for this commodity
+                commodity_changes = self._calculate_price_changes(
+                    original_prices=commodity_orig['price'],
+                    simulated_prices=commodity_sim['simulated_price'],
+                    by_column='exchange_rate_regime'
+                )
+                
+                regional_results[commodity] = commodity_changes
+            
+            # Calculate variation in price changes across commodities
+            north_changes = [
+                results.loc[('north', 'pct_change'), 'mean'] 
+                for commodity, results in regional_results.items()
+                if ('north', 'pct_change') in results.index
+            ]
+            
+            south_changes = [
+                results.loc[('south', 'pct_change'), 'mean'] 
+                for commodity, results in regional_results.items()
+                if ('south', 'pct_change') in results.index
+            ]
+            
+            # Calculate coefficient of variation (std/mean)
+            north_cv = np.std(north_changes) / np.mean(north_changes) if north_changes and np.mean(north_changes) != 0 else np.nan
+            south_cv = np.std(south_changes) / np.mean(south_changes) if south_changes and np.mean(south_changes) != 0 else np.nan
+            
+            # Determine if results are stable across commodities
+            # (Below stability threshold from config)
+            stability_threshold = config.get('analysis.simulation.regional_stability_threshold', 0.5)  # CV < 0.5 default
+            is_stable = (not np.isnan(north_cv) and north_cv < stability_threshold and 
+                         not np.isnan(south_cv) and south_cv < stability_threshold)
+            
+            return {
+                'commodity_results': regional_results,
+                'north_variation': north_cv,
+                'south_variation': south_cv,
+                'is_stable': is_stable
+            }
+        
+        # If no commodity column, check for other regional dimensions
+        elif 'market_id' in original_data.columns:
+            # Similar analysis could be implemented for market-level stability
+            return {'market_level_analysis': 'Not implemented'}
+        
+        else:
+            return {'regional_dimensions': 'Insufficient for stability analysis'}
+    
+    @handle_errors(logger=logger)
+    def _test_parameter_stability(
+        self, 
+        original_model: Any, 
+        simulated_model: Any
+    ) -> Dict[str, Any]:
+        """
+        Test stability of model parameters.
+        
+        Parameters
+        ----------
+        original_model : Any
+            Original threshold model
+        simulated_model : Any
+            Simulated threshold model
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Parameter stability test results
+        """
+        # Extract relevant parameters
+        original_params = {}
+        simulated_params = {}
+        
+        # Check for threshold parameters
+        if hasattr(original_model, 'threshold') and hasattr(simulated_model, 'threshold'):
+            original_params['threshold'] = original_model.threshold
+            simulated_params['threshold'] = simulated_model.threshold
+        
+        # Check for adjustment parameters
+        if hasattr(original_model, 'results') and hasattr(simulated_model, 'results'):
+            # Extract adjustment parameters below threshold
+            original_params['adjustment_below'] = original_model.results.get('adjustment_below_1', None)
+            simulated_params['adjustment_below'] = simulated_model.results.get('adjustment_below_1', None)
+            
+            # Extract adjustment parameters above threshold
+            original_params['adjustment_above'] = original_model.results.get('adjustment_above_1', None)
+            simulated_params['adjustment_above'] = simulated_model.results.get('adjustment_above_1', None)
+        
+        # Calculate parameter changes
+        param_changes = {}
+        for param in set(original_params.keys()) & set(simulated_params.keys()):
+            orig_val = original_params[param]
+            sim_val = simulated_params[param]
+            
+            if orig_val is not None and sim_val is not None:
+                abs_change = sim_val - orig_val
+                rel_change = (abs_change / abs(orig_val)) * 100 if orig_val != 0 else float('inf')
+                
+                param_changes[param] = {
+                    'original': orig_val,
+                    'simulated': sim_val,
+                    'absolute_change': abs_change,
+                    'relative_change': rel_change
+                }
+        
+        # Determine if parameters are stable
+        # (Below stability threshold from config)
+        stability_threshold = config.get('analysis.simulation.parameter_stability_threshold', 50)  # 50% default
+        
+        param_stability = {}
+        for param, changes in param_changes.items():
+            rel_change = changes.get('relative_change', float('inf'))
+            param_stability[param] = abs(rel_change) < stability_threshold
+        
+        # Overall stability assessment
+        is_stable = all(param_stability.values()) if param_stability else False
+        
+        return {
+            'parameter_changes': param_changes,
+            'parameter_stability': param_stability,
+            'is_stable': is_stable
+        }
     
     @handle_errors(logger=logger)
     def _compare_diagnostics(
@@ -1564,6 +2460,121 @@ class MarketIntegrationSimulation:
         }
         
         return comparison
+    
+    @handle_errors(logger=logger)
+    def _assess_overall_robustness(
+        self,
+        structural_break_results: Dict[str, Any],
+        diagnostic_results: Dict[str, Any],
+        stability_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Assess overall robustness of simulation results.
+        
+        Parameters
+        ----------
+        structural_break_results : Dict[str, Any]
+            Structural break test results
+        diagnostic_results : Dict[str, Any]
+            Diagnostic test results
+        stability_results : Dict[str, Any]
+            Stability test results
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Overall robustness assessment
+        """
+        # Extract key robustness metrics
+        structural_change = structural_break_results.get('break_comparison', {}).get('structural_change', False)
+        
+        diagnostic_improvements = diagnostic_results.get('diagnostic_comparison', {}).get('overall', {}).get('improvements', 0)
+        diagnostic_deteriorations = diagnostic_results.get('diagnostic_comparison', {}).get('overall', {}).get('deteriorations', 0)
+        
+        time_stable = stability_results.get('time_stability', {}).get('stability_metrics', {}).get('is_stable', False)
+        regional_stable = stability_results.get('regional_stability', {}).get('is_stable', False)
+        parameter_stable = stability_results.get('parameter_stability', {}).get('is_stable', False)
+        
+        # Calculate overall robustness score
+        # Each component contributes to the score
+        robustness_score = 0
+        total_components = 0
+        
+        # No structural change is good (+1)
+        if not structural_change:
+            robustness_score += 1
+        total_components += 1
+        
+        # More diagnostic improvements than deteriorations is good (+1)
+        if diagnostic_improvements > diagnostic_deteriorations:
+            robustness_score += 1
+        total_components += 1
+        
+        # Stable across time periods is good (+1)
+        if time_stable:
+            robustness_score += 1
+        total_components += 1
+        
+        # Stable across regions is good (+1)
+        if regional_stable:
+            robustness_score += 1
+        total_components += 1
+        
+        # Stable parameters is good (+1)
+        if parameter_stable:
+            robustness_score += 1
+        total_components += 1
+        
+        # Calculate percentage score
+        robustness_percentage = (robustness_score / total_components) * 100 if total_components > 0 else 0
+        
+        # Determine robustness level
+        if robustness_percentage >= 80:
+            robustness_level = "High"
+        elif robustness_percentage >= 60:
+            robustness_level = "Moderate"
+        elif robustness_percentage >= 40:
+            robustness_level = "Low"
+        else:
+            robustness_level = "Very Low"
+        
+        # Generate robustness summary
+        robustness_summary = []
+        
+        if not structural_change:
+            robustness_summary.append("No structural breaks introduced by the policy intervention.")
+        else:
+            robustness_summary.append("Policy intervention introduces structural changes in price dynamics.")
+        
+        if diagnostic_improvements > diagnostic_deteriorations:
+            robustness_summary.append("Model diagnostics show improvements after the intervention.")
+        elif diagnostic_improvements < diagnostic_deteriorations:
+            robustness_summary.append("Model diagnostics deteriorate after the intervention.")
+        else:
+            robustness_summary.append("Model diagnostics show mixed or unchanged results after the intervention.")
+        
+        if time_stable:
+            robustness_summary.append("Results are stable across different time periods.")
+        else:
+            robustness_summary.append("Results vary significantly across different time periods.")
+        
+        if regional_stable:
+            robustness_summary.append("Results are consistent across different regions and commodities.")
+        else:
+            robustness_summary.append("Results show significant variation across regions and commodities.")
+        
+        if parameter_stable:
+            robustness_summary.append("Model parameters remain stable before and after intervention.")
+        else:
+            robustness_summary.append("Model parameters change significantly after intervention.")
+        
+        return {
+            'robustness_score': robustness_score,
+            'total_components': total_components,
+            'robustness_percentage': robustness_percentage,
+            'robustness_level': robustness_level,
+            'summary': robustness_summary
+        }
     
     @timer
     @memory_usage_decorator
@@ -1646,12 +2657,20 @@ class MarketIntegrationSimulation:
                 futures[future] = param_value
             
             # Collect results as they complete
+            total_tasks = len(param_values)
+            completed_tasks = 0
+            
             for future in as_completed(futures):
                 param_value = futures[future]
                 try:
                     result = future.result()
                     sensitivity_results['results'][param_value] = result
-                    logger.info(f"Completed sensitivity analysis for {sensitivity_type}={param_value}")
+                    
+                    # Update progress
+                    completed_tasks += 1
+                    progress = (completed_tasks / total_tasks) * 100
+                    logger.info(f"Sensitivity analysis progress: {completed_tasks}/{total_tasks} ({progress:.1f}%)")
+                    
                 except Exception as e:
                     logger.error(f"Error in sensitivity analysis for {param_value}: {e}")
                     sensitivity_results['results'][param_value] = {'error': str(e)}
@@ -1659,6 +2678,13 @@ class MarketIntegrationSimulation:
         # Calculate summary statistics
         sensitivity_results['summary'] = self._calculate_sensitivity_summary(
             sensitivity_results['results'],
+            metrics
+        )
+        
+        # Generate plots for sensitivity analysis
+        sensitivity_results['plots'] = self._generate_sensitivity_plots(
+            sensitivity_results['results'],
+            sensitivity_type,
             metrics
         )
         
@@ -1835,3 +2861,50 @@ class MarketIntegrationSimulation:
             }
         
         return summary
+    
+    @handle_errors(logger=logger)
+    def _generate_sensitivity_plots(
+        self,
+        sensitivity_results: Dict[float, Dict[str, float]],
+        sensitivity_type: str,
+        metrics: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Generate plots for sensitivity analysis results.
+        
+        Parameters
+        ----------
+        sensitivity_results : Dict[float, Dict[str, float]]
+            Results of sensitivity analysis for each parameter value
+        sensitivity_type : str
+            Type of sensitivity analysis
+        metrics : List[str]
+            List of metrics tracked
+            
+        Returns
+        -------
+        Dict[str, Any]
+            Plot data for visualization
+        """
+        plot_data = {}
+        
+        # Extract parameter values and ensure they're sorted
+        param_values = sorted(sensitivity_results.keys())
+        
+        for metric in metrics:
+            # Extract values for this metric across all parameter values
+            values = [
+                sensitivity_results[param].get(metric, np.nan) 
+                for param in param_values
+                if isinstance(sensitivity_results[param], dict) and 'error' not in sensitivity_results[param]
+            ]
+            
+            # Store x and y values for plotting
+            plot_data[metric] = {
+                'x': param_values,
+                'y': values,
+                'x_label': f"{sensitivity_type.replace('_', ' ').title()} Value",
+                'y_label': f"{metric.replace('_', ' ').title()} Metric"
+            }
+        
+        return plot_data

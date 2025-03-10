@@ -470,36 +470,59 @@ class UnitRootTester:
         """
         Determine order of integration for a time series.
         
+        If the dataset has more than 10,000 observations, the series is processed in chunks
+        of configurable size (default 5000) to be memory-aware.
+        
         Parameters
         ----------
-        series : array_like
-            The time series to test
+        series : Union[pd.Series, np.ndarray]
+            The time series to test.
         max_order : int, optional
-            Maximum integration order to test
+            Maximum integration order to test (default is 2).
         test : str, optional
-            Unit root test to use ('adf', 'adf_gls', 'kpss', 'phillips_perron')
+            Unit root test to use ('adf', 'adf_gls', 'kpss', 'phillips_perron') (default is 'adf').
             
         Returns
         -------
         int
-            Order of integration
+            Order of integration.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        process: psutil.Process = psutil.Process(os.getpid())
+        start_mem: float = process.memory_info().rss / (1024 * 1024)  # MB
         
-        # Make a copy of the series to avoid modifying the original
+        # Determine number of observations
+        n_obs: int = len(series) if isinstance(series, pd.Series) else series.shape[0]
+        
+        # For large datasets, process in chunks
+        if n_obs > 10000:
+            chunk_size: int = config.get('analysis.chunk_size', 5000)
+            logger.info(f"Large dataset detected with {n_obs} observations. Processing in chunks of {chunk_size}.")
+            orders: List[int] = []
+            for start in range(0, n_obs, chunk_size):
+                end: int = min(start + chunk_size, n_obs)
+                if isinstance(series, pd.Series):
+                    chunk = series.iloc[start:end]
+                else:
+                    chunk = series[start:end]
+                if len(chunk) < 10:
+                    continue
+                d_chunk: int = self._determine_integration_order_for_chunk(chunk, max_order, test)
+                orders.append(d_chunk)
+                gc.collect()
+            overall_order: int = max(orders) if orders else max_order + 1
+            logger.info(f"Determined integration order from chunks: I({overall_order})")
+            end_mem = process.memory_info().rss / (1024 * 1024)
+            logger.debug(f"Integration order determination (chunked) complete. Memory usage: {end_mem - start_mem:.2f} MB")
+            return overall_order
+        
+        # For smaller datasets, use the original approach
         if isinstance(series, pd.Series):
             test_series = series.copy()
         else:
             test_series = np.copy(series)
         
-        # Test for unit root and difference if necessary
         for d in range(max_order + 1):
-            # Log current integration order being tested
             logger.info(f"Testing integration order {d}")
-            
-            # Test stationarity using the specified test method
             if test == 'adf':
                 result = self.test_adf(test_series)
             elif test == 'adf_gls':
@@ -511,37 +534,23 @@ class UnitRootTester:
             else:
                 raise ValueError(f"Unknown test: {test}")
             
-            # If stationary, return current order
             if result['stationary']:
                 logger.info(f"Series is I({d}) - stationary after {d} differences")
-                
-                # Track memory after processing
-                end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-                memory_diff = end_mem - start_mem
-                logger.debug(f"Integration order determination complete. Memory usage: {memory_diff:.2f} MB")
-                
+                end_mem = process.memory_info().rss / (1024 * 1024)
+                logger.debug(f"Integration order determination complete. Memory usage: {end_mem - start_mem:.2f} MB")
                 return d
             
-            # Difference the series and continue testing
             if d < max_order:
                 if isinstance(test_series, pd.Series):
                     test_series = test_series.diff().dropna()
                 else:
                     test_series = np.diff(test_series)
         
-        # If we reach here, series has higher order of integration than max_order
         logger.warning(f"Series has integration order > {max_order}")
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        logger.debug(f"Integration order determination complete. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
+        end_mem = process.memory_info().rss / (1024 * 1024)
+        logger.debug(f"Integration order determination complete. Memory usage: {end_mem - start_mem:.2f} MB")
         gc.collect()
-        
         return max_order + 1
-
 
 class StructuralBreakTester:
     """Detect structural breaks in time series data."""
@@ -958,7 +967,10 @@ class StructuralBreakTester:
         
         return gh_result
     
+    @memoize
+    @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @timer
     def _process_gh_batch(
         self,
         y_array: np.ndarray,
@@ -969,78 +981,167 @@ class StructuralBreakTester:
         ur_tester: Optional[UnitRootTester] = None
     ) -> List[Dict[str, Any]]:
         """
-        Process a batch of Gregory-Hansen tests.
+        Process a batch of Gregory-Hansen tests with caching and early stopping.
         
         Parameters
         ----------
         y_array : np.ndarray
-            Dependent variable array
+            Dependent variable array.
         x_array : np.ndarray
-            Independent variable(s) array
+            Independent variable(s) array.
         model : str
-            Model type
+            Model type.
         breakpoints : List[int]
-            Breakpoints to test in this batch
+            Breakpoints to test in this batch.
         batch_idx : int
-            Batch index for logging
+            Batch index for logging.
         ur_tester : UnitRootTester, optional
-            Unit root tester instance
+            Unit root tester instance.
             
         Returns
         -------
         List[Dict[str, Any]]
-            Batch test results
+            Batch test results.
         """
-        # Create UnitRootTester if not provided
+        # Cache to avoid redundant calculations
+        cache: Dict[int, Dict[str, Any]] = {}
+        batch_results: List[Dict[str, Any]] = []
+        early_stop_threshold: float = config.get('analysis.gh.early_stop_threshold', -10.0)
+        
         if ur_tester is None:
             ur_tester = UnitRootTester()
         
         n = len(y_array)
-        batch_results = []
-        
-        # Test each possible breakpoint in this batch
-        for i, breakpoint in enumerate(breakpoints):
-            if i % 50 == 0:
-                logger.debug(f"Processing breakpoint {i}/{len(breakpoints)} in batch {batch_idx}")
-            
-            # Create dummy variable for break
-            dummy = np.zeros(n)
-            dummy[breakpoint:] = 1
-            
-            # Create regressor matrix based on model type
-            try:
-                if model == 'cc':
-                    # Level shift only
-                    X = np.column_stack((np.ones(n), dummy, x_array))
-                elif model == 'ct':
-                    # Level shift with trend
-                    trend = np.arange(n)
-                    X = np.column_stack((np.ones(n), dummy, trend, x_array))
-                elif model == 'ctt':
-                    # Regime shift (intercept and slope)
-                    X_with_dummy = x_array * dummy.reshape(-1, 1)
-                    X = np.column_stack((np.ones(n), dummy, x_array, X_with_dummy))
-                else:
-                    raise ValueError(f"Unknown model type: {model}")
-                
-                # OLS regression
-                from statsmodels.regression.linear_model import OLS
-                model_fit = OLS(y_array, X).fit()
-                residuals = model_fit.resid
-                
-                # Test for cointegration (stationarity of residuals)
-                adf_result = ur_tester.test_adf(residuals, regression='nc')
-                
-                # Store results
-                batch_results.append({
-                    'breakpoint': breakpoint,
-                    'adf_stat': adf_result['statistic'],
-                    'pvalue': adf_result['pvalue']
-                })
-                
-            except Exception as e:
-                logger.debug(f"Error testing breakpoint {breakpoint} in batch {batch_idx}: {e}")
-                continue
-        
+        for idx, bp in enumerate(breakpoints):
+            # Periodic feedback via logger
+            if idx % 100 == 0 and idx > 0:
+                logger.debug(f"Batch {batch_idx}: Processed {idx}/{len(breakpoints)} breakpoints")
+            if bp in cache:
+                res = cache[bp]
+            else:
+                # Create dummy variable for break
+                dummy = np.zeros(n)
+                dummy[bp:] = 1
+                try:
+                    if model == 'cc':
+                        # Level shift only
+                        X = np.column_stack((np.ones(n), dummy, x_array))
+                    elif model == 'ct':
+                        # Level shift with trend
+                        trend = np.arange(n)
+                        X = np.column_stack((np.ones(n), dummy, trend, x_array))
+                    elif model == 'ctt':
+                        # Regime shift (intercept and slope)
+                        X_with_dummy = x_array * dummy.reshape(-1, 1)
+                        X = np.column_stack((np.ones(n), dummy, x_array, X_with_dummy))
+                    else:
+                        raise ValueError(f"Unknown model type: {model}")
+                    
+                    from statsmodels.regression.linear_model import OLS
+                    model_fit = OLS(y_array, X).fit()
+                    residuals = model_fit.resid
+                    adf_result = ur_tester.test_adf(residuals, regression='nc')
+                    res = {
+                        'breakpoint': bp,
+                        'adf_stat': adf_result['statistic'],
+                        'pvalue': adf_result['pvalue']
+                    }
+                    cache[bp] = res
+                except Exception as e:
+                    logger.debug(f"Error testing breakpoint {bp} in batch {batch_idx}: {e}")
+                    continue
+            batch_results.append(res)
+            # Early stopping: if very significant breakpoint found, break out early
+            if res.get('adf_stat', 0) < early_stop_threshold:
+                logger.info(f"Early stopping in batch {batch_idx} at breakpoint {bp} with adf_stat={res['adf_stat']}")
+                break
         logger.debug(f"Completed batch {batch_idx}: processed {len(batch_results)}/{len(breakpoints)} breakpoints")
         return batch_results
+
+    def multiple_test_comparison(
+        self, 
+        tests_results: Dict[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Consolidate results from run_all_tests using weighted reliability.
+        
+        Parameters
+        ----------
+        tests_results : dict
+            Results from run_all_tests with keys like 'adf', 'adf_gls', 'kpss', 'phillips_perron'.
+            
+        Returns
+        -------
+        dict
+            Consolidated result including a consensus recommendation and confidence level.
+        """
+        weights: Dict[str, float] = {
+            'adf': 0.3,
+            'adf_gls': 0.25,
+            'kpss': 0.2,
+            'phillips_perron': 0.25
+        }
+        score = 0.0
+        total_weight = 0.0
+        details: Dict[str, float] = {}
+        for test, result in tests_results.items():
+            w = weights.get(test, 0)
+            total_weight += w
+            # Assume 'stationary' flag indicates reliability; use pvalue to refine score if available.
+            if result.get('stationary', False):
+                score += w
+                details[test] = w
+            else:
+                details[test] = 0.0
+        confidence = score / total_weight if total_weight else 0
+        consensus = 'stationary' if confidence >= 0.5 else 'non-stationary'
+        logger.info(f"Multiple test comparison: consensus={consensus} with confidence={confidence:.2f}")
+        return {
+            'consensus': consensus,
+            'confidence': confidence,
+            'details': details
+        }
+
+    def detect_multivariate_breaks(
+        self, 
+        data: np.ndarray, 
+        pen: float = 3.0, 
+        model: str = 'l2'
+    ) -> Dict[str, Any]:
+        """
+        Detect structural breaks in multivariate time series using the PELT method.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            2D array where each column represents a time series.
+        pen : float, optional
+            Penalty value for adding a breakpoint.
+        model : str, optional
+            Model to use in ruptures (default 'l2').
+            
+        Returns
+        -------
+        dict
+            Results including breakpoints and segment information.
+        """
+        # Ensure data is a 2D numpy array using advanced indexing if necessary.
+        if data.ndim != 2:
+            raise ValueError("Input data must be a 2D array for multivariate analysis")
+        # Use PELT algorithm from ruptures for efficient break detection
+        algo = rpt.Pelt(model=model).fit(data)
+        breakpoints: List[int] = algo.predict(pen=pen)
+        if breakpoints and breakpoints[-1] == data.shape[0]:
+            breakpoints = breakpoints[:-1]
+        segments: List[Tuple[int, int]] = []
+        start = 0
+        for bp in breakpoints:
+            segments.append((start, bp))
+            start = bp
+        logger.info(f"Multivariate break detection: found {len(breakpoints)} breakpoints.")
+        return {
+            'breakpoints': breakpoints,
+            'segments': segments,
+            'penalty': pen,
+            'model': model
+        }
