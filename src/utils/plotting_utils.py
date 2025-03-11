@@ -17,7 +17,19 @@ import contextlib
 import os
 import gc
 import psutil
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import pandas as pd
+import logging
+import gc
 import time
+import warnings
+
+# Try optional imports
+with contextlib.suppress(ImportError):
+    import plotly.express as px
+    import plotly.graph_objects as go
 
 from src.utils.error_handler import handle_errors, VisualizationError
 from src.utils.decorators import timer, m1_optimized, memory_usage_decorator
@@ -109,50 +121,6 @@ def create_figure(
     """
     fig, ax = plt.subplots(figsize=(width, height), constrained_layout=constrained_layout)
     return fig, ax
-
-@handle_errors(logger=logger)
-def format_date_axis(
-    ax: Axes, 
-    date_format: str = '%Y-%m', 
-    rotation: float = 45,
-    interval: str = 'month'
-) -> None:
-    """
-    Format the x-axis for dates
-    
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axes to format
-    date_format : str, optional
-        Date format string
-    rotation : float, optional
-        Rotation angle for tick labels
-    interval : str, optional
-        Tick interval ('day', 'week', 'month', 'quarter', 'year')
-    """
-    # Set formatter
-    date_formatter = mdates.DateFormatter(date_format)
-    ax.xaxis.set_major_formatter(date_formatter)
-    
-    # Set locator based on interval
-    if interval == 'day':
-        locator = mdates.DayLocator()
-    elif interval == 'week':
-        locator = mdates.WeekdayLocator(byweekday=0)  # Monday
-    elif interval == 'month':
-        locator = mdates.MonthLocator()
-    elif interval == 'quarter':
-        locator = mdates.MonthLocator(bymonth=[1, 4, 7, 10])
-    elif interval == 'year':
-        locator = mdates.YearLocator()
-    else:
-        raise ValueError(f"Invalid interval: {interval}")
-    
-    ax.xaxis.set_major_locator(locator)
-    
-    # Rotate tick labels
-    plt.setp(ax.get_xticklabels(), rotation=rotation, ha='right')
 
 @handle_errors(logger=logger)
 def format_currency_axis(ax: Axes, axis: str = 'y', symbol: str = 'YER') -> None:
@@ -2781,3 +2749,321 @@ def _create_matplotlib_dashboard(data_dict, title):
             )
     
     return figures
+
+@timer
+@memory_usage_decorator
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+def create_interactive_market_map(
+    gdf, 
+    value_col, 
+    color_scale="viridis",
+    title="Yemen Market Analysis",
+    tooltip_cols=None,
+    height=700,
+    width=1000,
+    save_path=None,
+    show_labels=False,
+    label_col=None,
+    zoom_level=6
+) -> Any:
+    """
+    Create an interactive market map visualization.
+    
+    Uses plotly.express for interactive visualization if available,
+    otherwise falls back to matplotlib static map.
+    
+    Parameters
+    ----------
+    gdf : GeoDataFrame
+        GeoDataFrame containing market locations and attributes
+    value_col : str
+        Column name to use for coloring the markets
+    color_scale : str, default="viridis"
+        Color scale to use for the map
+    title : str, default="Yemen Market Analysis"
+        Title for the map
+    tooltip_cols : List[str], optional
+        Additional columns to show in tooltips
+    height : int, default=700
+        Height of the map in pixels
+    width : int, default=1000
+        Width of the map in pixels
+    save_path : str, optional
+        Path to save the visualization
+    show_labels : bool, default=False
+        Whether to show market labels on the map
+    label_col : str, optional
+        Column to use for labels if show_labels=True
+    zoom_level : int, default=6
+        Zoom level for the map
+        
+    Returns
+    -------
+    Any
+        Plotly figure or matplotlib figure depending on availability
+    """
+    try:
+        # Check if plotly is available by accessing px
+        if 'px' in globals():
+            # Extract centroids for mapping
+            gdf = gdf.copy()
+            gdf["center_lon"] = gdf.geometry.centroid.x
+            gdf["center_lat"] = gdf.geometry.centroid.y
+            
+            # Prepare tooltip data
+            hover_data = tooltip_cols if tooltip_cols else []
+            if show_labels and label_col:
+                hover_data = [label_col] + hover_data if hover_data else [label_col]
+            
+            # Create map
+            fig = px.scatter_mapbox(
+                gdf,
+                lat="center_lat",
+                lon="center_lon",
+                color=value_col,
+                size=gdf[value_col].abs() if value_col in gdf.columns else None,
+                color_continuous_scale=color_scale,
+                mapbox_style="carto-positron",
+                height=height,
+                width=width,
+                title=title,
+                hover_name=label_col if show_labels and label_col else None,
+                hover_data=hover_data
+            )
+            
+            # Configure layout
+            fig.update_layout(
+                margin={"r":0, "t":50, "l":0, "b":0},
+                mapbox=dict(
+                    zoom=zoom_level,
+                    center={"lat": gdf.geometry.centroid.y.mean(), 
+                           "lon": gdf.geometry.centroid.x.mean()}
+                )
+            )
+            
+            # Save if requested
+            if save_path:
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                fig.write_html(save_path)
+                logger.info(f"Interactive map saved to {save_path}")
+                
+            return fig
+            
+        else:
+            # Fallback to matplotlib
+            logger.warning("Plotly not available. Using static matplotlib map instead.")
+            return _create_static_market_map(
+                gdf, value_col, title, save_path, show_labels, label_col
+            )
+            
+    except Exception as e:
+        logger.error(f"Error creating interactive market map: {str(e)}")
+        # Additional fallback to simple static map
+        return _create_static_market_map(
+            gdf, value_col, title, save_path, show_labels, label_col
+        )
+
+def _create_static_market_map(
+    gdf, value_col, title, save_path=None, show_labels=False, label_col=None
+):
+    """Create a static market map using matplotlib."""
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Plot the GeoDataFrame
+    gdf.plot(column=value_col, cmap='viridis', legend=True, ax=ax)
+    
+    # Add labels if requested
+    if show_labels and label_col:
+        for idx, row in gdf.iterrows():
+            ax.annotate(text=row[label_col], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
+                       xytext=(3, 3), textcoords="offset points")
+    
+    ax.set_title(title)
+    ax.set_axis_off()
+    
+    # Save if requested
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, bbox_inches='tight', dpi=300)
+        logger.info(f"Static map saved to {save_path}")
+    
+    return fig
+
+@timer
+@handle_errors(logger=logger)
+def plot_interactive_time_series(
+    time_series,
+    date_col=None,
+    value_cols=None,
+    title="Time Series Analysis",
+    height=500,
+    width=900,
+    save_path=None
+):
+    """
+    Create an interactive time series visualization.
+    
+    Uses plotly.express for interactive visualization if available,
+    otherwise falls back to matplotlib.
+    
+    Parameters
+    ----------
+    time_series : pd.DataFrame
+        DataFrame containing time series data
+    date_col : str, optional
+        Column name for dates. If None, assumes index is dates.
+    value_cols : List[str], optional
+        Columns to plot. If None, plots all numeric columns.
+    title : str, default="Time Series Analysis"
+        Title for the plot
+    height : int, default=500
+        Height of the plot in pixels
+    width : int, default=900
+        Width of the plot in pixels
+    save_path : str, optional
+        Path to save the visualization
+        
+    Returns
+    -------
+    Any
+        Plotly figure or matplotlib figure
+    """
+    try:
+        # Check if plotly is available
+        if 'px' in globals():
+            # Prepare data
+            df = time_series.reset_index() if date_col is None else time_series.copy()
+            date_column = 'index' if date_col is None else date_col
+            
+            # Determine columns to plot
+            if value_cols is None:
+                value_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                value_cols = [col for col in value_cols if col != date_column]
+            
+            # Create plotly figure
+            fig = go.Figure()
+            
+            for col in value_cols:
+                fig.add_trace(
+                    go.Scatter(
+                        x=df[date_column],
+                        y=df[col],
+                        mode='lines',
+                        name=col
+                    )
+                )
+            
+            # Update layout
+            fig.update_layout(
+                title=title,
+                xaxis_title=date_column,
+                height=height,
+                width=width,
+                legend_title="Variables",
+                hovermode="x unified"
+            )
+            
+            # Save if requested
+            if save_path:
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                fig.write_html(save_path)
+                logger.info(f"Interactive time series plot saved to {save_path}")
+                
+            return fig
+            
+        else:
+            # Fallback to matplotlib
+            logger.warning("Plotly not available. Using static matplotlib plot instead.")
+            return _create_matplotlib_time_series(
+                time_series, date_col, value_cols, title, save_path
+            )
+            
+    except Exception as e:
+        logger.error(f"Error creating interactive time series: {str(e)}")
+        return _create_matplotlib_time_series(
+            time_series, date_col, value_cols, title, save_path
+        )
+
+def _create_matplotlib_time_series(
+    time_series, date_col=None, value_cols=None, title="Time Series", save_path=None
+):
+    """Create a static time series plot using matplotlib."""
+    # Prepare data
+    df = time_series.copy()
+    if date_col is not None:
+        df = df.set_index(date_col)
+    
+    # Determine columns to plot
+    if value_cols is None:
+        value_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    df[value_cols].plot(ax=ax)
+    
+    # Format axes
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    format_date_axis(ax)
+    
+    # Save if requested
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, bbox_inches='tight', dpi=300)
+        logger.info(f"Time series plot saved to {save_path}")
+    
+    return fig
+
+@handle_errors(logger=logger)
+def format_date_axis(ax, rotation=45, date_format=None):
+    """
+    Format the date axis for better readability.
+    
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to format
+    rotation : int, default=45
+        Rotation angle for date labels
+    date_format : str, optional
+        Date format string for date labels
+        
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The formatted axes
+    """
+    import matplotlib.dates as mdates
+    
+    # Get current figure size
+    fig = ax.figure
+    fig_width = fig.get_figwidth()
+    
+    # Adjust date formatting based on figure width
+    if fig_width < 8:
+        # For narrow figures
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        if date_format is None:
+            date_format = '%Y'
+    elif fig_width < 12:
+        # For medium figures
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        if date_format is None:
+            date_format = '%b %Y'
+    else:
+        # For wide figures
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        if date_format is None:
+            date_format = '%b %Y'
+    
+    # Set date formatter
+    if date_format:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+    
+    # Rotate labels
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=rotation, ha='right')
+    
+    # Adjust layout
+    fig.tight_layout()
+    
+    return ax

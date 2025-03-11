@@ -51,9 +51,11 @@ from src.utils import (
     
     # Statistics utilities
     bootstrap_confidence_interval, test_structural_break,
+    test_white_noise, test_autocorrelation, test_stationarity,
     
-    # Configuration
-    config
+    # Plotting utilities
+    set_plotting_style, create_figure, format_date_axis, plot_time_series,
+    add_annotations, save_plot
 )
 
 # Type variable for generic functions
@@ -375,104 +377,703 @@ class ResidualsAnalysis:
         
         return results
 
-
-@m1_optimized(parallel=True)
-@memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
-@timer
-def calculate_fit_statistics(
-    observed: Union[pd.Series, np.ndarray], 
-    predicted: Union[pd.Series, np.ndarray],
-    n_params: int = 1
-) -> Dict[str, float]:
-    """
-    Calculate comprehensive model fit statistics.
-    
-    Parameters
-    ----------
-    observed : array_like
-        Observed values
-    predicted : array_like
-        Predicted values
-    n_params : int, optional
-        Number of parameters in the model
+    @disk_cache(cache_dir='.cache/diagnostics')
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @timer
+    def create_advanced_diagnostic_plots(
+        self, 
+        residuals: Union[pd.Series, np.ndarray], 
+        save_path: Optional[str] = None,
+        include_bootstrap: bool = True,
+        n_bootstrap: int = 1000,
+        confidence_level: float = 0.95
+    ) -> Dict[str, Any]:
+        """
+        Create advanced diagnostic plots for model residuals.
         
-    Returns
-    -------
-    dict
-        Dictionary of fit statistics including R-squared, RMSE, MAE, etc.
-    """
-    # Validate inputs
-    valid1, errors1 = validate_time_series(observed, min_length=3, max_nulls=0)
-    valid2, errors2 = validate_time_series(predicted, min_length=3, max_nulls=0)
-    
-    if not valid1:
-        raise_if_invalid(valid1, errors1, "Invalid observed values")
-    if not valid2:
-        raise_if_invalid(valid2, errors2, "Invalid predicted values")
-    
-    # Convert to numpy arrays
-    if isinstance(observed, pd.Series):
-        observed = observed.values
-    if isinstance(predicted, pd.Series):
-        predicted = predicted.values
-    
-    # Check lengths match
-    if len(observed) != len(predicted):
-        raise ModelError(f"Length of observed ({len(observed)}) must match predicted ({len(predicted)})")
-    
-    # Calculate residuals
-    residuals = observed - predicted
-    
-    # Calculate statistics
-    n = len(observed)
-    y_mean = np.mean(observed)
-    
-    # Total sum of squares
-    ss_total = np.sum((observed - y_mean) ** 2)
-    
-    # Residual sum of squares
-    ss_residual = np.sum(residuals ** 2)
-    
-    # R-squared and adjusted R-squared
-    r_squared = 1 - (ss_residual / ss_total)
-    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - n_params - 1))
-    
-    # Root Mean Squared Error
-    rmse = np.sqrt(ss_residual / n)
-    
-    # Mean Absolute Error
-    mae = np.mean(np.abs(residuals))
-    
-    # Mean Absolute Percentage Error (avoid division by zero)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        abs_percent_errors = np.abs(residuals / observed) * 100
-        mape = np.mean(abs_percent_errors[np.isfinite(abs_percent_errors)])
-    
-    # Log likelihood (assuming normal errors)
-    sigma2 = ss_residual / n
-    loglikelihood = -n/2 * (1 + np.log(2 * np.pi) + np.log(sigma2))
-    
-    # Information criteria
-    aic = -2 * loglikelihood + 2 * n_params
-    bic = -2 * loglikelihood + n_params * np.log(n)
-    
-    return {
-        'r_squared': r_squared,
-        'adj_r_squared': adj_r_squared,
-        'rmse': rmse,
-        'mae': mae,
-        'mape': mape,
-        'aic': aic,
-        'bic': bic,
-        'loglikelihood': loglikelihood,
-        'n_obs': n,
-        'n_params': n_params,
-        'ss_total': ss_total,
-        'ss_residual': ss_residual,
-        'sigma2': sigma2
-    }
-    
+        This method generates a comprehensive set of visualizations for
+        analyzing residuals, including time series plots with confidence bands,
+        ACF/PACF plots, QQ plots, histograms, rolling statistics, and CUSUM
+        stability tests.
+        
+        Parameters
+        ----------
+        residuals : array_like
+            Model residuals for analysis
+        save_path : str, optional
+            Base path to save the plots. If provided, creates a directory
+            for the plots if it doesn't exist.
+        include_bootstrap : bool, optional
+            Whether to calculate bootstrap confidence bands
+        n_bootstrap : int, optional
+            Number of bootstrap replications if bootstrap bands are requested
+        confidence_level : float, optional
+            Confidence level for intervals (0-1)
+            
+        Returns
+        -------
+        dict
+            Dictionary containing figure objects for each plot type:
+            - 'time_series': Time series plot with confidence bands
+            - 'acf_pacf': Autocorrelation and partial autocorrelation plots
+            - 'qq_plot': QQ plot with confidence bands
+            - 'histogram': Histogram with KDE and normal overlay
+            - 'rolling_stats': Rolling statistics plots
+            - 'cusum': CUSUM stability test plot
+            
+        Notes
+        -----
+        This method applies performance optimizations for M1 Mac hardware
+        when generating bootstrap confidence bands. Bootstrap confidence bands
+        provide robust uncertainty quantification especially for non-normal residuals.
+        """
+        # Track memory usage
+        process = psutil.Process(os.getpid())
+        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        # Set plotting style
+        set_plotting_style()
+        
+        # Convert input to numpy array if pandas Series
+        if isinstance(residuals, pd.Series):
+            residuals_series = residuals
+            residuals_array = residuals.values
+            has_index = True
+            index = residuals.index
+        else:
+            residuals_array = np.asarray(residuals)
+            residuals_series = pd.Series(residuals_array)
+            has_index = False
+            index = np.arange(len(residuals_array))
+        
+        # Create output directory if saving plots
+        if save_path:
+            save_dir = Path(save_path)
+            save_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created directory for diagnostic plots: {save_dir}")
+        
+        # Initialize results dictionary
+        figures = {}
+        
+        # 1. Time series plot with confidence bands
+        figures['time_series'] = self._create_time_series_plot(
+            residuals_array, index, has_index, 
+            include_bootstrap, n_bootstrap, confidence_level
+        )
+        
+        # 2. ACF/PACF plots
+        figures['acf_pacf'] = self._create_acf_pacf_plot(residuals_array)
+        
+        # 3. QQ plot with confidence bands
+        figures['qq_plot'] = self._create_qq_plot(residuals_array, confidence_level)
+        
+        # 4. Histogram with KDE and normal overlay
+        figures['histogram'] = self._create_histogram_plot(residuals_array)
+        
+        # 5. Rolling statistics
+        figures['rolling_stats'] = self._create_rolling_stats_plot(
+            residuals_array, index, has_index
+        )
+        
+        # 6. CUSUM stability test
+        figures['cusum'] = self._create_cusum_plot(residuals_array, index, has_index)
+        
+        # Save figures if save_path is provided
+        if save_path:
+            for plot_name, fig in figures.items():
+                if fig is not None:
+                    plot_path = Path(save_path) / f"{plot_name}.png"
+                    save_plot(fig, plot_path, dpi=300)
+                    logger.info(f"Saved {plot_name} plot to {plot_path}")
+        
+        # Track memory after processing
+        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        memory_diff = end_mem - start_mem
+        logger.info(f"Advanced diagnostic plots created. Memory usage: {memory_diff:.2f} MB")
+        
+        # Force garbage collection
+        gc.collect()
+        
+        return figures
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_time_series_plot(
+        self, 
+        residuals: np.ndarray, 
+        index: Union[pd.Index, np.ndarray],
+        has_index: bool,
+        include_bootstrap: bool, 
+        n_bootstrap: int, 
+        confidence_level: float
+    ) -> plt.Figure:
+        """
+        Create time series plot with confidence bands.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+        index : pandas.Index or numpy.ndarray
+            Index values for x-axis
+        has_index : bool
+            Whether a meaningful index is available
+        include_bootstrap : bool
+            Whether to use bootstrap for confidence bands
+        n_bootstrap : int
+            Number of bootstrap replications
+        confidence_level : float
+            Confidence level for intervals
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Time series plot figure
+        """
+        fig, ax = create_figure(width=12, height=6)
+        
+        # Plot residuals time series
+        if has_index:
+            ax.plot(index, residuals, marker='.', linestyle='-', alpha=0.6, 
+                    label='Residuals')
+        else:
+            ax.plot(residuals, marker='.', linestyle='-', alpha=0.6, 
+                    label='Residuals')
+        
+        # Add mean line
+        mean_value = np.mean(residuals)
+        ax.axhline(y=mean_value, color='r', linestyle='-', label=f'Mean: {mean_value:.4f}')
+        
+        # Add confidence bands
+        if include_bootstrap:
+            # Calculate bootstrap confidence bands
+            bands = self._calculate_bootstrap_bands(
+                residuals, n_bootstrap, confidence_level
+            )
+            
+            # Add confidence bands to plot
+            if has_index:
+                ax.fill_between(index, bands['lower'], bands['upper'], 
+                               color='blue', alpha=0.2, 
+                               label=f'{confidence_level*100:.0f}% Confidence Band')
+            else:
+                ax.fill_between(range(len(residuals)), bands['lower'], bands['upper'], 
+                               color='blue', alpha=0.2, 
+                               label=f'{confidence_level*100:.0f}% Confidence Band')
+        else:
+            # Simple analytical bands (±1.96 standard errors for approximately 95% CI)
+            std_dev = np.std(residuals)
+            z_value = stats.norm.ppf(1 - (1 - confidence_level) / 2)
+            upper = mean_value + z_value * std_dev
+            lower = mean_value - z_value * std_dev
+            
+            ax.axhline(y=upper, color='g', linestyle='--', alpha=0.7,
+                      label=f'Upper Bound: {upper:.4f}')
+            ax.axhline(y=lower, color='g', linestyle='--', alpha=0.7,
+                      label=f'Lower Bound: {lower:.4f}')
+        
+        # Add formatting
+        ax.set_title("Residual Time Series with Confidence Bands")
+        ax.set_xlabel("Time" if not has_index else "")
+        ax.set_ylabel("Residual Value")
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+        
+        # Format date axis if available
+        if has_index and pd.api.types.is_datetime64_any_dtype(index):
+            format_date_axis(ax)
+        
+        # Add runs test to check randomness
+        runs_test_result = self._perform_runs_test(residuals)
+        
+        # Add annotations
+        add_annotations(ax, {
+            (0.02, 0.02): f"Runs Test p-value: {runs_test_result['p_value']:.4f}\n"
+                          f"Random: {runs_test_result['random']}",
+        }, offset_x=0, offset_y=0, ha='left', 
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+        
+        plt.tight_layout()
+        return fig
+
+    @m1_optimized(parallel=True)
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _calculate_bootstrap_bands(
+        self, 
+        residuals: np.ndarray, 
+        n_bootstrap: int, 
+        confidence_level: float
+    ) -> Dict[str, np.ndarray]:
+        """
+        Calculate bootstrap confidence bands for residuals.
+        
+        Uses parallel processing for efficient bootstrap computation on M1 hardware.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+        n_bootstrap : int
+            Number of bootstrap replications
+        confidence_level : float
+            Confidence level for intervals
+            
+        Returns
+        -------
+        dict
+            Dictionary with lower and upper confidence bands
+        """
+        # Use bootstrap_confidence_interval utility
+        def mean_func(x):
+            return np.mean(x)
+        
+        # Calculate bootstrap confidence interval for mean
+        bootstrap_result = bootstrap_confidence_interval(
+            data=residuals,
+            statistic_func=mean_func,
+            alpha=1-confidence_level,
+            n_bootstrap=n_bootstrap,
+            method='percentile'
+        )
+        
+        # Get bounds and replicate for time series
+        n = len(residuals)
+        lower = np.ones(n) * bootstrap_result['lower_bound']
+        upper = np.ones(n) * bootstrap_result['upper_bound']
+        
+        return {'lower': lower, 'upper': upper}
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _perform_runs_test(self, residuals: np.ndarray) -> Dict[str, Any]:
+        """
+        Perform runs test for randomness in residuals.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+            
+        Returns
+        -------
+        dict
+            Runs test results including p-value and randomness assessment
+        """
+        # Count runs above and below mean
+        mean = np.mean(residuals)
+        above_mean = residuals > mean
+        
+        # Count runs
+        runs = np.sum(np.diff(above_mean) != 0) + 1
+        
+        # Calculate expected runs and standard deviation
+        n1 = np.sum(above_mean)
+        n2 = len(residuals) - n1
+        expected_runs = (2 * n1 * n2) / (n1 + n2) + 1
+        std_runs = np.sqrt((2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / 
+                           ((n1 + n2) ** 2 * (n1 + n2 - 1)))
+        
+        # Calculate z-statistic and p-value
+        z = (runs - expected_runs) / std_runs
+        p_value = 2 * (1 - stats.norm.cdf(abs(z)))  # Two-sided test
+        
+        return {
+            'runs': runs,
+            'expected_runs': expected_runs,
+            'z_statistic': z,
+            'p_value': p_value,
+            'random': p_value >= 0.05
+        }
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_acf_pacf_plot(self, residuals: np.ndarray) -> plt.Figure:
+        """
+        Create ACF and PACF plots with significance testing.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            ACF/PACF plot figure
+        """
+        from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+        
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+        
+        # Calculate and plot ACF
+        plot_acf(residuals, ax=ax1, lags=min(40, len(residuals) // 2),
+                 alpha=0.05, title='Autocorrelation Function')
+        
+        # Calculate and plot PACF
+        plot_pacf(residuals, ax=ax2, lags=min(40, len(residuals) // 2),
+                  alpha=0.05, title='Partial Autocorrelation Function')
+        
+        # Use project's test_autocorrelation utility
+        autocorr_result = test_autocorrelation(
+            residuals, lags=min(30, len(residuals) // 4)
+        )
+        
+        # Add test results as annotation
+        add_annotations(ax1, {
+            (0.5, 0.02): f"Autocorrelation Test (H0: No Autocorrelation)\n"
+                         f"Significant Lags: {len(autocorr_result.get('significant_lags', []))}\n"
+                         f"Has Autocorrelation: {autocorr_result.get('has_autocorrelation', False)}"
+        }, offset_x=0, offset_y=0, ha='center',
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+        
+        plt.tight_layout()
+        return fig
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_qq_plot(self, residuals: np.ndarray, confidence_level: float) -> plt.Figure:
+        """
+        Create QQ plot with theoretical confidence bands.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+        confidence_level : float
+            Confidence level for intervals
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            QQ plot figure
+        """
+        from statsmodels.graphics.gofplots import qqplot
+        
+        fig, ax = create_figure(width=10, height=6)
+        
+        # Create QQ plot
+        qq = qqplot(residuals, line='s', ax=ax, fit=True)
+        
+        # Calculate theoretical confidence bands
+        n = len(residuals)
+        alpha = 1 - confidence_level
+        
+        # Generate uniform quantiles
+        p = np.linspace(alpha/2, 1-alpha/2, 100)
+        
+        # Transform to normal quantiles
+        theoretical_quantiles = stats.norm.ppf(p)
+        
+        # Calculate confidence bands
+        se = (1 / stats.norm.pdf(theoretical_quantiles)) * np.sqrt(p * (1 - p) / n)
+        upper_band = theoretical_quantiles + se * stats.norm.ppf(1 - alpha/2)
+        lower_band = theoretical_quantiles - se * stats.norm.ppf(1 - alpha/2)
+        
+        # Add confidence bands to plot
+        ax.plot(theoretical_quantiles, upper_band, 'r--', alpha=0.5,
+                label=f'{confidence_level*100:.0f}% Confidence Band')
+        ax.plot(theoretical_quantiles, lower_band, 'r--', alpha=0.5)
+        
+        # Use project's test_normality utility
+        normality_result = self.test_normality(residuals)
+        
+        # Add test results as annotation
+        add_annotations(ax, {
+            (0.02, 0.95): f"Normality Test Results:\n"
+                         f"Statistic: {normality_result.get('statistic', 0):.4f}\n"
+                         f"p-value: {normality_result.get('p_value', 0):.4f}\n"
+                         f"Normal: {normality_result.get('normal', False)}"
+        }, offset_x=0, offset_y=0, va='top',
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+        
+        ax.set_title("QQ Plot with Confidence Bands")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_histogram_plot(self, residuals: np.ndarray) -> plt.Figure:
+        """
+        Create histogram with KDE and normal overlay.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Histogram plot figure
+        """
+        fig, ax = create_figure(width=10, height=6)
+        
+        # Calculate statistics
+        mean = np.mean(residuals)
+        std = np.std(residuals)
+        skewness = stats.skew(residuals)
+        kurtosis = stats.kurtosis(residuals)
+        
+        # Create histogram
+        n, bins, patches = ax.hist(residuals, bins=30, density=True, alpha=0.6,
+                                  label='Histogram')
+        
+        # Add KDE
+        from scipy.stats import gaussian_kde
+        kde = gaussian_kde(residuals)
+        x = np.linspace(min(residuals), max(residuals), 1000)
+        ax.plot(x, kde(x), 'r-', label='KDE')
+        
+        # Add normal distribution overlay
+        ax.plot(x, stats.norm.pdf(x, mean, std), 'k--', linewidth=2,
+               label='Normal Distribution')
+        
+        # Add vertical lines for mean and +/- 1 and 2 standard deviations
+        ax.axvline(x=mean, color='g', linestyle='-', alpha=0.7, label=f'Mean: {mean:.4f}')
+        ax.axvline(x=mean+std, color='g', linestyle='--', alpha=0.5, label=f'+1 SD: {mean+std:.4f}')
+        ax.axvline(x=mean-std, color='g', linestyle='--', alpha=0.5, label=f'-1 SD: {mean-std:.4f}')
+        ax.axvline(x=mean+2*std, color='g', linestyle=':', alpha=0.5, label=f'+2 SD: {mean+2*std:.4f}')
+        ax.axvline(x=mean-2*std, color='g', linestyle=':', alpha=0.5, label=f'-2 SD: {mean-2*std:.4f}')
+        
+        # Use project's test_white_noise utility for comprehensive normality testing
+        white_noise_result = test_white_noise(residuals)
+        
+        # Add test results and statistics as annotation
+        add_annotations(ax, {
+            (0.98, 0.95): f"Distribution Statistics:\n"
+                         f"Mean: {mean:.4f}\n"
+                         f"Std Dev: {std:.4f}\n"
+                         f"Skewness: {skewness:.4f}\n"
+                         f"Kurtosis: {kurtosis:.4f}\n\n"
+                         f"White Noise Test:\n"
+                         f"Is White Noise: {white_noise_result.get('is_white_noise', False)}\n"
+                         f"Normal: {white_noise_result.get('normality_test', {}).get('normal', False)}"
+        }, offset_x=0, offset_y=0, va='top', ha='right',
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+        
+        ax.set_title("Residual Distribution with Normal Overlay")
+        ax.set_xlabel("Residual Value")
+        ax.set_ylabel("Density")
+        ax.legend(loc='upper left')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_rolling_stats_plot(
+        self, 
+        residuals: np.ndarray, 
+        index: Union[pd.Index, np.ndarray],
+        has_index: bool
+    ) -> plt.Figure:
+        """
+        Create rolling statistics plots for residuals.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+        index : pandas.Index or numpy.ndarray
+            Index values for x-axis
+        has_index : bool
+            Whether a meaningful index is available
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Rolling statistics plot figure
+        """
+        # Create DataFrame for rolling calculations
+        if has_index:
+            df = pd.Series(residuals, index=index)
+        else:
+            df = pd.Series(residuals)
+        
+        # Calculate rolling statistics (20% of data points window, min 10 points)
+        window = max(10, int(len(residuals) * 0.2))
+        rolling_mean = df.rolling(window=window).mean()
+        rolling_std = df.rolling(window=window).std()
+        rolling_acf = df.rolling(window=window).apply(
+            lambda x: pd.Series(x).autocorr(1) if len(x) > 5 else np.nan
+        )
+        
+        # Create plot
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
+        
+        # Plot rolling mean
+        if has_index:
+            ax1.plot(index, rolling_mean, 'r-', label=f'Rolling Mean (window={window})')
+            ax1.axhline(y=np.mean(residuals), color='k', linestyle='--', 
+                       label=f'Overall Mean: {np.mean(residuals):.4f}')
+        else:
+            ax1.plot(rolling_mean, 'r-', label=f'Rolling Mean (window={window})')
+            ax1.axhline(y=np.mean(residuals), color='k', linestyle='--', 
+                       label=f'Overall Mean: {np.mean(residuals):.4f}')
+        
+        ax1.set_title("Rolling Mean")
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        
+        # Plot rolling standard deviation
+        if has_index:
+            ax2.plot(index, rolling_std, 'g-', label=f'Rolling Std Dev (window={window})')
+            ax2.axhline(y=np.std(residuals), color='k', linestyle='--', 
+                       label=f'Overall Std Dev: {np.std(residuals):.4f}')
+        else:
+            ax2.plot(rolling_std, 'g-', label=f'Rolling Std Dev (window={window})')
+            ax2.axhline(y=np.std(residuals), color='k', linestyle='--', 
+                       label=f'Overall Std Dev: {np.std(residuals):.4f}')
+        
+        ax2.set_title("Rolling Standard Deviation")
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # Plot rolling autocorrelation
+        if has_index:
+            ax3.plot(index, rolling_acf, 'b-', label=f'Rolling Autocorrelation (window={window})')
+            ax3.axhline(y=pd.Series(residuals).autocorr(1), color='k', linestyle='--', 
+                       label=f'Overall Autocorr: {pd.Series(residuals).autocorr(1):.4f}')
+        else:
+            ax3.plot(rolling_acf, 'b-', label=f'Rolling Autocorrelation (window={window})')
+            ax3.axhline(y=pd.Series(residuals).autocorr(1), color='k', linestyle='--', 
+                       label=f'Overall Autocorr: {pd.Series(residuals).autocorr(1):.4f}')
+        
+        ax3.set_title("Rolling Autocorrelation (Lag 1)")
+        ax3.set_xlabel("Time" if not has_index else "")
+        ax3.grid(True, alpha=0.3)
+        ax3.legend()
+        
+        # Format date axis if available
+        if has_index and pd.api.types.is_datetime64_any_dtype(index):
+            for ax in [ax1, ax2, ax3]:
+                format_date_axis(ax)
+        
+        # Use project's test_structural_break utility
+        struct_break = test_structural_break(
+            y=rolling_mean.dropna().values,
+            method='quandt'
+        )
+        
+        # Add stability test summary
+        add_annotations(ax1, {
+            (0.02, 0.05): f"Structural Break Test:\n"
+                         f"Break Detected: {struct_break.get('significant', False)}\n"
+                         f"Break Point: {struct_break.get('break_date', 'None')}"
+        }, offset_x=0, offset_y=0,
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
+        
+        plt.tight_layout()
+        return fig
+
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    def _create_cusum_plot(
+        self, 
+        residuals: np.ndarray, 
+        index: Union[pd.Index, np.ndarray],
+        has_index: bool
+    ) -> plt.Figure:
+        """
+        Create CUSUM stability test plot.
+        
+        Parameters
+        ----------
+        residuals : numpy.ndarray
+            Residual values
+        index : pandas.Index or numpy.ndarray
+            Index values for x-axis
+        has_index : bool
+            Whether a meaningful index is available
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            CUSUM plot figure
+        """
+        # Calculate CUSUM statistics
+        cusum = np.cumsum(residuals - np.mean(residuals)) / np.std(residuals)
+        
+        # Calculate boundary lines
+        n = len(residuals)
+        alpha = 0.05  # 5% significance level
+        
+        # Critical values based on alpha
+        if alpha == 0.01:
+            critical_value = 1.63  # 99% confidence
+        elif alpha == 0.05:
+            critical_value = 1.36  # 95% confidence
+        elif alpha == 0.10:
+            critical_value = 1.22  # 90% confidence
+        else:
+            critical_value = 1.36  # Default to 95% confidence
+        
+        # Calculate boundary lines
+        t = np.arange(1, n+1)
+        bound = critical_value * np.sqrt(t)
+        
+        # Create plot
+        fig, ax = create_figure(width=12, height=6)
+        
+        # Plot CUSUM
+        if has_index:
+            ax.plot(index, cusum, 'b-', label='CUSUM')
+            ax.plot(index, bound, 'r--', label='Boundary (95% Confidence)')
+            ax.plot(index, -bound, 'r--')
+        else:
+            ax.plot(cusum, 'b-', label='CUSUM')
+            ax.plot(bound, 'r--', label='Boundary (95% Confidence)')
+            ax.plot(-bound, 'r--')
+        
+        ax.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+        
+        # Check if CUSUM crosses boundaries
+        crosses_boundary = np.any(np.abs(cusum) > bound)
+        
+        # Add annotation with result
+        if crosses_boundary:
+            crossing_point = np.argmax(np.abs(cusum) > bound)
+            
+            add_annotations(ax, {
+                (0.5, 0.02): "Boundary Crossed: Parameter Instability Detected"
+            }, offset_x=0, offset_y=0, ha='center',
+            bbox=dict(boxstyle="round,pad=0.3", fc="salmon", ec="red", alpha=0.8))
+            
+            # Mark crossing point
+            if has_index:
+                crossing_x = index[crossing_point]
+            else:
+                crossing_x = crossing_point
+                
+            crossing_y = cusum[crossing_point]
+            ax.plot(crossing_x, crossing_y, 'ro', markersize=10)
+            
+            # Add annotation at crossing point
+            if has_index:
+                ax.annotate(
+                    f"First Boundary Crossing",
+                    xy=(crossing_x, crossing_y), 
+                    xytext=(30, 30),
+                    textcoords='offset points',
+                    arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=.2")
+                )
+        else:
+            add_annotations(ax, {
+                (0.5, 0.02): "No Boundary Crossing: Parameters Stable"
+            }, offset_x=0, offset_y=0, ha='center',
+            bbox=dict(boxstyle="round,pad=0.3", fc="lightgreen", ec="green", alpha=0.8))
+        
+        ax.set_title("CUSUM Stability Test")
+        ax.set_xlabel("Time" if not has_index else "")
+        ax.set_ylabel("CUSUM Statistic")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Format date axis if available
+        if has_index and pd.api.types.is_datetime64_any_dtype(index):
+            format_date_axis(ax)
+        
+        plt.tight_layout()
+        return fig
+        
     @timer
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
     def plot_diagnostics(self, residuals=None, title=None, save_path=None, 
@@ -2754,6 +3355,26 @@ class ModelDiagnostics:
             **kwargs
         )
     
+    def create_advanced_diagnostic_plots(
+        self, 
+        residuals=None, 
+        save_path=None,
+        include_bootstrap=True,
+        n_bootstrap=1000,
+        confidence_level=0.95
+    ):
+        """Create advanced diagnostic plots for model residuals."""
+        if residuals is None:
+            residuals = self.residuals
+        
+        return self.residuals_analyzer.create_advanced_diagnostic_plots(
+            residuals=residuals,
+            save_path=save_path,
+            include_bootstrap=include_bootstrap,
+            n_bootstrap=n_bootstrap,
+            confidence_level=confidence_level
+        )
+    
     @disk_cache(cache_dir='.cache/diagnostics')
     @memory_usage_decorator
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
@@ -2848,11 +3469,17 @@ class ModelDiagnostics:
         
         # Create plots if requested
         if plot and self.residuals is not None:
-            results['plots'] = self.residuals_analyzer.plot_diagnostics(
-                self.residuals,
-                title=kwargs.get('plot_title', f"{self.model_name} Diagnostics"),
-                save_path=kwargs.get('save_path')
-            )
+            if kwargs.get('advanced_plots', False):
+                results['plots'] = self.residuals_analyzer.create_advanced_diagnostic_plots(
+                    self.residuals,
+                    save_path=kwargs.get('save_path')
+                )
+            else:
+                results['plots'] = self.residuals_analyzer.plot_diagnostics(
+                    self.residuals,
+                    title=kwargs.get('plot_title', f"{self.model_name} Diagnostics"),
+                    save_path=kwargs.get('save_path')
+                )
         
         # Calculate memory usage
         end_mem = process.memory_info().rss / (1024 * 1024)  # MB
@@ -2863,3 +3490,100 @@ class ModelDiagnostics:
         gc.collect()
         
         return results
+
+
+@memory_usage_decorator
+@handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+@timer
+def calculate_fit_statistics(
+    observed: Union[pd.Series, np.ndarray], 
+    predicted: Union[pd.Series, np.ndarray],
+    n_params: int = 1
+) -> Dict[str, float]:
+    """
+    Calculate comprehensive model fit statistics.
+    
+    Parameters
+    ----------
+    observed : array_like
+        Observed values
+    predicted : array_like
+        Predicted values
+    n_params : int, optional
+        Number of parameters in the model
+        
+    Returns
+    -------
+    dict
+        Dictionary of fit statistics including R-squared, RMSE, MAE, etc.
+    """
+    # Validate inputs
+    valid1, errors1 = validate_time_series(observed, min_length=3, max_nulls=0)
+    valid2, errors2 = validate_time_series(predicted, min_length=3, max_nulls=0)
+    
+    if not valid1:
+        raise_if_invalid(valid1, errors1, "Invalid observed values")
+    if not valid2:
+        raise_if_invalid(valid2, errors2, "Invalid predicted values")
+    
+    # Convert to numpy arrays
+    if isinstance(observed, pd.Series):
+        observed = observed.values
+    if isinstance(predicted, pd.Series):
+        predicted = predicted.values
+    
+    # Check lengths match
+    if len(observed) != len(predicted):
+        raise ModelError(f"Length of observed ({len(observed)}) must match predicted ({len(predicted)})")
+    
+    # Calculate residuals
+    residuals = observed - predicted
+    
+    # Calculate statistics
+    n = len(observed)
+    y_mean = np.mean(observed)
+    
+    # Total sum of squares
+    ss_total = np.sum((observed - y_mean) ** 2)
+    
+    # Residual sum of squares
+    ss_residual = np.sum(residuals ** 2)
+    
+    # R-squared and adjusted R-squared
+    r_squared = 1 - (ss_residual / ss_total)
+    adj_r_squared = 1 - ((1 - r_squared) * (n - 1) / (n - n_params - 1))
+    
+    # Root Mean Squared Error
+    rmse = np.sqrt(ss_residual / n)
+    
+    # Mean Absolute Error
+    mae = np.mean(np.abs(residuals))
+    
+    # Mean Absolute Percentage Error (avoid division by zero)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        abs_percent_errors = np.abs(residuals / observed) * 100
+        mape = np.mean(abs_percent_errors[np.isfinite(abs_percent_errors)])
+    
+    # Log likelihood (assuming normal errors)
+    sigma2 = ss_residual / n
+    loglikelihood = -n/2 * (1 + np.log(2 * np.pi) + np.log(sigma2))
+    
+    # Information criteria
+    aic = -2 * loglikelihood + 2 * n_params
+    bic = -2 * loglikelihood + n_params * np.log(n)
+    
+    return {
+        'r_squared': r_squared,
+        'adj_r_squared': adj_r_squared,
+        'rmse': rmse,
+        'mae': mae,
+        'mape': mape,
+        'aic': aic,
+        'bic': bic,
+        'loglikelihood': loglikelihood,
+        'n_obs': n,
+        'n_params': n_params,
+        'ss_total': ss_total,
+        'ss_residual': ss_residual,
+        'sigma2': sigma2
+    }

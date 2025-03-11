@@ -221,6 +221,92 @@ def parallelize_array_processing(
             return results
 
 @handle_errors(logger=logger)
+def determine_optimal_chunk_size(
+    data_size: int, 
+    memory_headroom_mb: int = 1000,
+    size_per_item_bytes: int = 1000,
+    min_chunk_size: int = 100,
+    max_chunk_size: Optional[int] = None
+) -> int:
+    """
+    Determine the optimal chunk size for processing large datasets based on available system memory.
+    
+    This function calculates an appropriate chunk size that balances memory usage with processing
+    efficiency. It accounts for system-specific characteristics like available memory and
+    adapts calculation for Apple Silicon systems with shared memory.
+    
+    Parameters
+    ----------
+    data_size : int
+        Total number of items in the dataset
+    memory_headroom_mb : int, default=1000
+        Memory safety margin in MB to reserve for other processes
+    size_per_item_bytes : int, default=1000
+        Estimated memory usage per item in bytes
+    min_chunk_size : int, default=100
+        Minimum chunk size regardless of memory constraints
+    max_chunk_size : int, optional
+        Maximum chunk size (defaults to data_size if not specified)
+        
+    Returns
+    -------
+    int
+        Optimal chunk size for processing
+        
+    Notes
+    -----
+    Memory calculation is performed by:
+    1. Determining available system memory
+    2. Reserving headroom memory
+    3. Dividing usable memory by per-item memory requirements
+    4. Applying system-specific adjustments
+    5. Enforcing minimum and maximum bounds
+    
+    Example
+    -------
+    >>> # Example usage
+    >>> chunk_size = determine_optimal_chunk_size(
+    ...     len(large_dataset), 
+    ...     memory_headroom_mb=2000,
+    ...     size_per_item_bytes=large_dataset.memory_usage(deep=True).sum() / len(large_dataset)
+    ... )
+    """
+    # Get available system memory
+    mem = psutil.virtual_memory()
+    available_memory_bytes = mem.available
+    
+    # Calculate usable memory (available minus headroom)
+    usable_memory_bytes = available_memory_bytes - (memory_headroom_mb * 1024 * 1024)
+    
+    # Account for system-specific memory characteristics
+    if IS_APPLE_SILICON:
+        # Apple Silicon has unified memory architecture, be more conservative
+        # to account for memory shared with GPU
+        usable_memory_bytes = usable_memory_bytes * 0.8
+    
+    # Calculate how many items we can process at once
+    max_items = int(usable_memory_bytes / size_per_item_bytes)
+    
+    # Apply min/max constraints
+    if max_chunk_size is None:
+        max_chunk_size = data_size
+    
+    chunk_size = min(max(min_chunk_size, max_items), max_chunk_size, data_size)
+    
+    # Log the determined chunk size
+    available_memory_mb = available_memory_bytes / (1024 * 1024)
+    usable_memory_mb = usable_memory_bytes / (1024 * 1024)
+    
+    logger.info(
+        f"Determined optimal chunk size: {chunk_size} items "
+        f"(available memory: {available_memory_mb:.1f} MB, "
+        f"usable memory: {usable_memory_mb:.1f} MB, "
+        f"estimated memory per chunk: {(chunk_size * size_per_item_bytes) / (1024 * 1024):.1f} MB)"
+    )
+    
+    return chunk_size
+
+@handle_errors(logger=logger)
 def process_in_batches(
     data: Union[pd.DataFrame, np.ndarray],
     batch_func: Callable,
