@@ -386,7 +386,7 @@ class ResidualsAnalysis:
             residuals: Union[pd.Series, np.ndarray], 
             save_path: Optional[str] = None,
             include_bootstrap: bool = True,
-            n_bootstrap: int = 1000,
+            n_bootstrap: int = 5000,
             confidence_level: float = 0.95
         ) -> Dict[str, Any]:
             """
@@ -2627,7 +2627,7 @@ class PredictionAnalysis:
         statistic_func: Callable,
         n_bootstrap: int = 1000,
         alpha: float = 0.05,
-        method: str = 'percentile',
+        method: str = 'bca',
         batch_size: int = 100,
         max_workers: Optional[int] = None,
         convergence_threshold: Optional[float] = 0.001,

@@ -8,13 +8,13 @@ import matplotlib.dates as mdates
 import plotly.graph_objects as go
 from typing import Optional, List, Dict, Union, Tuple, Any
 
-from src.utils import (
-    handle_errors, 
-    config, 
-    validate_dataframe, 
+from utils import (
+    handle_errors,
+    config,
+    validate_dataframe,
     raise_if_invalid,
-    set_plotting_style, 
-    format_date_axis, 
+    set_plotting_style,
+    format_date_axis,
     format_currency_axis,
     save_plot,
     create_figure,

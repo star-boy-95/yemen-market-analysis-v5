@@ -14,7 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from typing import Optional, Tuple, List, Dict, Any, Union
 import datetime
 
-from src.utils import (
+from utils import (
     handle_errors,
     config,
     validate_dataframe,

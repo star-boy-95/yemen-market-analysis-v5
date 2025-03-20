@@ -32,10 +32,18 @@ class DataLoader:
         gdf = read_geojson(file_path)
         
         valid, errors = validate_geodataframe(
-            gdf, 
-            required_columns=["admin1", "commodity", "date", "price"]
+            gdf,
+            required_columns=["admin1", "commodity", "date", "price"],
+            check_nulls=False  # Don't check for null values
         )
-        raise_if_invalid(valid, errors, f"Invalid GeoJSON file: {filename}")
+        
+        # Log warnings about null values but don't fail
+        for error in errors:
+            if "null values" in error:
+                logger.warning(error)
+            else:
+                # Only raise for critical errors
+                raise_if_invalid(False, [error], f"Invalid GeoJSON file: {filename}")
         
         logger.info(f"Loaded GeoJSON from {file_path}: {len(gdf)} features")
         return gdf

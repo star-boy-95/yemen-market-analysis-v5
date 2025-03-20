@@ -37,6 +37,111 @@ logger = logging.getLogger(__name__)
 # Configure system for optimal performance
 configure_system_for_performance()
 
+@handle_errors(logger=logger, error_type=(ValueError, AttributeError, TypeError))
+def calculate_information_criteria(model):
+    """
+    Calculate information criteria for model selection and comparison.
+    
+    Computes AIC, BIC, and HQC for the given model. If the model already has these
+    attributes, they will be used directly. Otherwise, they will be calculated
+    using the log-likelihood, number of parameters, and number of observations.
+    
+    Parameters
+    ----------
+    model : object
+        Fitted model object. Should have attributes like 'llf', 'nobs', 'params',
+        or methods like 'loglikelihood', 'get_params'.
+        
+    Returns
+    -------
+    dict
+        Dictionary containing information criteria:
+        - 'aic': Akaike Information Criterion
+        - 'bic': Bayesian Information Criterion (Schwarz)
+        - 'hqic': Hannan-Quinn Information Criterion
+        - 'llf': Log-likelihood value
+        - 'n_params': Number of parameters
+        - 'n_obs': Number of observations
+    """
+    result = {}
+    
+    # Extract attributes that might already exist in the model
+    # First check for common information criteria
+    for criterion in ['aic', 'bic', 'hqic']:
+        if hasattr(model, criterion):
+            result[criterion] = getattr(model, criterion)
+    
+    # Get log-likelihood
+    if hasattr(model, 'llf'):
+        result['llf'] = model.llf
+    elif hasattr(model, 'loglikelihood'):
+        result['llf'] = model.loglikelihood
+    elif hasattr(model, 'score'):
+        # Some models use score instead of log-likelihood
+        try:
+            result['llf'] = model.score(getattr(model, 'X', None), getattr(model, 'y', None))
+        except:
+            pass
+    
+    # Get number of parameters
+    if hasattr(model, 'params'):
+        params = getattr(model, 'params')
+        result['n_params'] = len(params) if hasattr(params, '__len__') else 1
+    elif hasattr(model, 'nparams'):
+        result['n_params'] = model.nparams
+    elif hasattr(model, 'n_params'):
+        result['n_params'] = model.n_params
+    elif hasattr(model, 'coef_'):
+        result['n_params'] = len(model.coef_) + (1 if hasattr(model, 'intercept_') else 0)
+    elif hasattr(model, 'get_params'):
+        try:
+            result['n_params'] = len(model.get_params())
+        except:
+            # Default to 1 if we can't determine
+            result['n_params'] = 1
+    else:
+        # Default to 1 if we can't determine
+        result['n_params'] = 1
+    
+    # Get number of observations
+    if hasattr(model, 'nobs'):
+        result['n_obs'] = model.nobs
+    elif hasattr(model, 'n_samples_'):
+        result['n_obs'] = model.n_samples_
+    elif hasattr(model, 'data') and hasattr(model.data, '__len__'):
+        result['n_obs'] = len(model.data)
+    else:
+        # Try to infer from model attributes if possible
+        # but will need default value later if not found
+        pass
+    
+    # Calculate information criteria if they don't already exist
+    if 'llf' in result and 'n_params' in result:
+        
+        # Ensure n_obs is available, use a default if not
+        n_obs = result.get('n_obs', 100)  # Default to 100 if not found
+        result['n_obs'] = n_obs  # Save in results
+        
+        k = result['n_params']
+        llf = result['llf']
+        
+        # Calculate AIC if not already present
+        if 'aic' not in result:
+            result['aic'] = -2 * llf + 2 * k
+        
+        # Calculate BIC if not already present
+        if 'bic' not in result:
+            result['bic'] = -2 * llf + k * np.log(n_obs)
+        
+        # Calculate HQC if not already present
+        if 'hqic' not in result:
+            result['hqic'] = -2 * llf + 2 * k * np.log(np.log(n_obs))
+    
+    # Add model type information
+    result['model_type'] = type(model).__name__
+    
+    return result
+
 class ModelComparer:
     """
     Compare multiple model specifications for the best fit to data.

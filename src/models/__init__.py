@@ -16,8 +16,7 @@ from models.cointegration import (
 from models.diagnostics import (
     ModelDiagnostics,
     calculate_fit_statistics,
-    bootstrap_confidence_intervals,
-    compute_prediction_intervals
+    bootstrap_confidence_interval
 )
 
 # Threshold models
@@ -31,9 +30,6 @@ from models.threshold import (
 
 from models.threshold_vecm import (
     ThresholdVECM,
-    calculate_regime_transition_matrix,
-    calculate_half_lives,
-    test_threshold_significance,
     combine_tvecm_results
 )
 
@@ -66,8 +62,7 @@ __all__ = [
     # Model diagnostics
     'ModelDiagnostics',
     'calculate_fit_statistics',
-    'bootstrap_confidence_intervals',
-    'compute_prediction_intervals',
+    'bootstrap_confidence_interval',
     
     # Threshold models
     'ThresholdCointegration',
@@ -75,9 +70,6 @@ __all__ = [
     'test_asymmetric_adjustment',
     'test_mtar_adjustment',
     'ThresholdVECM',
-    'calculate_regime_transition_matrix',
-    'calculate_half_lives',
-    'test_threshold_significance',
     'combine_tvecm_results',
     
     # Spatial models

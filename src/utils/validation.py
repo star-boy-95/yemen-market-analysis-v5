@@ -577,6 +577,63 @@ def validate_percentage(value: float) -> bool:
     """
     return 0 <= value <= 100
 
+def validate_data(gdf: gpd.GeoDataFrame, logger: logging.Logger) -> bool:
+    """
+    Validate the input data for the Yemen Market Integration analysis.
+    
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        GeoDataFrame containing the market data
+    logger : logging.Logger
+        Logger instance
+        
+    Returns
+    -------
+    bool
+        True if data is valid, False otherwise
+    """
+    logger.info("Validating input data")
+    
+    # Check if it's a GeoDataFrame
+    if not isinstance(gdf, gpd.GeoDataFrame):
+        logger.error("Input data is not a GeoDataFrame")
+        return False
+    
+    # Check required columns
+    required_columns = ['date', 'commodity', 'price', 'admin1', 'geometry']
+    missing_columns = set(required_columns) - set(gdf.columns)
+    if missing_columns:
+        logger.error(f"Missing required columns: {', '.join(missing_columns)}")
+        return False
+    
+    # Check data types
+    if not pd.api.types.is_datetime64_any_dtype(gdf['date']):
+        logger.error("'date' column is not datetime type")
+        return False
+    
+    if not pd.api.types.is_numeric_dtype(gdf['price']):
+        logger.error("'price' column is not numeric type")
+        return False
+    
+    # Check for null values in critical columns
+    for col in ['date', 'commodity', 'price', 'admin1']:
+        if col in gdf.columns:
+            null_count = gdf[col].isnull().sum()
+            if null_count > 0:
+                logger.warning(f"Column '{col}' has {null_count} null values")
+    
+    # Check for valid geometry
+    if gdf.geometry.isna().any():
+        logger.warning(f"Found {gdf.geometry.isna().sum()} rows with missing geometry")
+    
+    # Check for sufficient data
+    if len(gdf) < 10:
+        logger.warning(f"Limited data available: only {len(gdf)} observations")
+    
+    logger.info("Data validation completed")
+    return True
+
 def raise_if_invalid(is_valid: bool, errors: List[str], error_msg: str = "Validation failed") -> None:
     """
     Raise ValidationError if validation failed

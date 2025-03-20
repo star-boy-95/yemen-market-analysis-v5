@@ -2300,6 +2300,62 @@ def compute_variance_ratio(
     
     return result
 
+def calculate_gini_coefficient(
+    data: Union[pd.Series, np.ndarray],
+    weights: Optional[Union[pd.Series, np.ndarray]] = None
+) -> float:
+    """
+    Calculate the Gini coefficient, a measure of inequality.
+    
+    In Yemen's context, this can measure inequality in market access,
+    price dispersion across regions, or welfare distribution.
+    
+    Parameters
+    ----------
+    data : array_like
+        Data values (e.g., incomes, prices)
+    weights : array_like, optional
+        Weights for each observation (e.g., population)
+        
+    Returns
+    -------
+    float
+        Gini coefficient (0 = perfect equality, 1 = perfect inequality)
+    """
+    # Convert to numpy arrays
+    if isinstance(data, pd.Series):
+        data = data.values
+    if weights is not None and isinstance(weights, pd.Series):
+        weights = weights.values
+    
+    # Sort data
+    sorted_indices = np.argsort(data)
+    sorted_data = data[sorted_indices]
+    
+    # Handle weights
+    if weights is None:
+        # Equal weights
+        weights = np.ones_like(data)
+    else:
+        # Sort weights according to data
+        weights = weights[sorted_indices]
+    
+    # Normalize weights to sum to 1
+    weights = weights / np.sum(weights)
+    
+    # Calculate cumulative share of population and variable
+    cum_weights = np.cumsum(weights)
+    cum_values = np.cumsum(sorted_data * weights)
+    cum_values = cum_values / cum_values[-1]  # Normalize
+    
+    # Calculate Gini coefficient using trapezoidal rule
+    # G = 1 - 2 * area under Lorenz curve
+    # Area under Lorenz curve = sum of trapezoids
+    gini = 1 - 2 * np.sum((cum_weights[1:] - cum_weights[:-1]) *
+                          (cum_values[1:] + cum_values[:-1]) / 2)
+    
+    return gini
+
 @m1_optimized()
 @handle_errors(logger=logger)
 def test_structural_break(

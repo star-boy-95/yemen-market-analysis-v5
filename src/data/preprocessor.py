@@ -40,10 +40,18 @@ class DataPreprocessor:
         """
         # Validate input data
         valid, errors = validate_geodataframe(
-            gdf, 
-            required_columns=["admin1", "commodity", "date", "price"]
+            gdf,
+            required_columns=["admin1", "commodity", "date", "price"],
+            check_nulls=False  # Don't check for null values
         )
-        raise_if_invalid(valid, errors, "Invalid input data for preprocessing")
+        
+        # Log warnings about null values but don't fail
+        for error in errors:
+            if "null values" in error:
+                logger.warning(error)
+            else:
+                # Only raise for critical errors
+                raise_if_invalid(False, [error], "Invalid input data for preprocessing")
         
         # Make a copy to avoid modifying the original
         processed = gdf.copy()
@@ -52,7 +60,7 @@ class DataPreprocessor:
         processed = clean_column_names(processed)
         
         # Convert date strings to datetime objects using utility
-        processed = convert_dates(processed, date_cols=['date'])
+        processed = convert_dates(processed, date_columns=['date'])
         
         # Handle missing values using utility
         processed = self._handle_missing_values(processed)
@@ -81,7 +89,7 @@ class DataPreprocessor:
         filled_gdf = fill_missing_values(
             gdf,
             numeric_strategy='median',
-            group_cols=['admin1', 'commodity'],
+            group_columns=['admin1', 'commodity'],
             date_strategy='forward'
         )
         
@@ -116,8 +124,8 @@ class DataPreprocessor:
         """
         # Create date features using utility
         gdf = create_date_features(
-            gdf, 
-            date_col='date',
+            gdf,
+            date_column='date',
             features=['year', 'month', 'weekofyear']
         )
         
@@ -130,9 +138,9 @@ class DataPreprocessor:
         # Create lagged features using utility
         gdf = create_lag_features(
             gdf,
-            cols=['price', 'price_log'],
+            columns=['price', 'price_log'],
             lags=[1],
-            group_cols=['admin1', 'commodity']
+            group_columns=['admin1', 'commodity']
         )
         
         # Calculate price returns manually
@@ -156,7 +164,7 @@ class DataPreprocessor:
         return gdf
     
     @handle_errors(logger=logger, error_type=(ValueError, KeyError))
-    def calculate_price_differentials(self, gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+    def calculate_price_differentials(self, gdf: gpd.GeoDataFrame, commodity: str = None) -> pd.DataFrame:
         """
         Calculate price differentials between north and south exchange rate regimes.
         
@@ -164,6 +172,8 @@ class DataPreprocessor:
         ----------
         gdf : geopandas.GeoDataFrame
             Input GeoDataFrame
+        commodity : str, optional
+            Commodity to filter by
             
         Returns
         -------
@@ -177,19 +187,25 @@ class DataPreprocessor:
         )
         raise_if_invalid(valid, errors, "Invalid data for price differential calculation")
         
+        # Filter by commodity if provided
+        if commodity:
+            filtered_gdf = gdf[gdf['commodity'] == commodity]
+        else:
+            filtered_gdf = gdf
+            
         # Get unique commodities and dates
-        commodities = gdf['commodity'].unique()
-        dates = gdf['date'].unique()
+        commodities = filtered_gdf['commodity'].unique()
+        dates = filtered_gdf['date'].unique()
         
         # Create empty list to store differentials
         differentials = []
         
         # For each commodity and date, calculate north-south differential
-        for commodity in commodities:
+        for commodity_name in commodities:
             for date in dates:
                 # Filter data for this commodity and date
-                mask = (gdf['commodity'] == commodity) & (gdf['date'] == date)
-                data = gdf[mask]
+                mask = (filtered_gdf['commodity'] == commodity_name) & (filtered_gdf['date'] == date)
+                data = filtered_gdf[mask]
                 
                 # Skip if no data for this combination
                 if len(data) == 0:
@@ -205,7 +221,7 @@ class DataPreprocessor:
                 
                 # Calculate differential
                 differential = {
-                    'commodity': commodity,
+                    'commodity': commodity_name,
                     'date': date,
                     'north_price': north_price,
                     'south_price': south_price,

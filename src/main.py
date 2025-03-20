@@ -29,6 +29,7 @@ import argparse
 import logging
 import time
 import warnings
+import sys
 from datetime import datetime
 import statsmodels.api as sm
 from scipy import stats
@@ -1451,16 +1452,19 @@ def main():
         
         # Load and preprocess data
         logger.info(f"Loading data from: {args.data}")
-        loader = DataLoader(args.data)
-        gdf = loader.load_geojson()
+        # Extract just the filename from the path
+        filename = os.path.basename(args.data)
+        # Initialize the loader with the parent directory of data/raw
+        loader = DataLoader("./data")
+        gdf = loader.load_geojson(filename)
         
         # Validate data
         validate_data(gdf, logger)
         
         # Preprocess data
         logger.info("Preprocessing data")
-        preprocessor = DataPreprocessor(gdf)
-        processed_gdf = preprocessor.preprocess()
+        preprocessor = DataPreprocessor()
+        processed_gdf = preprocessor.preprocess_geojson(gdf)
         
         # Calculate price differentials for visualization
         logger.info("Calculating price differentials")

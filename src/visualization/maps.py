@@ -10,10 +10,10 @@ import folium
 from folium.plugins import HeatMap
 from typing import Optional, List, Dict, Union, Tuple, Any
 
-from src.utils import (
-    handle_errors, 
-    config, 
-    validate_geodataframe, 
+from utils import (
+    handle_errors,
+    config,
+    validate_geodataframe,
     raise_if_invalid,
     reproject_gdf,
     save_plot,
