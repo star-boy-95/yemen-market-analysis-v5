@@ -1086,7 +1086,6 @@ def create_market_catchments(
     return result
 
 @handle_errors(logger=logger)
-@m1_optimized(parallel=True)
 def create_conflict_adjusted_weights(
     gdf: gpd.GeoDataFrame,
     k: int = 5,
@@ -1134,15 +1133,26 @@ def create_conflict_adjusted_weights(
     w = copy.deepcopy(knn)
     
     # Adjust weights based on conflict
-    for i, neighbors in w.neighbors.items():
+    for idx, (i, neighbors) in enumerate(w.neighbors.items()):
         new_weights = []
-        for j in neighbors:
-            # Calculate average conflict intensity between regions
-            conflict_factor = (conflict_values[i] + conflict_values[j]) / 2
-            # Reduce weight (increase distance) based on conflict
-            original_weight = w.weights[i][w.neighbors[i].index(j)]
-            new_weight = original_weight * (1 - conflict_weight * conflict_factor)
-            new_weights.append(new_weight)
+        for j_idx, j in enumerate(neighbors):
+            # Get the actual indices in the conflict_values array
+            # Use the position in the GeoDataFrame, not the original index
+            i_pos = list(w.neighbors.keys()).index(i)
+            j_pos = list(w.neighbors.keys()).index(j)
+            
+            # Ensure indices are within bounds
+            if i_pos < len(conflict_values) and j_pos < len(conflict_values):
+                # Calculate average conflict intensity between regions
+                conflict_factor = (conflict_values[i_pos] + conflict_values[j_pos]) / 2
+                # Reduce weight (increase distance) based on conflict
+                original_weight = w.weights[i][j_idx]
+                new_weight = original_weight * (1 - conflict_weight * conflict_factor)
+                new_weights.append(new_weight)
+            else:
+                # If indices are out of bounds, keep original weight
+                logger.warning(f"Index out of bounds in conflict adjustment: {i_pos}, {j_pos}, max={len(conflict_values)-1}")
+                new_weights.append(w.weights[i][j_idx])
         
         w.weights[i] = new_weights
     

@@ -8,10 +8,10 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
-from utils import handle_errors, validate_geodataframe, raise_if_invalid
-from utils import clean_column_names, convert_dates, fill_missing_values
-from utils import normalize_columns, create_date_features, create_lag_features
-from utils import validate_dataframe
+from src.utils import handle_errors, validate_geodataframe, raise_if_invalid
+from src.utils import clean_column_names, convert_dates, fill_missing_values
+from src.utils import normalize_columns, create_date_features, create_lag_features
+from src.utils import validate_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -85,13 +85,20 @@ class DataPreprocessor:
         geopandas.GeoDataFrame
             DataFrame with handled missing values
         """
-        # Use the fill_missing_values utility
+        # Use the fill_missing_values utility (without specifying columns)
         filled_gdf = fill_missing_values(
             gdf,
             numeric_strategy='median',
             group_columns=['admin1', 'commodity'],
             date_strategy='forward'
         )
+        
+        # Fill missing values in 'population' column separately
+        if 'population' in filled_gdf.columns:
+            filled_gdf['population'] = filled_gdf.groupby(['admin1', 'commodity'])['population'].transform(
+                lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
+            )
+            logger.info("Filled missing values in 'population' column with group medians")
         
         # For conflict data, fill remaining NAs with zeros
         conflict_cols = [col for col in filled_gdf.columns if 'conflict' in col]
@@ -142,6 +149,14 @@ class DataPreprocessor:
             lags=[1],
             group_columns=['admin1', 'commodity']
         )
+        
+        # Fill missing values in lagged price columns
+        for col in ['price_lag1', 'price_log_lag1']:
+            if col in gdf.columns:
+                gdf[col] = gdf.groupby(['admin1', 'commodity'])[col].transform(
+                    lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
+                )
+                logger.info(f"Filled missing values in '{col}' with group medians")
         
         # Calculate price returns manually
         gdf = gdf.sort_values(['admin1', 'commodity', 'date'])

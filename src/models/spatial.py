@@ -262,7 +262,10 @@ class SpatialEconometrics:
         """
         significant = gdf['moran_p_value'] < 0.05
         high = gdf[variable] > gdf[variable].mean()
-        high_neighbors = local_moran.lag > local_moran.lag.mean()
+        
+        # Get the spatially lagged variable (y_lag is the correct attribute in Moran_Local)
+        y_lag = local_moran.y_lag
+        high_neighbors = y_lag > y_lag.mean()
         
         # Classify clusters
         gdf['cluster_type'] = 'not_significant'

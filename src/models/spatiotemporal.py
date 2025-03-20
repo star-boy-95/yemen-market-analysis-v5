@@ -43,21 +43,26 @@ def integrate_time_series_spatial_results(time_series_results, spatial_results, 
         integrated_results['adjustment_above'] = tvecm_result.get('adjustment_above_1')
         
         # Calculate half-lives if adjustment parameters are available
-        if 'adjustment_below_1' in tvecm_result and 'adjustment_above_1' in tvecm_result:
-            adj_below = tvecm_result['adjustment_below_1']
-            adj_above = tvecm_result['adjustment_above_1']
-            
+        adj_below = tvecm_result.get('adjustment_below_1')
+        adj_above = tvecm_result.get('adjustment_above_1')
+        
+        if adj_below is not None:
             if adj_below != 0:
                 half_life_below = np.log(0.5) / np.log(1 + abs(adj_below))
                 integrated_results['half_life_below'] = half_life_below
             else:
                 integrated_results['half_life_below'] = float('inf')
+        else:
+            integrated_results['half_life_below'] = None
                 
+        if adj_above is not None:
             if adj_above != 0:
                 half_life_above = np.log(0.5) / np.log(1 + abs(adj_above))
                 integrated_results['half_life_above'] = half_life_above
             else:
                 integrated_results['half_life_above'] = float('inf')
+        else:
+            integrated_results['half_life_above'] = None
     
     # Extract key metrics from spatial analysis
     if spatial_results and 'global_moran' in spatial_results:
@@ -203,7 +208,25 @@ def identify_market_clusters(time_series_results, spatial_results):
     if spatial_results and 'model' in spatial_results and hasattr(spatial_results['model'], 'gdf'):
         gdf = spatial_results['model'].gdf
         
-        if 'lisa_cluster' in gdf.columns:
+        # Check for cluster_type column (from local Moran's I analysis)
+        if 'cluster_type' in gdf.columns:
+            # Count markets in each cluster type
+            cluster_counts = gdf['cluster_type'].value_counts().to_dict()
+            
+            # Create cluster summary
+            clusters['spatial'] = {
+                'counts': cluster_counts,
+                'description': 'Markets grouped by price similarity and spatial proximity'
+            }
+            
+            # Calculate average price by cluster
+            if 'price' in gdf.columns:
+                clusters['spatial']['avg_price'] = {
+                    cluster_type: gdf[gdf['cluster_type'] == cluster_type]['price'].mean()
+                    for cluster_type in cluster_counts.keys()
+                }
+        # Fall back to lisa_cluster if it exists (for backward compatibility)
+        elif 'lisa_cluster' in gdf.columns:
             # Count markets in each cluster type
             cluster_counts = gdf['lisa_cluster'].value_counts().to_dict()
             
