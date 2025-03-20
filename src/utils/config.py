@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, List
 import logging
-from src.utils.error_handler import handle_errors, ConfigError
+from .error_handler import handle_errors, ConfigError
 
 logger = logging.getLogger(__name__)
 

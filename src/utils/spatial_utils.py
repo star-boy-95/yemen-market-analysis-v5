@@ -15,8 +15,8 @@ import logging
 from typing import Union, List, Dict, Any, Optional, Tuple, Callable
 import warnings
 
-from src.utils.error_handler import handle_errors
-from src.utils.decorators import timer, m1_optimized
+from .error_handler import handle_errors
+from .decorators import timer, m1_optimized
 
 logger = logging.getLogger(__name__)
 

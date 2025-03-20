@@ -31,9 +31,9 @@ with contextlib.suppress(ImportError):
     import plotly.express as px
     import plotly.graph_objects as go
 
-from src.utils.error_handler import handle_errors, VisualizationError
-from src.utils.decorators import timer, m1_optimized, memory_usage_decorator
-from src.utils.performance_utils import configure_system_for_performance, parallelize_dataframe, optimize_dataframe
+from .error_handler import handle_errors, VisualizationError
+from .decorators import timer, m1_optimized, memory_usage_decorator
+from .performance_utils import configure_system_for_performance, parallelize_dataframe, optimize_dataframe
 
 logger = logging.getLogger(__name__)
 

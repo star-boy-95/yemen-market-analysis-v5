@@ -11,7 +11,7 @@ from pathlib import Path
 import json
 import re
 
-from src.utils.error_handler import ValidationError
+from .error_handler import ValidationError
 
 logger = logging.getLogger(__name__)
 

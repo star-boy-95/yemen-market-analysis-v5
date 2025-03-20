@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Union, Tuple
 
-from src.utils import handle_errors, validate_geodataframe, raise_if_invalid
-from src.utils import read_geojson, write_geojson, DataError
+from utils import handle_errors, validate_geodataframe, raise_if_invalid
+from utils import read_geojson, write_geojson, DataError
 
 logger = logging.getLogger(__name__)
 

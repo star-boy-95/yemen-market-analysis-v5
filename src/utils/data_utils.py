@@ -12,8 +12,8 @@ from pathlib import Path
 from datetime import datetime
 import re
 
-from src.utils.error_handler import handle_errors, DataError
-from src.utils.decorators import timer, m1_optimized
+from .error_handler import handle_errors, DataError
+from .decorators import timer, m1_optimized
 
 logger = logging.getLogger(__name__)
 

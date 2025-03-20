@@ -3,17 +3,17 @@ Economic modeling and statistical testing modules for market integration analysi
 """
 
 # Unit root testing
-from src.models.unit_root import UnitRootTester, StructuralBreakTester
+from models.unit_root import UnitRootTester, StructuralBreakTester
 
 # Cointegration testing
-from src.models.cointegration import (
+from models.cointegration import (
     CointegrationTester,
     estimate_cointegration_vector,
     calculate_half_life
 )
 
 # Model diagnostics
-from src.models.diagnostics import (
+from models.diagnostics import (
     ModelDiagnostics,
     calculate_fit_statistics,
     bootstrap_confidence_intervals,
@@ -21,7 +21,7 @@ from src.models.diagnostics import (
 )
 
 # Threshold models
-from src.models.threshold import (
+from models.threshold import (
     ThresholdCointegration,
     calculate_asymmetric_adjustment,
     calculate_half_life,
@@ -29,8 +29,8 @@ from src.models.threshold import (
     test_mtar_adjustment
 )
 
-from src.models.threshold_vecm import (
-    ThresholdVECM, 
+from models.threshold_vecm import (
+    ThresholdVECM,
     calculate_regime_transition_matrix,
     calculate_half_lives,
     test_threshold_significance,
@@ -38,7 +38,7 @@ from src.models.threshold_vecm import (
 )
 
 # Spatial models
-from src.models.spatial import (
+from models.spatial import (
     SpatialEconometrics,
     calculate_market_accessibility,
     calculate_market_isolation,
@@ -48,7 +48,7 @@ from src.models.spatial import (
 )
 
 # Simulation models
-from src.models.simulation import (
+from models.simulation import (
     MarketIntegrationSimulation
 )
 

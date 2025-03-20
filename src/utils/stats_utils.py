@@ -13,8 +13,8 @@ import logging
 import warnings
 from arch.unitroot import DFGLS, PhillipsPerron, ZivotAndrews
 
-from src.utils.error_handler import handle_errors, ModelError
-from src.utils.decorators import timer, m1_optimized
+from .error_handler import handle_errors, ModelError
+from .decorators import timer, m1_optimized
 
 logger = logging.getLogger(__name__)
 

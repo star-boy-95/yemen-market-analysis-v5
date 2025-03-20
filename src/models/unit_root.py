@@ -15,7 +15,7 @@ from statsmodels.tsa.stattools import adfuller, kpss
 import arch.unitroot as unitroot
 import ruptures as rpt
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ModelError,
     

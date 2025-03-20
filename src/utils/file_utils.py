@@ -1,3 +1,4 @@
+import fiona
 """
 File operations utilities for the Yemen Market Integration Project.
 """
@@ -18,8 +19,8 @@ import geopandas as gpd
 import numpy as np
 from datetime import datetime
 
-from src.utils.error_handler import handle_errors, DataError
-from src.utils.decorators import timer
+from .error_handler import handle_errors, DataError
+from .decorators import timer
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,7 @@ def write_csv(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool:
     df.to_csv(file_path, **kwargs)
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, gpd.io.file.DriverError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, fiona.errors.DriverError))
 def read_geojson(file_path: Union[str, Path], **kwargs) -> gpd.GeoDataFrame:
     """
     Read GeoJSON file
@@ -620,7 +621,7 @@ def read_large_csv_chunks(file_path: Union[str, Path], chunk_size: int = 10000, 
     return pd.read_csv(file_path, chunksize=chunk_size, **kwargs)
 
 @timer
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, gpd.io.file.DriverError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, fiona.errors.DriverError))
 def read_large_geojson_chunks(file_path: Union[str, Path], chunk_size: int = 1000) -> Iterator[gpd.GeoDataFrame]:
     """
     Read a large GeoJSON file in chunks

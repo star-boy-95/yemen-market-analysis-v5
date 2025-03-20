@@ -383,3 +383,35 @@ def singleton(cls):
         return instances[cls]
     
     return get_instance
+
+def memory_usage_decorator(func: Callable[..., T]) -> Callable[..., T]:
+    """
+    Decorator to measure memory usage of a function
+    
+    Parameters
+    ----------
+    func : callable
+    Function to measure
+    
+    Returns
+    -------
+    callable
+    Decorated function
+    """
+    import psutil
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        process = psutil.Process(os.getpid())
+        start_memory = process.memory_info().rss
+        result = func(*args, **kwargs)
+        end_memory = process.memory_info().rss
+        memory_used = end_memory - start_memory
+        
+        # Convert to MB
+        memory_used_mb = memory_used / (1024 * 1024)
+        
+        func_name = func.__qualname__
+        logger.debug(f"Function {func_name} used {memory_used_mb:.2f} MB of memory")
+        
+        return result
+    return wrapper

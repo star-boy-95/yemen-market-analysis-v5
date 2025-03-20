@@ -16,8 +16,8 @@ import gc
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 
-from src.utils.decorators import timer
-from src.utils.error_handler import handle_errors
+from .decorators import timer
+from .error_handler import handle_errors
 
 logger = logging.getLogger(__name__)
 
