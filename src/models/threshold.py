@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
 import matplotlib.pyplot as plt
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -490,7 +490,7 @@ class ThresholdCointegration:
         
         # Run diagnostics if requested
         if run_diagnostics:
-            from src.models.diagnostics import ModelDiagnostics
+            from models.diagnostics import ModelDiagnostics
             diagnostics = ModelDiagnostics(
                 residuals=self.results['equation1'].resid,
                 model_name="TVECM"
@@ -589,7 +589,7 @@ class ThresholdCointegration:
         logger.info("Running diagnostic tests on TVECM model")
         
         # Use project's ModelDiagnostics
-        from src.models.diagnostics import ModelDiagnostics
+        from models.diagnostics import ModelDiagnostics
         diagnostics = ModelDiagnostics(
             residuals=self.results['equation1'].resid,
             model_name="TVECM"

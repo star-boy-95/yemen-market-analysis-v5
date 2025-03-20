@@ -35,7 +35,8 @@ from scipy.linalg import toeplitz
 from pathlib import Path
 import warnings
 
-from src.utils import (
+from utils.config import config
+from utils import (
     # Error handling
     handle_errors, ModelError,
     
@@ -698,57 +699,57 @@ class ResidualsAnalysis:
         return fig
 
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
-def _create_qq_plot(self, residuals, confidence_level=0.95):
-    """Create QQ plot with confidence bands."""
-    from scipy import stats
-    import statsmodels.api as sm
-    
-    fig, ax = plt.subplots(figsize=(8, 8))
-    
-    # Calculate standardized residuals
-    std_residuals = (residuals - residuals.mean()) / residuals.std()
-    
-    # Create QQ plot
-    sm.qqplot(std_residuals, line='45', ax=ax)
-    
-    # Add confidence bands
-    n = len(residuals)
-    alpha = 1 - confidence_level
-    
-    # Generate theoretical order statistics from normal distribution
-    ordered = stats.norm.ppf(np.arange(1, n + 1) / (n + 1))
-    
-    # Calculate confidence bands
-    stderr = 1.0 / np.sqrt(n)
-    upper = ordered + stderr * stats.norm.ppf(1 - alpha/2)
-    lower = ordered - stderr * stats.norm.ppf(1 - alpha/2)
-    
-    # Get sorted standardized residuals
-    sorted_residuals = np.sort(std_residuals)
-    
-    # Plot confidence bands
-    ax.plot(ordered, upper, 'r--', alpha=0.5)
-    ax.plot(ordered, lower, 'r--', alpha=0.5, 
-           label=f'{confidence_level:.0%} Confidence Band')
-    
-    # Add normality test information
-    k2, p_value = stats.normaltest(std_residuals)
-    norm_test_text = (
-        f"D'Agostino's K² Test:\n"
-        f"K² = {k2:.4f}, p-value = {p_value:.4f}\n"
-        f"{'Normal at 5%' if p_value > 0.05 else 'Non-normal at 5%'}"
-    )
-    ax.text(
-        0.05, 0.95, norm_test_text, transform=ax.transAxes,
-        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
-    )
-    
-    ax.set_title("Normal Q-Q Plot")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    
-    fig.tight_layout()
-    return fig
+    def _create_qq_plot(self, residuals, confidence_level=0.95):
+        """Create QQ plot with confidence bands."""
+        from scipy import stats
+        import statsmodels.api as sm
+        
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        # Calculate standardized residuals
+        std_residuals = (residuals - residuals.mean()) / residuals.std()
+        
+        # Create QQ plot
+        sm.qqplot(std_residuals, line='45', ax=ax)
+        
+        # Add confidence bands
+        n = len(residuals)
+        alpha = 1 - confidence_level
+        
+        # Generate theoretical order statistics from normal distribution
+        ordered = stats.norm.ppf(np.arange(1, n + 1) / (n + 1))
+        
+        # Calculate confidence bands
+        stderr = 1.0 / np.sqrt(n)
+        upper = ordered + stderr * stats.norm.ppf(1 - alpha/2)
+        lower = ordered - stderr * stats.norm.ppf(1 - alpha/2)
+        
+        # Get sorted standardized residuals
+        sorted_residuals = np.sort(std_residuals)
+        
+        # Plot confidence bands
+        ax.plot(ordered, upper, 'r--', alpha=0.5)
+        ax.plot(ordered, lower, 'r--', alpha=0.5,
+               label=f'{confidence_level:.0%} Confidence Band')
+        
+        # Add normality test information
+        k2, p_value = stats.normaltest(std_residuals)
+        norm_test_text = (
+            f"D'Agostino's K² Test:\n"
+            f"K² = {k2:.4f}, p-value = {p_value:.4f}\n"
+            f"{'Normal at 5%' if p_value > 0.05 else 'Non-normal at 5%'}"
+        )
+        ax.text(
+            0.05, 0.95, norm_test_text, transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
+        )
+        
+        ax.set_title("Normal Q-Q Plot")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+        fig.tight_layout()
+        return fig
 
 
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))

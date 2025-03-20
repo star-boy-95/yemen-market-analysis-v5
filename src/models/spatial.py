@@ -13,7 +13,7 @@ from spreg import ML_Lag, ML_Error
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     

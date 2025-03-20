@@ -19,11 +19,11 @@ import time
 from collections import defaultdict
 import itertools
 
-from src.models.threshold import ThresholdCointegration, test_mtar_adjustment
-from src.models.diagnostics import ModelDiagnostics
+from models.threshold import ThresholdCointegration, test_mtar_adjustment
+from models.diagnostics import ModelDiagnostics
 
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ValidationError,
     
@@ -742,7 +742,7 @@ class MarketIntegrationSimulation:
         
         try:
             # Import SpatialEconometrics from spatial.py
-            from src.models.spatial import SpatialEconometrics
+            from models.spatial import SpatialEconometrics
             
             # Create a new model instance
             spatial_model = SpatialEconometrics(data)
@@ -801,7 +801,7 @@ class MarketIntegrationSimulation:
             Integration indices before and after, with percentage improvement
         """
         # Import required function from spatial.py
-        from src.models.spatial import market_integration_index
+        from models.spatial import market_integration_index
         
         # Determine which results to use
         if policy_scenario is not None:
@@ -1969,7 +1969,7 @@ class MarketIntegrationSimulation:
             Structural break test results
         """
         # Import necessary class
-        from src.models.unit_root import StructuralBreakTester
+        from models.unit_root import StructuralBreakTester
         
         logger.info("Testing for structural breaks")
         
@@ -2042,7 +2042,7 @@ class MarketIntegrationSimulation:
             Residual diagnostic test results
         """
         # Import necessary class
-        from src.models.diagnostics import ModelDiagnostics
+        from models.diagnostics import ModelDiagnostics
         
         logger.info("Running residual diagnostics")
         

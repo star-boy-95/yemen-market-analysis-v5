@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
 import matplotlib.pyplot as plt
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     

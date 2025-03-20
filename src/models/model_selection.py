@@ -16,7 +16,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
-from src.utils import (
+from utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
