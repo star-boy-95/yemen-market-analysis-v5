@@ -142,11 +142,11 @@ def fill_missing_values(
                         )
                     elif date_strategy == 'forward':
                         df[column] = df.groupby(valid_group_columns)[column].transform(
-                            lambda x: x.fillna(method='ffill')
+                            lambda x: x.ffill()
                         )
                     elif date_strategy == 'backward':
                         df[column] = df.groupby(valid_group_columns)[column].transform(
-                            lambda x: x.fillna(method='bfill')
+                            lambda x: x.bfill()
                         )
         else:
             logger.warning("No valid group columns found, filling without grouping")
@@ -183,9 +183,9 @@ def fill_missing_values(
             if date_strategy == 'nearest':
                 df[date_columns] = df[date_columns].interpolate(method='nearest')
             elif date_strategy == 'forward':
-                df[date_columns] = df[date_columns].fillna(method='ffill')
+                df[date_columns] = df[date_columns].ffill()
             elif date_strategy == 'backward':
-                df[date_columns] = df[date_columns].fillna(method='bfill')
+                df[date_columns] = df[date_columns].bfill()
     
     return df
 

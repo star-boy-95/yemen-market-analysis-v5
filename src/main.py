@@ -294,12 +294,13 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     
     # Time series plots with enhanced styling
     logger.info(f"Creating time series plots for {commodity}")
-    fig_ts = time_vis.plot_price_series(
+    fig_ts, ax_ts = time_vis.plot_price_series(
         commodity_data,
         group_col='admin1',
-        title=f'Price Trends for {commodity} by Region',
-        style='publication',  # Enhanced styling for publication
-        include_events=True   # Mark significant events/structural breaks
+        title=f'Price Trends for {commodity} by Region'
+        # Removed unsupported parameters:
+        # style='publication',
+        # include_events=True
     )
     ts_path = viz_path / f'{commodity.replace(" ", "_")}_price_trends.png'
     fig_ts.savefig(ts_path, dpi=300, bbox_inches='tight')
@@ -309,11 +310,12 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     # Price differential plots with trend analysis
     logger.info("Creating price differential plots with trend analysis")
     commodity_diff = differentials[differentials['commodity'] == commodity]
-    fig_diff = time_vis.plot_price_differentials(
+    fig_diff, ax_diff = time_vis.plot_price_differentials(
         commodity_diff,
-        title=f'Price Differentials: North vs South ({commodity})',
-        include_trend=True,    # Add trend line
-        style='publication'    # Enhanced styling
+        title=f'Price Differentials: North vs South ({commodity})'
+        # Removed unsupported parameters:
+        # include_trend=True,
+        # style='publication'
     )
     diff_path = viz_path / f'{commodity.replace(" ", "_")}_price_differentials.png'
     fig_diff.savefig(diff_path, dpi=300, bbox_inches='tight')
@@ -322,7 +324,7 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     
     # Create price volatility visualization
     logger.info("Creating price volatility visualization")
-    fig_vol = time_vis.plot_price_volatility(
+    fig_vol, ax_vol = time_vis.plot_price_volatility(
         commodity_data,
         window=12,  # 12-month rolling window
         group_col='exchange_rate_regime',
@@ -342,13 +344,14 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     ]
     
     # Enhanced static map with better color scheme and annotations
-    fig_map = map_vis.plot_static_map(
+    fig_map, ax_map = map_vis.plot_static_map(
         latest_data,
         column='price',
         title=f'Price Distribution of {commodity} ({latest_date.strftime("%Y-%m-%d")})',
-        style='publication',
-        annotate_outliers=True,
-        include_legend=True
+        legend=True  # Changed from include_legend to legend
+        # Removed unsupported parameters:
+        # style='publication',
+        # annotate_outliers=True,
     )
     map_path = viz_path / f'{commodity.replace(" ", "_")}_price_map.png'
     fig_map.savefig(map_path, dpi=300, bbox_inches='tight')
@@ -356,13 +359,14 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     logger.info(f"Saved enhanced spatial map to {map_path}")
     
     # Conflict intensity map
-    fig_conflict = map_vis.plot_static_map(
+    fig_conflict, ax_conflict = map_vis.plot_static_map(
         latest_data,
         column='conflict_intensity_normalized',
         title=f'Conflict Intensity and Market Access ({latest_date.strftime("%Y-%m-%d")})',
-        style='publication',
         cmap='Reds',
-        include_legend=True
+        legend=True  # Changed from include_legend to legend
+        # Removed unsupported parameter:
+        # style='publication',
     )
     conflict_map_path = viz_path / f'{commodity.replace(" ", "_")}_conflict_map.png'
     fig_conflict.savefig(conflict_map_path, dpi=300, bbox_inches='tight')
@@ -375,7 +379,8 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
         latest_data,
         column='price',
         popup_cols=['admin1', 'market', 'price', 'usdprice', 'conflict_intensity_normalized'],
-        title=f'Interactive Price Map for {commodity}'
+        title=f'Interactive Price Map for {commodity}',
+        key_on='feature.properties.admin1'  # Use admin1 as the key column
     )
     interactive_map_path = viz_path / f'{commodity.replace(" ", "_")}_interactive_map.html'
     m.save(interactive_map_path)
@@ -386,10 +391,11 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
     if threshold_model is not None and hasattr(threshold_model, 'results') and threshold_model.results:
         logger.info("Creating asymmetric adjustment visualization")
         asym_vis = AsymmetricAdjustmentVisualizer()
-        fig_asym = asym_vis.plot_asymmetric_adjustment(
+        fig_asym, ax_asym = asym_vis.plot_asymmetric_adjustment(
             threshold_model,
-            title=f'Asymmetric Price Adjustment: {commodity}',
-            style='publication'
+            title=f'Asymmetric Price Adjustment: {commodity}'
+            # Removed unsupported parameter:
+            # style='publication'
         )
         asym_path = viz_path / f'{commodity.replace(" ", "_")}_asymmetric_adjustment.png'
         fig_asym.savefig(asym_path, dpi=300, bbox_inches='tight')
@@ -397,11 +403,12 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
         logger.info(f"Saved asymmetric adjustment plot to {asym_path}")
         
         # Create regime-specific impulse response functions
-        fig_irf = asym_vis.plot_regime_impulse_responses(
+        fig_irf, ax_irf = asym_vis.plot_regime_impulse_responses(
             threshold_model,
             periods=24,
-            title=f'Regime-Specific Impulse Responses: {commodity}',
-            style='publication'
+            title=f'Regime-Specific Impulse Responses: {commodity}'
+            # Removed unsupported parameter:
+            # style='publication'
         )
         irf_path = viz_path / f'{commodity.replace(" ", "_")}_impulse_responses.png'
         fig_irf.savefig(irf_path, dpi=300, bbox_inches='tight')

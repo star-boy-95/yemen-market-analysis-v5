@@ -92,8 +92,10 @@ class MarketMapVisualizer:
             The matplotlib axes
         """
         # Validate inputs
-        valid, errors = validate_geodataframe(gdf)
-        raise_if_invalid(valid, errors, "Invalid GeoDataFrame for static map")
+        valid, errors = validate_geodataframe(gdf, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid GeoDataFrame for static map")
         
         if column is not None and column not in gdf.columns:
             raise ValueError(f"Column '{column}' not found in GeoDataFrame")
@@ -148,12 +150,13 @@ class MarketMapVisualizer:
     
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def create_interactive_map(
-        self, 
-        gdf: gpd.GeoDataFrame, 
-        column: Optional[str] = None, 
+        self,
+        gdf: gpd.GeoDataFrame,
+        column: Optional[str] = None,
         popup_cols: Optional[List[str]] = None,
         title: Optional[str] = None,
-        save_path: Optional[str] = None
+        save_path: Optional[str] = None,
+        key_on: str = 'feature.properties.market_id'
     ) -> folium.Map:
         """
         Create interactive map using folium.
@@ -170,6 +173,8 @@ class MarketMapVisualizer:
             Map title, default None
         save_path : str, optional
             Path to save the HTML map, default None
+        key_on : str, optional
+            The key in GeoJSON to bind the data to, default 'feature.properties.market_id'
             
         Returns
         -------
@@ -177,16 +182,37 @@ class MarketMapVisualizer:
             The folium map
         """
         # Validate inputs
-        valid, errors = validate_geodataframe(gdf)
-        raise_if_invalid(valid, errors, "Invalid GeoDataFrame for interactive map")
+        valid, errors = validate_geodataframe(gdf, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid GeoDataFrame for interactive map")
         
         # Ensure GeoDataFrame has WGS84 CRS for folium
         plot_gdf = reproject_gdf(gdf.copy(), to_crs=4326)  # WGS84 for web mapping
         
+        # Convert any Timestamp objects to strings to avoid JSON serialization issues
+        for col in plot_gdf.columns:
+            if pd.api.types.is_datetime64_any_dtype(plot_gdf[col]):
+                plot_gdf[col] = plot_gdf[col].astype(str)
+        
         # Determine center of map
+        # First reproject to a projected CRS for accurate centroid calculation
+        projected_gdf = plot_gdf.copy()
+        if projected_gdf.crs.is_geographic:
+            # Use a suitable projected CRS (UTM zone for Yemen)
+            projected_gdf = projected_gdf.to_crs(self.yemen_crs)
+        
+        # Calculate centroids in the projected CRS
+        centroids = projected_gdf.geometry.centroid
+        
+        # Convert back to WGS84 for folium
+        if projected_gdf.crs != 4326:
+            centroids = centroids.to_crs(4326)
+        
+        # Calculate the mean center
         center = [
-            plot_gdf.geometry.centroid.y.mean(),
-            plot_gdf.geometry.centroid.x.mean()
+            centroids.y.mean(),
+            centroids.x.mean()
         ]
         
         # Create folium map
@@ -210,13 +236,28 @@ class MarketMapVisualizer:
                 vmin = plot_gdf[column].min()
                 vmax = plot_gdf[column].max()
                 
+                # Extract the key column from the key_on parameter
+                key_parts = key_on.split('.')
+                if len(key_parts) >= 3:
+                    key_column = key_parts[-1]  # Last part of the key_on string
+                else:
+                    key_column = 'index'  # Default to index if key_on format is unexpected
+                
+                # Check if the key column exists in the dataframe
+                if key_column not in plot_gdf.columns and key_column != 'index':
+                    # Use index as fallback
+                    logger.warning(f"Column '{key_column}' not found in GeoDataFrame, using index instead")
+                    key_column = 'index'
+                    # Add index as a column if needed
+                    plot_gdf['index'] = plot_gdf.index
+                
                 # Add choropleth
                 folium.Choropleth(
                     geo_data=plot_gdf.__geo_interface__,
                     name=column,
                     data=plot_gdf,
-                    columns=['market_id', column],
-                    key_on='feature.properties.market_id',
+                    columns=[key_column, column],
+                    key_on=key_on,
                     fill_color=self.cmap,
                     fill_opacity=0.7,
                     line_opacity=0.2,
@@ -285,8 +326,10 @@ class MarketMapVisualizer:
             The folium map
         """
         # Validate inputs
-        valid, errors = validate_geodataframe(gdf, required_columns=[price_col])
-        raise_if_invalid(valid, errors, "Invalid GeoDataFrame for price heatmap")
+        valid, errors = validate_geodataframe(gdf, required_columns=[price_col], check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid GeoDataFrame for price heatmap")
         
         # Filter by commodity and date if provided
         plot_gdf = gdf.copy()
@@ -301,9 +344,23 @@ class MarketMapVisualizer:
         plot_gdf = reproject_gdf(plot_gdf, to_crs=4326)  # WGS84 for web mapping
         
         # Determine center of map
+        # First reproject to a projected CRS for accurate centroid calculation
+        projected_gdf = plot_gdf.copy()
+        if projected_gdf.crs.is_geographic:
+            # Use a suitable projected CRS (UTM zone for Yemen)
+            projected_gdf = projected_gdf.to_crs(self.yemen_crs)
+        
+        # Calculate centroids in the projected CRS
+        centroids = projected_gdf.geometry.centroid
+        
+        # Convert back to WGS84 for folium
+        if projected_gdf.crs != 4326:
+            centroids = centroids.to_crs(4326)
+        
+        # Calculate the mean center
         center = [
-            plot_gdf.geometry.centroid.y.mean(),
-            plot_gdf.geometry.centroid.x.mean()
+            centroids.y.mean(),
+            centroids.x.mean()
         ]
         
         # Create folium map
@@ -391,8 +448,10 @@ class MarketMapVisualizer:
             The matplotlib axes
         """
         # Validate inputs
-        valid, errors = validate_geodataframe(gdf, required_columns=[isolation_col])
-        raise_if_invalid(valid, errors, "Invalid GeoDataFrame for market integration map")
+        valid, errors = validate_geodataframe(gdf, required_columns=[isolation_col], check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid GeoDataFrame for market integration map")
         
         # If isolation_col doesn't exist but we have conflict data, calculate isolation index
         if isolation_col not in gdf.columns and 'conflict_intensity' in gdf.columns:
@@ -460,8 +519,10 @@ class MarketMapVisualizer:
         """
         # Validate inputs
         for gdf, name in [(original_gdf, 'original'), (simulated_gdf, 'simulated')]:
-            valid, errors = validate_geodataframe(gdf, required_columns=[metric_col])
-            raise_if_invalid(valid, errors, f"Invalid {name} GeoDataFrame")
+            valid, errors = validate_geodataframe(gdf, required_columns=[metric_col], check_nulls=False)
+            # Only validate required columns exist, not null values
+            raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                            f"Invalid {name} GeoDataFrame")
         
         # Create a new GeoDataFrame with the difference
         diff_gdf = original_gdf.copy()

@@ -3015,7 +3015,7 @@ def _create_matplotlib_time_series(
     return fig
 
 @handle_errors(logger=logger)
-def format_date_axis(ax, rotation=45, date_format=None):
+def format_date_axis(ax, rotation=45, date_format=None, interval=None):
     """
     Format the date axis for better readability.
     
@@ -3027,6 +3027,8 @@ def format_date_axis(ax, rotation=45, date_format=None):
         Rotation angle for date labels
     date_format : str, optional
         Date format string for date labels
+    interval : str, optional
+        Interval for date ticks ('day', 'week', 'month', 'quarter', 'year')
         
     Returns
     -------
@@ -3039,22 +3041,45 @@ def format_date_axis(ax, rotation=45, date_format=None):
     fig = ax.figure
     fig_width = fig.get_figwidth()
     
-    # Adjust date formatting based on figure width
-    if fig_width < 8:
-        # For narrow figures
-        ax.xaxis.set_major_locator(mdates.YearLocator())
-        if date_format is None:
-            date_format = '%Y'
-    elif fig_width < 12:
-        # For medium figures
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-        if date_format is None:
-            date_format = '%b %Y'
+    # Set locator based on interval parameter if provided
+    if interval:
+        if interval.lower() == 'day':
+            ax.xaxis.set_major_locator(mdates.DayLocator())
+            if date_format is None:
+                date_format = '%Y-%m-%d'
+        elif interval.lower() == 'week':
+            ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0))  # Monday
+            if date_format is None:
+                date_format = '%Y-%m-%d'
+        elif interval.lower() == 'month':
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
+            if date_format is None:
+                date_format = '%b %Y'
+        elif interval.lower() == 'quarter':
+            ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+            if date_format is None:
+                date_format = '%b %Y'
+        elif interval.lower() == 'year':
+            ax.xaxis.set_major_locator(mdates.YearLocator())
+            if date_format is None:
+                date_format = '%Y'
     else:
-        # For wide figures
-        ax.xaxis.set_major_locator(mdates.MonthLocator())
-        if date_format is None:
-            date_format = '%b %Y'
+        # Adjust date formatting based on figure width if interval not specified
+        if fig_width < 8:
+            # For narrow figures
+            ax.xaxis.set_major_locator(mdates.YearLocator())
+            if date_format is None:
+                date_format = '%Y'
+        elif fig_width < 12:
+            # For medium figures
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+            if date_format is None:
+                date_format = '%b %Y'
+        else:
+            # For wide figures
+            ax.xaxis.set_major_locator(mdates.MonthLocator())
+            if date_format is None:
+                date_format = '%b %Y'
     
     # Set date formatter
     if date_format:

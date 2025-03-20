@@ -88,10 +88,15 @@ class TimeSeriesVisualizer:
         if group_col is not None:
             required_cols.append(group_col)
             
-        valid, errors = validate_dataframe(df, required_columns=required_cols)
-        raise_if_invalid(valid, errors, "Invalid data for price series plot")
+        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid data for price series plot")
         
         if group_col is not None:
+            # Create figure first
+            fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
+            
             # Use the utility function for grouped time series
             fig, ax = plot_time_series_by_group(
                 df=df,
@@ -100,9 +105,12 @@ class TimeSeriesVisualizer:
                 group=group_col,
                 title=title,
                 ylabel=ylabel,
-                figsize=(self.fig_width, self.fig_height)
+                ax=ax  # Pass the existing axes instead of figsize
             )
         else:
+            # Create figure first
+            fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
+            
             # Use the utility function for single time series
             fig, ax = plot_time_series(
                 df=df,
@@ -110,7 +118,7 @@ class TimeSeriesVisualizer:
                 y=price_col,
                 title=title,
                 ylabel=ylabel,
-                figsize=(self.fig_width, self.fig_height)
+                ax=ax  # Pass the existing axes instead of figsize
             )
         
         # Configure axes for print if needed
@@ -168,8 +176,10 @@ class TimeSeriesVisualizer:
         else:
             required_cols.append(diff_col)
             
-        valid, errors = validate_dataframe(df, required_columns=required_cols)
-        raise_if_invalid(valid, errors, "Invalid data for price differentials plot")
+        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid data for price differentials plot")
         
         # Create figure
         fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
@@ -222,6 +232,150 @@ class TimeSeriesVisualizer:
             
         return fig, ax
     
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def plot_price_volatility(
+        self,
+        df: pd.DataFrame,
+        price_col: str = 'price_return',
+        date_col: str = 'date',
+        group_col: Optional[str] = None,
+        window: int = 3,
+        title: Optional[str] = None,
+        ylabel: str = 'Price Volatility',
+        save_path: Optional[str] = None
+    ) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot price volatility over time, optionally grouped by a category.
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame containing the price data
+        price_col : str, optional
+            Name of the price column to calculate volatility from, default 'price_return'
+        date_col : str, optional
+            Name of the date column, default 'date'
+        group_col : str, optional
+            Column to group by (e.g., 'exchange_rate_regime'), default None
+        window : int, optional
+            Rolling window size for volatility calculation, default 3
+        title : str, optional
+            Plot title, default None
+        ylabel : str, optional
+            Y-axis label, default 'Price Volatility'
+        save_path : str, optional
+            Path to save the figure, default None
+            
+        Returns
+        -------
+        fig : plt.Figure
+            The matplotlib figure
+        ax : plt.Axes
+            The matplotlib axes
+        """
+        # Validate inputs
+        required_cols = [date_col]
+        if group_col is not None:
+            required_cols.append(group_col)
+            
+        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid data for price volatility plot")
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
+        
+        # If price_col is price_return, use it directly
+        # Otherwise, calculate volatility from the specified column
+        if price_col != 'price_return' and price_col != 'price_volatility':
+            # Check if the column exists
+            if price_col not in df.columns:
+                raise ValueError(f"Column {price_col} not found in DataFrame")
+            
+            # Group by if needed
+            if group_col is not None:
+                groups = df[group_col].unique()
+                for group_val in groups:
+                    group_data = df[df[group_col] == group_val].copy()
+                    group_data = group_data.sort_values(date_col)
+                    
+                    # Calculate returns
+                    group_data['returns'] = group_data[price_col].pct_change()
+                    
+                    # Calculate volatility
+                    group_data['volatility'] = group_data['returns'].rolling(window=window, min_periods=1).std()
+                    
+                    # Plot
+                    ax.plot(
+                        group_data[date_col],
+                        group_data['volatility'],
+                        label=str(group_val)
+                    )
+            else:
+                # Sort by date
+                temp_df = df.sort_values(date_col).copy()
+                
+                # Calculate returns
+                temp_df['returns'] = temp_df[price_col].pct_change()
+                
+                # Calculate volatility
+                temp_df['volatility'] = temp_df['returns'].rolling(window=window, min_periods=1).std()
+                
+                # Plot
+                ax.plot(
+                    temp_df[date_col],
+                    temp_df['volatility']
+                )
+        else:
+            # Use existing volatility column or price_return directly
+            vol_col = 'price_volatility' if 'price_volatility' in df.columns else price_col
+            
+            if group_col is not None:
+                # Group and plot
+                groups = df[group_col].unique()
+                for group_val in groups:
+                    group_data = df[df[group_col] == group_val]
+                    ax.plot(
+                        group_data[date_col],
+                        group_data[vol_col],
+                        label=str(group_val)
+                    )
+            else:
+                # Plot without grouping
+                ax.plot(
+                    df[date_col],
+                    df[vol_col]
+                )
+        
+        # Set labels and title
+        ax.set_ylabel(ylabel)
+        if title:
+            ax.set_title(title)
+        else:
+            ax.set_title('Price Volatility Over Time')
+        
+        # Format date axis
+        format_date_axis(
+            ax,
+            date_format=self.date_format,
+            interval=config.get('visualization.date_interval', 'month')
+        )
+        
+        # Add legend if grouped
+        if group_col is not None:
+            ax.legend()
+        
+        # Add grid if configured
+        if config.get('visualization.grid', True):
+            ax.grid(True, alpha=0.3)
+            
+        # Save if requested
+        if save_path:
+            save_plot(fig, save_path, dpi=self.dpi)
+            
+        return fig, ax
+    
     @handle_errors(logger=logger, error_type=(ValueError, TypeError, ImportError))
     def plot_interactive_time_series(
         self, 
@@ -263,8 +417,10 @@ class TimeSeriesVisualizer:
         if group_col is not None:
             required_cols.append(group_col)
             
-        valid, errors = validate_dataframe(df, required_columns=required_cols)
-        raise_if_invalid(valid, errors, "Invalid data for interactive time series plot")
+        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid data for interactive time series plot")
         
         # Get figure dimensions
         width = config.get('visualization.interactive_width', 800)

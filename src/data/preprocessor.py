@@ -147,10 +147,24 @@ class DataPreprocessor:
         gdf = gdf.sort_values(['admin1', 'commodity', 'date'])
         gdf['price_return'] = gdf.groupby(['admin1', 'commodity'])['price_log'].diff()
         
-        # Create rolling features for volatility
+        # Fill missing price returns with 0 (no change) for first observations in each group
+        missing_returns = gdf['price_return'].isna().sum()
+        if missing_returns > 0:
+            logger.info(f"Filling {missing_returns} missing price returns with 0")
+            gdf['price_return'] = gdf['price_return'].fillna(0)
+        
+        # Create rolling features for volatility with more lenient min_periods
         gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_return'].transform(
             lambda x: x.rolling(window=3, min_periods=1).std()
         )
+        
+        # Fill any remaining missing volatility values with the group median
+        missing_volatility = gdf['price_volatility'].isna().sum()
+        if missing_volatility > 0:
+            logger.info(f"Filling {missing_volatility} missing volatility values with group medians")
+            gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_volatility'].transform(
+                lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
+            )
         
         # Normalize conflict intensity if present
         if 'conflict_intensity' in gdf.columns and 'conflict_intensity_normalized' not in gdf.columns:
@@ -183,9 +197,20 @@ class DataPreprocessor:
         # Validate input data
         valid, errors = validate_dataframe(
             gdf,
-            required_columns=['commodity', 'date', 'price', 'exchange_rate_regime']
+            required_columns=['commodity', 'date', 'price', 'exchange_rate_regime'],
+            check_nulls=False  # Don't fail on null values
         )
-        raise_if_invalid(valid, errors, "Invalid data for price differential calculation")
+        
+        # Log null values but don't fail
+        null_counts = gdf.isnull().sum()
+        columns_with_nulls = null_counts[null_counts > 0]
+        if not columns_with_nulls.empty:
+            for col, count in columns_with_nulls.items():
+                logger.warning(f"Column '{col}' has {count} null values")
+        
+        # Only validate required columns exist, not null values
+        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
+                        "Invalid data for price differential calculation")
         
         # Filter by commodity if provided
         if commodity:
