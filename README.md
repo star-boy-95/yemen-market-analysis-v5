@@ -35,6 +35,7 @@ pip install -e .
 - **Spatial Econometrics**: Implementation of spatial econometric models to analyze geographic dependencies in market integration, including spatial weight matrix creation, spatial lag models (SLM), and spatial error models (SEM).
 - **Policy Simulation**: Tools for simulating various policy interventions, such as exchange rate unification and connectivity improvement, to assess their impact on market integration and welfare.
 - **Visualization**: Comprehensive visualization tools for both time series and spatial data, including time series plots with regime highlighting, spatial maps for market integration visualization, and interactive dashboards for data exploration.
+- **Integration Modules**: New modules for integrating time series and spatial results, interpreting analysis results, and generating comprehensive reports.
 
 ## Usage
 
@@ -80,11 +81,58 @@ weights = model.create_weight_matrix(
 )
 ```
 
+### Using the New Integration Modules
+
+```python
+# Import integration modules
+from src.models.spatiotemporal import integrate_time_series_spatial_results
+from src.models.interpretation import interpret_threshold_results
+from src.models.reporting import generate_comprehensive_report
+
+# Integrate time series and spatial results
+integrated_results = integrate_time_series_spatial_results(
+    time_series_results={
+        'unit_root': unit_root_results,
+        'cointegration': cointegration_results,
+        'tvecm': threshold_results['tvecm']
+    },
+    spatial_results=spatial_results,
+    commodity='beans (kidney red)'
+)
+
+# Interpret threshold model results
+interpretation = interpret_threshold_results(threshold_results, 'beans (kidney red)')
+print(f"Summary: {interpretation['summary']}")
+for implication in interpretation['implications']:
+    print(f"- {implication}")
+
+# Generate comprehensive report
+report_path = generate_comprehensive_report(
+    all_results=all_results,
+    commodity='beans (kidney red)',
+    output_path=Path('output'),
+    logger=logger
+)
+```
+
+### Running the Full Integrated Analysis
+
+```bash
+# Run the integrated analysis for a specific commodity
+python run_yemen_analysis.py --commodity "beans (kidney red)" --output results
+
+# Run with additional parameters
+python run_yemen_analysis.py --commodity "wheat" --output results --max-lags 6 --k-neighbors 8 --report-format markdown
+```
+
 ### Running Tests
 
 ```bash
 # Run all tests
 pytest
+
+# Run specific test modules
+pytest tests/test_integrated_analysis.py
 ```
 
 ## Installation and Development
@@ -140,6 +188,7 @@ The project includes comprehensive documentation:
 - **Implementation Plan**: `docs/implementation_plan.md` - Development roadmap and status
 - **Econometric Methods**: `docs/econometric_methods.md` - Mathematical specifications
 - **Data Dictionary**: `docs/data_dictionary.md` - Data sources and structure
+- **Integration Modules**: `docs/integration_modules.md` - Guide to the new integration modules
 - **API References**:
   - `docs/api/econometrics_api.md` - Econometric model API
   - `docs/api/simulation_api.md` - Simulation model API
@@ -169,6 +218,8 @@ yemen-market-integration/
 │   │   ├── threshold_vecm.py      # TVECM implementation
 │   │   ├── spatial.py             # Spatial econometrics
 │   │   ├── spatiotemporal.py      # Combined spatial-time series
+│   │   ├── interpretation.py      # Results interpretation
+│   │   ├── reporting.py           # Report generation
 │   │   ├── simulation.py          # Policy simulation
 │   │   └── diagnostics.py         # Model diagnostics
 │   │
@@ -206,12 +257,16 @@ yemen-market-integration/
 │   ├── guides/                    # User guides
 │   └── archived/                  # Archived documentation
 │
+├── examples/                      # Example scripts
+│   └── integrated_analysis_example.py  # Example of using integration modules
+│
 ├── config/                        # Configuration files
 │   ├── settings.yaml              # Project settings
 │   └── logging.yaml               # Logging configuration
 │
 ├── logs/                          # Log files
 │
+├── run_yemen_analysis.py          # Main entry point script
 ├── requirements.txt               # Core dependencies
 ├── requirements-dev.txt           # Development dependencies
 ├── setup.py                       # Package installation
@@ -220,6 +275,7 @@ yemen-market-integration/
 ├── .pre-commit-config.yaml        # Pre-commit hooks
 ├── build.sh                       # Build script
 └── Makefile                       # Project makefile
+```
 
 ## Contributing
 

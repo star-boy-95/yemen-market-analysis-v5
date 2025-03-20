@@ -1,1071 +1,410 @@
-# Yemen Market Analysis: Methodology Implementation Plan
-
-This document outlines a comprehensive plan for implementing all missing methodologies in the Yemen Market Analysis project, based on the documentation in the `docs` folder and the current state of the codebase.
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Unit Root and Cointegration Module](#unit-root-and-cointegration-module)
-3. [Threshold Models Module](#threshold-models-module)
-4. [Spatial Econometrics Module](#spatial-econometrics-module)
-5. [Policy Simulation Module](#policy-simulation-module)
-6. [Model Diagnostics Module](#model-diagnostics-module)
-7. [Implementation Timeline](#implementation-timeline)
-8. [Testing Strategy](#testing-strategy)
+# Methodology Implementation Plan for Yemen Market Integration Analysis
 
 ## Overview
 
-The Yemen Market Analysis project requires several advanced econometric methodologies to analyze market integration in conflict-affected settings. Based on the documentation, several key methodologies need to be implemented or completed:
-
-1. **Unit Root and Cointegration Testing**: Methods for testing stationarity and cointegration relationships
-2. **Threshold Models**: Nonlinear models for analyzing asymmetric price adjustments
-3. **Spatial Econometrics**: Methods for analyzing geographic dependencies in market integration
-4. **Policy Simulation**: Tools for simulating the effects of policy interventions
-5. **Model Diagnostics**: Comprehensive tools for validating econometric models
-
-## Unit Root and Cointegration Module
-
-### Current Status
-
-The unit root testing module has basic functionality but is missing several advanced methods and has validation issues.
-
-### Implementation Tasks
-
-1. **Fix Validation Issues**
-   - Update the `validate_time_series()` function to handle the `custom_validators` parameter
-   - Implement proper error handling for missing data and invalid inputs
-   - Add validation for minimum series length and frequency
-
-2. **Implement Zivot-Andrews Test**
-   ```python
-   def test_zivot_andrews(self, series, max_lags=None, trend='both'):
-       """
-       Test for unit root with a structural break using Zivot-Andrews test.
-       
-       Parameters
-       ----------
-       series : array_like
-           Time series to test
-       max_lags : int, optional
-           Maximum number of lags
-       trend : str, optional
-           Trend specification ('intercept', 'trend', 'both')
-           
-       Returns
-       -------
-       dict
-           Test results including:
-           - statistic: test statistic
-           - p_value: p-value
-           - critical_values: critical values
-           - breakpoint: estimated breakpoint
-           - stationary: bool, whether series is stationary
-       """
-       # Validate input
-       valid, errors = validate_time_series(series)
-       if not valid:
-           raise ValidationError(f"Invalid time series: {errors}")
-       
-       # Determine lag order if not specified
-       if max_lags is None:
-           max_lags = int(np.ceil(12 * (len(series)/100)**(1/4)))
-       
-       # Initialize variables
-       t = len(series)
-       y = series.values if isinstance(series, pd.Series) else series
-       
-       # Trim series to exclude endpoints (typically 15% from each end)
-       trim = int(0.15 * t)
-       
-       # Initialize results
-       min_stat = np.inf
-       breakpoint = None
-       
-       # Loop through potential breakpoints
-       for tb in range(trim, t - trim):
-           # Create dummy variables
-           du = np.zeros(t)
-           dt = np.zeros(t)
-           du[tb:] = 1
-           dt[tb:] = np.arange(1, t - tb + 1)
-           
-           # Create regression matrix based on trend specification
-           if trend == 'intercept':
-               x = np.column_stack((np.ones(t), np.arange(1, t + 1), du, y[:-1]))
-           elif trend == 'trend':
-               x = np.column_stack((np.ones(t), np.arange(1, t + 1), dt, y[:-1]))
-           else:  # 'both'
-               x = np.column_stack((np.ones(t), np.arange(1, t + 1), du, dt, y[:-1]))
-           
-           # Add lagged differences
-           for j in range(1, max_lags + 1):
-               x = np.column_stack((x, np.diff(y, n=1)[j-1:t-1+j]))
-           
-           # Adjust sample for lagged differences
-           y_diff = np.diff(y, n=1)[max_lags:]
-           x = x[max_lags:, :]
-           
-           # OLS regression
-           beta = np.linalg.lstsq(x, y_diff, rcond=None)[0]
-           resid = y_diff - x @ beta
-           ssr = np.sum(resid**2)
-           
-           # Calculate t-statistic for unit root coefficient
-           se = np.sqrt(ssr / (len(y_diff) - x.shape[1]))
-           t_stat = beta[3] / (se * np.sqrt(np.linalg.inv(x.T @ x)[3, 3]))
-           
-           # Update minimum statistic
-           if t_stat < min_stat:
-               min_stat = t_stat
-               breakpoint = tb
-       
-       # Critical values (from Zivot and Andrews, 1992)
-       critical_values = {
-           'intercept': {'1%': -5.34, '5%': -4.80, '10%': -4.58},
-           'trend': {'1%': -4.93, '5%': -4.42, '10%': -4.11},
-           'both': {'1%': -5.57, '5%': -5.08, '10%': -4.82}
-       }
-       
-       # Determine p-value (approximation)
-       p_value = self._approximate_za_pvalue(min_stat, trend)
-       
-       # Determine if stationary
-       stationary = min_stat < critical_values[trend]['5%']
-       
-       return {
-           'statistic': min_stat,
-           'p_value': p_value,
-           'critical_values': critical_values[trend],
-           'breakpoint': breakpoint,
-           'stationary': stationary
-       }
-   
-   def _approximate_za_pvalue(self, statistic, trend):
-       """
-       Approximate p-value for Zivot-Andrews test.
-       
-       Parameters
-       ----------
-       statistic : float
-           Test statistic
-       trend : str
-           Trend specification
-           
-       Returns
-       -------
-       float
-           Approximate p-value
-       """
-       # Approximation based on simulated critical values
-       # This is a simplified approach; more accurate methods exist
-       if trend == 'intercept':
-           if statistic < -5.34:
-               return 0.01
-           elif statistic < -4.80:
-               return 0.05
-           elif statistic < -4.58:
-               return 0.10
-           else:
-               return 0.10 + 0.90 * (1 - np.exp(-(statistic + 4.58)))
-       elif trend == 'trend':
-           if statistic < -4.93:
-               return 0.01
-           elif statistic < -4.42:
-               return 0.05
-           elif statistic < -4.11:
-               return 0.10
-           else:
-               return 0.10 + 0.90 * (1 - np.exp(-(statistic + 4.11)))
-       else:  # 'both'
-           if statistic < -5.57:
-               return 0.01
-           elif statistic < -5.08:
-               return 0.05
-           elif statistic < -4.82:
-               return 0.10
-           else:
-               return 0.10 + 0.90 * (1 - np.exp(-(statistic + 4.82)))
-   ```
-
-3. **Implement Integration Order Determination**
-   ```python
-   def determine_integration_order(self, series, max_order=2, alpha=0.05):
-       """
-       Determine the integration order of a time series.
-       
-       Parameters
-       ----------
-       series : array_like
-           Time series to test
-       max_order : int, optional
-           Maximum integration order to test
-       alpha : float, optional
-           Significance level
-           
-       Returns
-       -------
-       int
-           Integration order (0, 1, 2, ..., or max_order if higher)
-       """
-       # Validate input
-       valid, errors = validate_time_series(series)
-       if not valid:
-           raise ValidationError(f"Invalid time series: {errors}")
-       
-       # Test original series
-       adf_result = self.test_adf(series)
-       if adf_result['stationary']:
-           return 0
-       
-       # Test first difference
-       for d in range(1, max_order + 1):
-           diff_series = np.diff(series, n=d)
-           adf_result = self.test_adf(diff_series)
-           if adf_result['stationary']:
-               return d
-       
-       # If still not stationary after max_order differences
-       return max_order
-   ```
-
-4. **Implement Gregory-Hansen Test**
-   ```python
-   def test_gregory_hansen(self, y, x, model='regime_shift', trend='c', max_lags=None, alpha=0.05):
-       """
-       Test for cointegration with structural breaks using Gregory-Hansen test.
-       
-       Parameters
-       ----------
-       y : array_like
-           Dependent variable
-       x : array_like
-           Independent variable(s)
-       model : str, optional
-           Model type ('level_shift', 'regime_shift', 'trend_shift')
-       trend : str, optional
-           Deterministic trend specification ('n', 'c', 'ct')
-       max_lags : int, optional
-           Maximum number of lags for ADF test
-       alpha : float, optional
-           Significance level
-           
-       Returns
-       -------
-       dict
-           Test results including:
-           - statistic: ADF test statistic
-           - p_value: p-value
-           - critical_values: critical values
-           - breakpoint: estimated breakpoint
-           - cointegrated: bool, whether series are cointegrated
-           - beta: cointegrating vector (if cointegrated)
-       """
-       # Implementation similar to Zivot-Andrews but for cointegration
-       # This is a complex test that requires careful implementation
-   ```
-
-5. **Enhance Johansen Test**
-   ```python
-   def test_johansen(self, data, det_order=1, k_ar_diff=2, alpha=0.05):
-       """
-       Test for cointegration in a multivariate system using Johansen procedure.
-       
-       Parameters
-       ----------
-       data : array_like
-           Multivariate time series data
-       det_order : int, optional
-           Deterministic trend specification
-       k_ar_diff : int, optional
-           Number of lagged differences in the VECM
-       alpha : float, optional
-           Significance level
-           
-       Returns
-       -------
-       dict
-           Test results including:
-           - rank: estimated cointegration rank
-           - trace_stat: trace statistics
-           - max_eig_stat: maximum eigenvalue statistics
-           - critical_values: critical values
-           - eigenvectors: cointegrating vectors (if cointegrated)
-           - eigenvalues: eigenvalues from decomposition
-       """
-       # Enhanced implementation with better error handling and validation
-   ```
-
-6. **Implement Half-Life Calculation**
-   ```python
-   def calculate_half_life(self, alpha, method='standard'):
-       """
-       Calculate half-life of deviations from long-run equilibrium.
-       
-       Parameters
-       ----------
-       alpha : float
-           Adjustment speed coefficient from ECM/VECM
-       method : str, optional
-           Method for calculation ('standard', 'threshold')
-           
-       Returns
-       -------
-       float
-           Half-life in time periods
-       """
-       if method == 'standard':
-           # Standard half-life calculation
-           if alpha >= 0:
-               return float('inf')  # No convergence
-           return np.log(0.5) / np.log(1 + alpha)
-       elif method == 'threshold':
-           # Threshold-specific calculation
-           # This would depend on the specific threshold model
-           # Implementation would vary based on model structure
-           pass
-       else:
-           raise ValueError(f"Unknown method: {method}")
-   ```
-
-## Threshold Models Module
-
-### Current Status
-
-The threshold models module has basic functionality but is missing several advanced methods for asymmetric adjustment and regime-switching.
-
-### Implementation Tasks
-
-1. **Implement Threshold Autoregressive (TAR) Model**
-   ```python
-   def estimate_tar(self, threshold_var=None, max_lags=4, trim=0.15, threshold_range=None):
-       """
-       Estimate Threshold Autoregressive (TAR) model.
-       
-       Parameters
-       ----------
-       threshold_var : array_like, optional
-           Threshold variable (uses lagged dependent variable if None)
-       max_lags : int, optional
-           Maximum number of lags
-       trim : float, optional
-           Trimming percentage for threshold search
-       threshold_range : tuple, optional
-           Range for threshold search (min, max)
-           
-       Returns
-       -------
-       dict
-           Estimation results including:
-           - threshold: estimated threshold value
-           - coefficients_below: coefficients for lower regime
-           - coefficients_above: coefficients for upper regime
-           - residuals: model residuals
-           - aic: Akaike Information Criterion
-           - bic: Bayesian Information Criterion
-           - threshold_effect: test for threshold effect
-       """
-       # Implementation
-   ```
-
-2. **Implement Momentum-Threshold Autoregressive (M-TAR) Model**
-   ```python
-   def estimate_mtar(self, max_lags=4, trim=0.15, threshold_range=None):
-       """
-       Estimate Momentum-Threshold Autoregressive (M-TAR) model.
-       
-       Parameters
-       ----------
-       max_lags : int, optional
-           Maximum number of lags
-       trim : float, optional
-           Trimming percentage for threshold search
-       threshold_range : tuple, optional
-           Range for threshold search (min, max)
-           
-       Returns
-       -------
-       dict
-           Estimation results including:
-           - threshold: estimated threshold value
-           - coefficients_below: coefficients for lower regime
-           - coefficients_above: coefficients for upper regime
-           - residuals: model residuals
-           - aic: Akaike Information Criterion
-           - bic: Bayesian Information Criterion
-           - threshold_effect: test for threshold effect
-       """
-       # Implementation
-   ```
-
-3. **Enhance Threshold Cointegration**
-   ```python
-   def estimate_threshold(self, threshold_var=None, trim=0.15, max_iter=300, tol=1e-6):
-       """
-       Estimate threshold cointegration model.
-       
-       Parameters
-       ----------
-       threshold_var : array_like, optional
-           Threshold variable (uses error correction term if None)
-       trim : float, optional
-           Trimming percentage for threshold search
-       max_iter : int, optional
-           Maximum number of iterations for estimation
-       tol : float, optional
-           Convergence tolerance
-           
-       Returns
-       -------
-       dict
-           Estimation results including:
-           - threshold: estimated threshold value
-           - adjustment_below: adjustment coefficient below threshold
-           - adjustment_above: adjustment coefficient above threshold
-           - coefficients_below: coefficients for lower regime
-           - coefficients_above: coefficients for upper regime
-           - residuals: model residuals
-           - aic: Akaike Information Criterion
-           - bic: Bayesian Information Criterion
-           - threshold_effect: test for threshold effect
-       """
-       # Enhanced implementation with better search algorithm
-   ```
-
-4. **Implement Hansen & Seo (2002) Threshold VECM**
-   ```python
-   def estimate_tvecm(self, beta=None, threshold=None, trim=0.15, max_iter=300, tol=1e-6):
-       """
-       Estimate Threshold Vector Error Correction Model (TVECM).
-       
-       Parameters
-       ----------
-       beta : array_like, optional
-           Cointegrating vector (estimated if None)
-       threshold : float, optional
-           Threshold value (estimated if None)
-       trim : float, optional
-           Trimming percentage for threshold search
-       max_iter : int, optional
-           Maximum number of iterations for estimation
-       tol : float, optional
-           Convergence tolerance
-           
-       Returns
-       -------
-       dict
-           Estimation results including:
-           - threshold: estimated threshold value
-           - beta: cointegrating vector
-           - adjustment_below_1: adjustment coefficient for first variable below threshold
-           - adjustment_above_1: adjustment coefficient for first variable above threshold
-           - adjustment_below_2: adjustment coefficient for second variable below threshold
-           - adjustment_above_2: adjustment coefficient for second variable above threshold
-           - coefficients_below: coefficients for lower regime
-           - coefficients_above: coefficients for upper regime
-           - residuals: model residuals
-           - aic: Akaike Information Criterion
-           - bic: Bayesian Information Criterion
-           - threshold_effect: test for threshold effect
-       """
-       # Implementation
-   ```
-
-5. **Implement Impulse Response Functions**
-   ```python
-   def calculate_impulse_responses(self, periods=24, shocks=None, regime=None):
-       """
-       Calculate impulse response functions for threshold models.
-       
-       Parameters
-       ----------
-       periods : int, optional
-           Number of periods for impulse responses
-       shocks : array_like, optional
-           Custom shock values (uses unit shocks if None)
-       regime : str, optional
-           Regime to calculate IRFs for ('below', 'above', 'both')
-           
-       Returns
-       -------
-       dict
-           Impulse response functions including:
-           - irf_below: IRFs for lower regime
-           - irf_above: IRFs for upper regime
-           - irf_combined: Combined IRFs (if regime='both')
-       """
-       # Implementation
-   ```
-
-## Spatial Econometrics Module
-
-### Current Status
-
-The spatial econometrics module has basic functionality but is missing several advanced methods for conflict-adjusted spatial analysis.
-
-### Implementation Tasks
-
-1. **Fix Validation Issues**
-   - Update the `validate_geodataframe()` function to handle the `check_crs` parameter
-   - Fix the Numba compilation issue in `create_conflict_adjusted_weights()`
-   - Implement proper error handling for missing data and invalid inputs
-
-2. **Implement Conflict-Adjusted Spatial Weights**
-   ```python
-   def create_conflict_adjusted_weights(self, gdf, k=5, conflict_col=None, conflict_weight=0.5):
-       """
-       Create spatial weights adjusted for conflict intensity.
-       
-       Parameters
-       ----------
-       gdf : geopandas.GeoDataFrame
-           GeoDataFrame with points
-       k : int, optional
-           Number of nearest neighbors
-       conflict_col : str, optional
-           Column name for conflict intensity
-       conflict_weight : float, optional
-           Weight for conflict in distance adjustment
-           
-       Returns
-       -------
-       libpysal.weights.W
-           Conflict-adjusted spatial weights matrix
-       """
-       # Implementation without Numba to avoid compilation issues
-       # Use pure Python implementation instead
-   ```
-
-3. **Implement Spatial Lag Model**
-   ```python
-   def spatial_lag_model(self, y_col, x_cols, weights=None, method='ML'):
-       """
-       Estimate Spatial Lag Model (SLM).
-       
-       Parameters
-       ----------
-       y_col : str
-           Column name for dependent variable
-       x_cols : list of str
-           Column names for independent variables
-       weights : libpysal.weights.W, optional
-           Spatial weights matrix (uses self.weights if None)
-       method : str, optional
-           Estimation method ('ML', 'GMM')
-           
-       Returns
-       -------
-       dict
-           Model results including:
-           - rho: spatial autoregressive parameter
-           - betas: coefficient estimates
-           - std_err: standard errors
-           - t_stats: t-statistics
-           - p_values: p-values
-           - r2: R-squared
-           - log_likelihood: log-likelihood
-           - aic: Akaike Information Criterion
-       """
-       # Implementation
-   ```
-
-4. **Implement Spatial Error Model**
-   ```python
-   def spatial_error_model(self, y_col, x_cols, weights=None, method='ML'):
-       """
-       Estimate Spatial Error Model (SEM).
-       
-       Parameters
-       ----------
-       y_col : str
-           Column name for dependent variable
-       x_cols : list of str
-           Column names for independent variables
-       weights : libpysal.weights.W, optional
-           Spatial weights matrix (uses self.weights if None)
-       method : str, optional
-           Estimation method ('ML', 'GMM')
-           
-       Returns
-       -------
-       dict
-           Model results including:
-           - lambda: spatial error parameter
-           - betas: coefficient estimates
-           - std_err: standard errors
-           - t_stats: t-statistics
-           - p_values: p-values
-           - r2: R-squared
-           - log_likelihood: log-likelihood
-           - aic: Akaike Information Criterion
-       """
-       # Implementation
-   ```
-
-5. **Implement Spatial Durbin Model**
-   ```python
-   def spatial_durbin_model(self, y_col, x_cols, weights=None, method='ML'):
-       """
-       Estimate Spatial Durbin Model (SDM).
-       
-       Parameters
-       ----------
-       y_col : str
-           Column name for dependent variable
-       x_cols : list of str
-           Column names for independent variables
-       weights : libpysal.weights.W, optional
-           Spatial weights matrix (uses self.weights if None)
-       method : str, optional
-           Estimation method ('ML', 'GMM')
-           
-       Returns
-       -------
-       dict
-           Model results including:
-           - rho: spatial autoregressive parameter
-           - betas: coefficient estimates
-           - thetas: spatial lag coefficient estimates
-           - std_err: standard errors
-           - t_stats: t-statistics
-           - p_values: p-values
-           - r2: R-squared
-           - log_likelihood: log-likelihood
-           - aic: Akaike Information Criterion
-       """
-       # Implementation
-   ```
-
-6. **Implement Direct and Indirect Effects Calculation**
-   ```python
-   def calculate_impacts(self, model='lag'):
-       """
-       Calculate direct, indirect, and total effects for spatial models.
-       
-       Parameters
-       ----------
-       model : str, optional
-           Model type ('lag', 'error', 'durbin')
-           
-       Returns
-       -------
-       dict
-           Impact measures including:
-           - direct: direct effects
-           - indirect: indirect (spillover) effects
-           - total: total effects
-       """
-       # Implementation
-   ```
-
-7. **Implement Market Accessibility Index**
-   ```python
-   def compute_accessibility_index(self, population_gdf, max_distance=None, distance_decay=2.0, weight_col='population'):
-       """
-       Compute market accessibility index considering population and distance.
-       
-       Parameters
-       ----------
-       population_gdf : geopandas.GeoDataFrame
-           GeoDataFrame with population points/polygons
-       max_distance : float, optional
-           Maximum distance to consider
-       distance_decay : float, optional
-           Distance decay parameter (power)
-       weight_col : str, optional
-           Column name in population_gdf for weights
-           
-       Returns
-       -------
-       geopandas.GeoDataFrame
-           Original GeoDataFrame with additional column 'accessibility_index'
-       """
-       # Implementation
-   ```
-
-## Policy Simulation Module
-
-### Current Status
-
-The policy simulation module is missing most of its core functionality, with only placeholder implementations.
-
-### Implementation Tasks
-
-1. **Implement Exchange Rate Unification Simulation**
-   ```python
-   def simulate_exchange_rate_unification(self, target_rate='official', reference_date=None):
-       """
-       Simulate exchange rate unification using USD as cross-rate.
-       
-       Parameters
-       ----------
-       target_rate : str or float, optional
-           Method to determine the unified exchange rate:
-           - 'official': Use official exchange rate
-           - 'market': Use market exchange rate
-           - 'average': Use average of north and south rates
-           - Specific value: Use provided numerical value
-       reference_date : str, optional
-           Date to use for reference exchange rates (default: latest date)
-           
-       Returns
-       -------
-       dict
-           Simulation results including:
-           - 'simulated_data': GeoDataFrame with simulated prices
-           - 'unified_rate': Selected unified exchange rate
-           - 'price_changes': DataFrame of price changes by region
-           - 'threshold_model': Re-estimated threshold model
-       """
-       # Validate input data
-       self._validate_input_data()
-       
-       # Convert prices to USD
-       data_with_usd = self._convert_to_usd(self.data)
-       
-       # Determine unified exchange rate
-       unified_rate = self._determine_unified_rate(data_with_usd, target_rate, reference_date)
-       
-       # Apply unified rate to convert back to YER
-       simulated_data = data_with_usd.copy()
-       simulated_data['simulated_price'] = simulated_data['usd_price'] * unified_rate
-       
-       # Calculate price changes
-       price_changes = self._calculate_price_changes(
-           self.data['price'], 
-           simulated_data['simulated_price'],
-           by_column='exchange_rate_regime'
-       )
-       
-       # Re-estimate threshold model if available
-       threshold_model = None
-       if self.threshold_model is not None:
-           # Extract north and south prices
-           north_prices = simulated_data[simulated_data['exchange_rate_regime'] == 'north']['simulated_price']
-           south_prices = simulated_data[simulated_data['exchange_rate_regime'] == 'south']['simulated_price']
-           
-           # Re-estimate threshold model
-           from src.models.threshold import ThresholdCointegration
-           threshold_model = ThresholdCointegration(north_prices, south_prices)
-           threshold_model.estimate_cointegration()
-           threshold_model.estimate_threshold()
-       
-       return {
-           'simulated_data': simulated_data,
-           'unified_rate': unified_rate,
-           'price_changes': price_changes,
-           'threshold_model': threshold_model
-       }
-   ```
-
-2. **Implement Improved Connectivity Simulation**
-   ```python
-   def simulate_improved_connectivity(self, reduction_factor=0.5):
-       """
-       Simulate improved connectivity by reducing conflict barriers.
-       
-       Parameters
-       ----------
-       reduction_factor : float, optional
-           Factor by which to reduce conflict intensity (0.0-1.0)
-           
-       Returns
-       -------
-       dict
-           Simulation results including:
-           - 'simulated_data': GeoDataFrame with reduced conflict intensity
-           - 'spatial_weights': Recalculated spatial weights
-           - 'spatial_model': Re-estimated spatial model
-       """
-       # Validate input data
-       self._validate_input_data()
-       
-       # Apply improved connectivity
-       simulated_data, new_weights = self._apply_improved_connectivity(
-           self.data, 
-           reduction_factor=reduction_factor,
-           conflict_col='conflict_intensity_normalized'
-       )
-       
-       # Re-estimate spatial model if available
-       spatial_model = None
-       if self.spatial_model is not None:
-           # Create new spatial model with simulated data
-           from src.models.spatial import SpatialEconometrics
-           spatial_model = SpatialEconometrics(simulated_data)
-           spatial_model.weights = new_weights
-           
-           # Re-estimate model
-           if hasattr(self.spatial_model, 'y_col') and hasattr(self.spatial_model, 'x_cols'):
-               spatial_model.spatial_lag_model(
-                   y_col=self.spatial_model.y_col,
-                   x_cols=self.spatial_model.x_cols
-               )
-       
-       return {
-           'simulated_data': simulated_data,
-           'spatial_weights': new_weights,
-           'spatial_model': spatial_model
-       }
-   ```
-
-3. **Implement Combined Policy Simulation**
-   ```python
-   def simulate_combined_policies(self, reduction_factor=0.5, unification_method='official', reference_date=None):
-       """
-       Simulate combined exchange rate unification and improved connectivity.
-       
-       Parameters
-       ----------
-       reduction_factor : float, optional
-           Factor by which to reduce conflict intensity
-       unification_method : str, optional
-           Method to determine unified exchange rate
-       reference_date : str, optional
-           Date to use for reference exchange rates
-           
-       Returns
-       -------
-       dict
-           Combined simulation results
-       """
-       # Validate input data
-       self._validate_input_data()
-       
-       # First simulate improved connectivity
-       connectivity_results = self.simulate_improved_connectivity(reduction_factor)
-       
-       # Then simulate exchange rate unification on the connectivity-adjusted data
-       # Create a temporary simulation object with the connectivity-adjusted data
-       temp_sim = MarketIntegrationSimulation(
-           data=connectivity_results['simulated_data'],
-           threshold_model=self.threshold_model,
-           spatial_model=connectivity_results['spatial_model']
-       )
-       
-       # Run exchange rate unification simulation
-       exchange_results = temp_sim.simulate_exchange_rate_unification(
-           target_rate=unification_method,
-           reference_date=reference_date
-       )
-       
-       # Combine results
-       combined_results = {
-           'simulated_data': exchange_results['simulated_data'],
-           'unified_rate': exchange_results['unified_rate'],
-           'conflict_reduction': reduction_factor,
-           'price_changes': exchange_results['price_changes'],
-           'threshold_model': exchange_results['threshold_model'],
-           'spatial_model': connectivity_results['spatial_model'],
-           'spatial_weights': connectivity_results['spatial_weights']
-       }
-       
-       return combined_results
-   ```
-
-4. **Implement Welfare Effects Calculation**
-   ```python
-   def calculate_welfare_effects(self, policy_scenario=None):
-       """
-       Calculate welfare effects of policy simulations.
-       
-       Parameters
-       ----------
-       policy_scenario : str, optional
-           Which policy scenario to analyze:
-           - 'exchange_rate_unification'
-           - 'improved_connectivity'
-           - 'combined_policy'
-           If None, uses latest simulation results
-           
-       Returns
-       -------
-       dict
-           Welfare analysis results
-       """
-       # Implementation
-   ```
-
-5. **Implement Sensitivity Analysis**
-   ```python
-   def run_sensitivity_analysis(self, sensitivity_type='conflict_reduction', param_values=None, metrics=None):
-       """
-       Run sensitivity analysis by varying parameters and measuring impact.
-       
-       Parameters
-       ----------
-       sensitivity_type : str, optional
-           Type of sensitivity analysis:
-           - 'conflict_reduction': Vary conflict reduction factor
-           - 'exchange_rate': Vary exchange rate target values
-       param_values : List[float], optional
-           List of parameter values to test
-       metrics : List[str], optional
-           List of metrics to track
-           
-       Returns
-       -------
-       dict
-           Sensitivity analysis results
-       """
-       # Implementation
-   ```
-
-## Model Diagnostics Module
-
-### Current Status
-
-The model diagnostics module has basic functionality but is missing several advanced methods for comprehensive model validation.
-
-### Implementation Tasks
-
-1. **Implement Residual Diagnostics**
-   ```python
-   def residual_tests(self, residuals, lags=10):
-       """
-       Run comprehensive diagnostic tests on model residuals.
-       
-       Parameters
-       ----------
-       residuals : array_like
-           Model residuals
-       lags : int, optional
-           Number of lags for autocorrelation tests
-           
-       Returns
-       -------
-       dict
-           Test results including:
-           - normality: Jarque-Bera test results
-           - autocorrelation: Ljung-Box test results
-           - heteroskedasticity: White test results
-           - overall: summary of all tests
-       """
-       # Implementation
-   ```
-
-2. **Implement Model Selection Criteria**
-   ```python
-   def calculate_information_criteria(self, model):
-       """
-       Calculate information criteria for model selection.
-       
-       Parameters
-       ----------
-       model : object
-           Estimated model object
-           
-       Returns
-       -------
-       dict
-           Information criteria including:
-           - aic: Akaike Information Criterion
-           - bic: Bayesian Information Criterion
-           - hqic: Hannan-Quinn Information Criterion
-       """
-       # Implementation
-   ```
-
-3. **Implement Parameter Stability Tests**
-   ```python
-   def test_parameter_stability(self, model, data):
-       """
-       Test for parameter stability over time.
-       
-       Parameters
-       ----------
-       model : object
-           Estimated model object
-       data : pandas.DataFrame
-           Data used for estimation
-           
-       Returns
-       -------
-       dict
-           Stability test results including:
-           - cusum: CUSUM test results
-           - cusum_sq: CUSUM of squares test results
-           - recursive: recursive estimation results
-           - chow: Chow test results
-       """
-       # Implementation
-   ```
-
-4. **Implement Model Comparison**
-   ```python
-   def compare_models(self, models, data):
-       """
-       Compare multiple models using various criteria.
-       
-       Parameters
-       ----------
-       models : list
-           List of estimated model objects
-       data : pandas.DataFrame
-           Data used for estimation
-           
-       Returns
-       -------
-       dict
-           Comparison results including:
-           - information_criteria: AIC, BIC, HQIC for each model
-           - likelihood_ratio: likelihood ratio test results
-           - forecast_accuracy: forecast accuracy metrics
-           - recommendation: recommended model
-       """
-       # Implementation
-   ```
-
-## Implementation Timeline
-
-### Phase 1: Core Functionality (Weeks 1-2)
-
-1. Fix validation issues in Unit Root and Spatial modules
-2. Implement basic Threshold Cointegration functionality
-3. Implement Exchange Rate Unification simulation
-
-### Phase 2: Advanced Methods (Weeks 3-4)
-
-1. Implement Zivot-Andrews and Gregory-Hansen tests
-2. Implement Hansen & Seo Threshold VECM
-3. Implement Conflict-Adjusted Spatial Weights
-4. Implement Improved Connectivity simulation
-
-### Phase 3: Integration and Optimization (Weeks 5-6)
-
-1. Implement Combined Policy simulation
-2. Implement Welfare Effects calculation
-3. Optimize performance for large datasets
-4. Implement parallel processing for simulations
-
-### Phase 4: Diagnostics and Validation (Weeks 7-8)
-
-1. Implement comprehensive Residual Diagnostics
-2. Implement Parameter Stability Tests
-3. Implement Model Comparison functionality
-4. Implement Sensitivity Analysis
-
-## Testing Strategy
-
-### Unit Tests
-
-1. Test each method with known data and expected results
-2. Test edge cases and error handling
-3. Test with different parameter configurations
-
-### Integration Tests
-
-1. Test interaction between different modules
-2. Test end-to-end workflows
-3. Test with real Yemen market data
-
-### Performance Tests
-
-1. Test with large datasets
-2. Benchmark parallel processing performance
-3. Test memory usage optimization
-
-### Validation Tests
-
-1. Compare results with established econometric software
-2. Validate against theoretical expectations
-3. Test robustness to different data characteristics
+This document outlines the econometric methodology and implementation plan for the Yemen Market Integration project. It focuses on the technical aspects of implementing the econometric methods, including threshold cointegration, spatial econometrics, and policy simulation.
+
+## 1. Econometric Framework
+
+### 1.1 Time Series Analysis
+
+#### Unit Root Testing
+- **Implementation Status**: Complete
+- **Methods**: 
+  - Augmented Dickey-Fuller (ADF) test
+  - KPSS test
+  - Zivot-Andrews test for structural breaks
+- **Implementation Details**:
+  - Use the `UnitRootTester` class in `src/models/unit_root.py`
+  - Implement tests with appropriate lag selection
+  - Account for structural breaks due to conflict events
+
+#### Cointegration Analysis
+- **Implementation Status**: Complete
+- **Methods**:
+  - Engle-Granger two-step method
+  - Johansen procedure for multivariate analysis
+  - Gregory-Hansen test for cointegration with structural breaks
+- **Implementation Details**:
+  - Use the `CointegrationTester` class in `src/models/cointegration.py`
+  - Implement tests with appropriate model specification
+  - Calculate half-life of deviations from equilibrium
+
+#### Threshold Cointegration
+- **Implementation Status**: Complete
+- **Methods**:
+  - Threshold Autoregressive (TAR) models
+  - Momentum-TAR (M-TAR) models
+  - Threshold Vector Error Correction Models (TVECM)
+- **Implementation Details**:
+  - Use the `ThresholdCointegration` class in `src/models/threshold.py`
+  - Implement grid search for threshold estimation
+  - Calculate asymmetric adjustment parameters
+
+### 1.2 Spatial Econometrics
+
+#### Spatial Weight Matrix
+- **Implementation Status**: Complete
+- **Methods**:
+  - K-nearest neighbors weights
+  - Conflict-adjusted weights
+  - Exchange rate regime boundary weights
+- **Implementation Details**:
+  - Use the `SpatialEconometrics` class in `src/models/spatial.py`
+  - Implement conflict adjustment using conflict intensity data
+  - Create specialized weights for cross-regime connections
+
+#### Spatial Regression Models
+- **Implementation Status**: Complete with recent updates
+- **Methods**:
+  - Spatial Lag Model (SLM)
+  - Spatial Error Model (SEM)
+  - Direct, indirect, and total effects calculation
+- **Implementation Details**:
+  - Use the `spatial_lag_model` and `spatial_error_model` methods
+  - Implement the `calculate_impacts` method for effect decomposition
+  - Store models as class attributes for further analysis
+
+#### Spatial Autocorrelation
+- **Implementation Status**: Complete
+- **Methods**:
+  - Global Moran's I
+  - Local Indicators of Spatial Association (LISA)
+  - Spatial clusters and outliers
+- **Implementation Details**:
+  - Use the `moran_i_test` and `local_moran_test` methods
+  - Implement cluster classification
+  - Visualize spatial patterns
+
+### 1.3 Policy Simulation
+
+#### Exchange Rate Unification
+- **Implementation Status**: Needs implementation
+- **Methods**:
+  - Official rate unification
+  - Market rate unification
+  - Average rate unification
+- **Implementation Details**:
+  - Implement in `MarketIntegrationSimulation` class
+  - Convert prices to USD using regional exchange rates
+  - Apply unified exchange rate across all regions
+  - Recalculate price differentials and integration metrics
+
+#### Conflict Reduction
+- **Implementation Status**: Needs implementation
+- **Methods**:
+  - Uniform conflict reduction
+  - Targeted conflict reduction
+  - Gradual vs. immediate reduction
+- **Implementation Details**:
+  - Implement in `MarketIntegrationSimulation` class
+  - Reduce conflict intensity by specified factor
+  - Recalculate spatial weights and market connections
+  - Estimate impact on price transmission
+
+#### Combined Policy Analysis
+- **Implementation Status**: Needs implementation
+- **Methods**:
+  - Sequential policy implementation
+  - Simultaneous policy implementation
+  - Interaction effects analysis
+- **Implementation Details**:
+  - Implement in `MarketIntegrationSimulation` class
+  - Combine exchange rate unification and conflict reduction
+  - Analyze synergies and trade-offs
+  - Calculate comprehensive welfare effects
+
+## 2. Implementation Priorities
+
+### 2.1 Immediate Priorities
+
+1. **Complete Spatial Impact Calculation**
+   - Status: Complete
+   - Details: Implemented the `calculate_impacts` method in `SpatialEconometrics` class
+
+2. **Implement Exchange Rate Unification Simulation**
+   - Status: Needs implementation
+   - Details: Replace placeholder with actual implementation in `MarketIntegrationSimulation` class
+
+3. **Implement Conflict Reduction Simulation**
+   - Status: Needs implementation
+   - Details: Replace placeholder with actual implementation in `MarketIntegrationSimulation` class
+
+4. **Implement Combined Policy Simulation**
+   - Status: Needs implementation
+   - Details: Replace placeholder with actual implementation in `MarketIntegrationSimulation` class
+
+### 2.2 Secondary Priorities
+
+1. **Enhance Welfare Analysis**
+   - Status: Needs implementation
+   - Details: Replace simplified calculations with comprehensive welfare metrics
+
+2. **Implement Sensitivity Analysis**
+   - Status: Needs implementation
+   - Details: Replace placeholder with actual parameter sensitivity analysis
+
+3. **Improve Visualization**
+   - Status: Partially implemented
+   - Details: Enhance visualization of spatial impacts and policy effects
+
+### 2.3 Long-term Priorities
+
+1. **Implement Advanced Econometric Methods**
+   - Status: Future work
+   - Details: Add panel data methods, dynamic spatial models, etc.
+
+2. **Develop Interactive Dashboard**
+   - Status: Future work
+   - Details: Create interactive visualization of results
+
+3. **Extend to Additional Commodities**
+   - Status: Future work
+   - Details: Apply methodology to more commodities and markets
+
+## 3. Technical Implementation Details
+
+### 3.1 Spatial Impact Calculation
+
+```python
+def calculate_impacts(self, model_type='lag'):
+    """
+    Calculate direct, indirect, and total effects for spatial models.
+    
+    Parameters
+    ----------
+    model_type : str, optional
+        Type of model to calculate impacts for ('lag' or 'error')
+        
+    Returns
+    -------
+    dict
+        Dictionary of direct, indirect, and total effects
+    """
+    # Check if we have the specified model
+    if model_type == 'lag' and hasattr(self, 'lag_model'):
+        # Calculate impacts for lag model
+        impacts = self._calculate_lag_impacts()
+        return impacts
+    elif model_type == 'error' and hasattr(self, 'error_model'):
+        # Calculate impacts for error model
+        impacts = self._calculate_error_impacts()
+        return impacts
+    else:
+        raise ValueError(f"Model type '{model_type}' not available or not estimated")
+```
+
+### 3.2 Exchange Rate Unification Simulation
+
+```python
+def simulate_exchange_rate_unification(self, method='official'):
+    """
+    Simulate exchange rate unification across regions.
+    
+    Parameters
+    ----------
+    method : str, optional
+        Method for determining unified rate ('official', 'market', or 'average')
+        
+    Returns
+    -------
+    dict
+        Simulation results
+    """
+    # Get current exchange rates
+    north_rate = self.data[self.data['exchange_rate_regime'] == 'north']['exchange_rate'].mean()
+    south_rate = self.data[self.data['exchange_rate_regime'] == 'south']['exchange_rate'].mean()
+    
+    # Determine unified rate based on method
+    if method == 'official':
+        unified_rate = north_rate  # Assuming north rate is official
+    elif method == 'market':
+        unified_rate = south_rate  # Assuming south rate is market-driven
+    elif method == 'average':
+        unified_rate = (north_rate + south_rate) / 2
+    else:
+        raise ValueError(f"Unknown unification method: {method}")
+    
+    # Convert all prices to USD
+    self.data['usd_price'] = self.data['price'] / self.data['exchange_rate']
+    
+    # Apply unified exchange rate
+    self.data['unified_price'] = self.data['usd_price'] * unified_rate
+    
+    # Calculate metrics
+    results = self._calculate_simulation_metrics('unified_price')
+    results['unified_rate'] = unified_rate
+    results['method'] = method
+    
+    return results
+```
+
+### 3.3 Conflict Reduction Simulation
+
+```python
+def simulate_improved_connectivity(self, reduction_factor=0.5):
+    """
+    Simulate improved market connectivity by reducing conflict barriers.
+    
+    Parameters
+    ----------
+    reduction_factor : float, optional
+        Percentage reduction in conflict (0-1)
+        
+    Returns
+    -------
+    dict
+        Simulation results
+    """
+    # Create copy of data for simulation
+    sim_data = self.data.copy()
+    
+    # Apply conflict reduction
+    conflict_col = 'conflict_intensity_normalized'
+    reduced_col = f'{conflict_col}_reduced'
+    sim_data[reduced_col] = sim_data[conflict_col] * (1 - reduction_factor)
+    
+    # Create spatial model with reduced conflict
+    spatial_model = SpatialEconometrics(sim_data)
+    
+    # Create weight matrices with reduced conflict
+    spatial_model.create_weight_matrix(
+        conflict_adjusted=True,
+        conflict_col=reduced_col
+    )
+    
+    # Estimate spatial model with reduced conflict
+    y_col = 'price'
+    x_cols = ['usdprice', 'conflict_intensity_normalized', 'distance_to_port']
+    
+    lag_model = spatial_model.spatial_lag_model(y_col, x_cols)
+    
+    # Calculate impacts
+    impacts = spatial_model.calculate_impacts(model_type='lag')
+    
+    # Calculate metrics
+    results = self._calculate_simulation_metrics('price')
+    results['reduction_factor'] = reduction_factor
+    results['impacts'] = impacts
+    
+    return results
+```
+
+### 3.4 Combined Policy Simulation
+
+```python
+def simulate_combined_policy(self, reduction_factor=0.5, exchange_rate_method='official'):
+    """
+    Simulate combined policies (conflict reduction + exchange rate unification).
+    
+    Parameters
+    ----------
+    reduction_factor : float, optional
+        Percentage reduction in conflict (0-1)
+    exchange_rate_method : str, optional
+        Method for determining unified rate ('official', 'market', or 'average')
+        
+    Returns
+    -------
+    dict
+        Simulation results
+    """
+    # Create copy of data for simulation
+    sim_data = self.data.copy()
+    
+    # Apply conflict reduction
+    conflict_col = 'conflict_intensity_normalized'
+    reduced_col = f'{conflict_col}_reduced'
+    sim_data[reduced_col] = sim_data[conflict_col] * (1 - reduction_factor)
+    
+    # Get current exchange rates
+    north_rate = sim_data[sim_data['exchange_rate_regime'] == 'north']['exchange_rate'].mean()
+    south_rate = sim_data[sim_data['exchange_rate_regime'] == 'south']['exchange_rate'].mean()
+    
+    # Determine unified rate based on method
+    if exchange_rate_method == 'official':
+        unified_rate = north_rate
+    elif exchange_rate_method == 'market':
+        unified_rate = south_rate
+    elif exchange_rate_method == 'average':
+        unified_rate = (north_rate + south_rate) / 2
+    else:
+        raise ValueError(f"Unknown unification method: {exchange_rate_method}")
+    
+    # Convert all prices to USD
+    sim_data['usd_price'] = sim_data['price'] / sim_data['exchange_rate']
+    
+    # Apply unified exchange rate
+    sim_data['unified_price'] = sim_data['usd_price'] * unified_rate
+    
+    # Create spatial model with reduced conflict and unified exchange rate
+    spatial_model = SpatialEconometrics(sim_data)
+    
+    # Create weight matrices with reduced conflict
+    spatial_model.create_weight_matrix(
+        conflict_adjusted=True,
+        conflict_col=reduced_col
+    )
+    
+    # Estimate spatial model
+    y_col = 'unified_price'
+    x_cols = ['usd_price', reduced_col, 'distance_to_port']
+    
+    lag_model = spatial_model.spatial_lag_model(y_col, x_cols)
+    
+    # Calculate impacts
+    impacts = spatial_model.calculate_impacts(model_type='lag')
+    
+    # Calculate metrics
+    results = self._calculate_simulation_metrics('unified_price')
+    results['reduction_factor'] = reduction_factor
+    results['unified_rate'] = unified_rate
+    results['exchange_rate_method'] = exchange_rate_method
+    results['impacts'] = impacts
+    
+    return results
+```
+
+## 4. Testing and Validation
+
+### 4.1 Unit Testing
+
+- Test each econometric method individually
+- Verify results against known examples
+- Check edge cases and error handling
+
+### 4.2 Integration Testing
+
+- Test the full econometric pipeline
+- Verify that components work together correctly
+- Check that results are consistent across methods
+
+### 4.3 Validation
+
+- Compare results with economic theory
+- Validate against empirical evidence
+- Check robustness to parameter changes
+
+## 5. Documentation
+
+### 5.1 Code Documentation
+
+- Add comprehensive docstrings to all methods
+- Document parameters, returns, and exceptions
+- Include examples of usage
+
+### 5.2 Methodology Documentation
+
+- Document econometric methods in detail
+- Explain assumptions and limitations
+- Provide references to academic literature
+
+### 5.3 User Documentation
+
+- Create user guides for running analyses
+- Document configuration options
+- Provide interpretation guidelines for results
+
+## Conclusion
+
+This methodology implementation plan provides a comprehensive roadmap for implementing the econometric methods required for the Yemen Market Integration project. By following this plan, we can ensure that the implementation is complete, accurate, and well-documented.

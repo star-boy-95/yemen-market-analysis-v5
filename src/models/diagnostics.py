@@ -35,8 +35,8 @@ from scipy.linalg import toeplitz
 from pathlib import Path
 import warnings
 
-from utils.config import config
-from utils import (
+from src.utils.config import config
+from src.utils import (
     # Error handling
     handle_errors, ModelError,
     

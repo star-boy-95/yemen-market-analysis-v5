@@ -273,7 +273,7 @@ def write_csv(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool:
     df.to_csv(file_path, **kwargs)
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, fiona.errors.DriverError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
 def read_geojson(file_path: Union[str, Path], **kwargs) -> gpd.GeoDataFrame:
     """
     Read GeoJSON file

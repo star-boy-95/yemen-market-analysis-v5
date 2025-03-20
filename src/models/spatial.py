@@ -71,6 +71,8 @@ class SpatialEconometrics:
         self.gdf = gdf
         self.weights = None
         self.diagnostic_hooks = {}
+        self.lag_model = None
+        self.error_model = None
         logger.info(f"Initialized SpatialEconometrics with {len(gdf)} observations")
     
     @handle_errors(logger=logger, error_type=(ValidationError, TypeError))
@@ -309,14 +311,14 @@ class SpatialEconometrics:
             name_x = x_cols
         
         # Estimate model
-        model = ML_Lag(y, X, self.weights, name_y=name_y, name_x=name_x)
+        self.lag_model = ML_Lag(y, X, self.weights, name_y=name_y, name_x=name_x)
         
         logger.info(
-            f"Spatial lag model estimated: AIC={model.aic:.4f}, "
-            f"R2={model.pr2:.4f}, rho={model.rho:.4f}"
+            f"Spatial lag model estimated: AIC={self.lag_model.aic:.4f}, "
+            f"R2={self.lag_model.pr2:.4f}, rho={self.lag_model.rho:.4f}"
         )
         
-        return model
+        return self.lag_model
     
     @timer
     @memory_usage_decorator
@@ -358,14 +360,14 @@ class SpatialEconometrics:
             name_x = x_cols
         
         # Estimate model
-        model = ML_Error(y, X, self.weights, name_y=name_y, name_x=name_x)
+        self.error_model = ML_Error(y, X, self.weights, name_y=name_y, name_x=name_x)
         
         logger.info(
-            f"Spatial error model estimated: AIC={model.aic:.4f}, "
-            f"R2={model.pr2:.4f}, lambda={model.lam:.4f}"
+            f"Spatial error model estimated: AIC={self.error_model.aic:.4f}, "
+            f"R2={self.error_model.pr2:.4f}, lambda={self.error_model.lam:.4f}"
         )
         
-        return model
+        return self.error_model
     
     @handle_errors(logger=logger)
     def _prepare_model_data(self, y_col, x_cols):
@@ -573,6 +575,120 @@ class SpatialEconometrics:
         if labels:
             nx.draw_networkx_labels(G, pos, font_size=8, ax=ax)
     
+    @timer
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    def calculate_impacts(self, model_type='lag'):
+        """
+        Calculate direct, indirect, and total effects for spatial models.
+        
+        Parameters
+        ----------
+        model_type : str, optional
+            Type of model to calculate impacts for ('lag' or 'error')
+            
+        Returns
+        -------
+        dict
+            Dictionary of direct, indirect, and total effects
+        """
+        # Check if we have the specified model
+        if model_type == 'lag' and hasattr(self, 'lag_model'):
+            # Calculate impacts for lag model
+            impacts = self._calculate_lag_impacts()
+            return impacts
+        elif model_type == 'error' and hasattr(self, 'error_model'):
+            # Calculate impacts for error model
+            impacts = self._calculate_error_impacts()
+            return impacts
+        else:
+            raise ValueError(f"Model type '{model_type}' not available or not estimated")
+    
+    @handle_errors(logger=logger)
+    def _calculate_lag_impacts(self):
+        """
+        Calculate impacts for spatial lag model.
+        
+        Returns
+        -------
+        dict
+            Dictionary of direct, indirect, and total effects
+        """
+        # Get parameters
+        rho = self.lag_model.rho
+        betas = self.lag_model.betas
+        
+        # Get variable names
+        var_names = self.lag_model.name_x
+        
+        # Calculate impacts
+        direct = {}
+        indirect = {}
+        total = {}
+        
+        # For each variable
+        for i, var in enumerate(var_names):
+            # Direct effect
+            direct[var] = betas[i] / (1 - rho)
+            
+            # Indirect effect (spatial spillover)
+            indirect[var] = betas[i] * rho / ((1 - rho) * (1 - rho))
+            
+            # Total effect
+            total[var] = direct[var] + indirect[var]
+        
+        return {
+            'direct': direct,
+            'indirect': indirect,
+            'total': total,
+            'rho': rho,
+            'model_type': 'lag'
+        }
+    
+    @handle_errors(logger=logger)
+    def _calculate_error_impacts(self):
+        """
+        Calculate impacts for spatial error model.
+        
+        Returns
+        -------
+        dict
+            Dictionary of direct, indirect, and total effects
+        """
+        # For error model, indirect effects are zero
+        # Direct effects are just the coefficients
+        
+        # Get parameters
+        betas = self.error_model.betas
+        lambda_param = self.error_model.lam
+        
+        # Get variable names
+        var_names = self.error_model.name_x
+        
+        # Calculate impacts
+        direct = {}
+        indirect = {}
+        total = {}
+        
+        # For each variable
+        for i, var in enumerate(var_names):
+            # Direct effect is just the coefficient
+            direct[var] = betas[i]
+            
+            # No indirect effects in spatial error model
+            indirect[var] = 0
+            
+            # Total effect equals direct effect
+            total[var] = betas[i]
+        
+        return {
+            'direct': direct,
+            'indirect': indirect,
+            'total': total,
+            'lambda': lambda_param,
+            'model_type': 'error'
+        }
+    
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     def prepare_simulation_data(self):
         """
@@ -593,6 +709,21 @@ class SpatialEconometrics:
             'diagnostic_hooks': self.diagnostic_hooks,
             'model_type': 'spatial_econometrics'
         }
+        
+        # Add model impacts if available
+        if hasattr(self, 'lag_model') and self.lag_model is not None:
+            try:
+                lag_impacts = self.calculate_impacts(model_type='lag')
+                simulation_data['lag_impacts'] = lag_impacts
+            except Exception as e:
+                logger.warning(f"Could not calculate lag model impacts: {e}")
+                
+        if hasattr(self, 'error_model') and self.error_model is not None:
+            try:
+                error_impacts = self.calculate_impacts(model_type='error')
+                simulation_data['error_impacts'] = error_impacts
+            except Exception as e:
+                logger.warning(f"Could not calculate error model impacts: {e}")
         
         return simulation_data
     
@@ -1004,6 +1135,67 @@ def _run_spatial_analysis(markets_gdf, sim_data, conflict_col, price_col,
     results['metrics']['moran_I_change'] = sim_moran['I'] - original_moran['I']
     results['metrics']['moran_pvalue_original'] = original_moran['p_norm']
     results['metrics']['moran_pvalue_simulated'] = sim_moran['p_norm']
+    
+    # Estimate spatial lag models if possible
+    try:
+        # Estimate models with common variables
+        if 'distance' in markets_gdf.columns and 'population' in markets_gdf.columns:
+            x_cols = ['distance', 'population']
+            
+            # Estimate original model
+            original_lag = original_model.spatial_lag_model(price_col, x_cols)
+            results['models']['original_lag'] = {
+                'rho': original_lag.rho,
+                'betas': original_lag.betas.tolist(),
+                'aic': original_lag.aic
+            }
+            
+            # Estimate simulation model
+            sim_lag = sim_model.spatial_lag_model(price_col, x_cols)
+            results['models']['simulated_lag'] = {
+                'rho': sim_lag.rho,
+                'betas': sim_lag.betas.tolist(),
+                'aic': sim_lag.aic
+            }
+            
+            # Add impacts if available
+            try:
+                original_impacts = original_model.calculate_impacts(model_type='lag')
+                sim_impacts = sim_model.calculate_impacts(model_type='lag')
+                
+                results['models']['original_impacts'] = original_impacts
+                results['models']['simulated_impacts'] = sim_impacts
+                
+                # Calculate impact changes
+                impact_changes = {
+                    'direct': {},
+                    'indirect': {},
+                    'total': {}
+                }
+                
+                for var in original_impacts['direct'].keys():
+                    for effect_type in ['direct', 'indirect', 'total']:
+                        orig_val = original_impacts[effect_type][var]
+                        sim_val = sim_impacts[effect_type][var]
+                        
+                        if orig_val != 0:
+                            pct_change = (sim_val - orig_val) / abs(orig_val) * 100
+                        else:
+                            pct_change = 0
+                            
+                        impact_changes[effect_type][var] = {
+                            'original': orig_val,
+                            'simulated': sim_val,
+                            'absolute_change': sim_val - orig_val,
+                            'percent_change': pct_change
+                        }
+                
+                results['models']['impact_changes'] = impact_changes
+                
+            except Exception as e:
+                logger.warning(f"Could not calculate impact changes: {e}")
+    except Exception as e:
+        logger.warning(f"Could not estimate spatial models: {e}")
     
     # Add exchange rate regime analysis if available
     if 'exchange_rate_regime' in markets_gdf.columns:

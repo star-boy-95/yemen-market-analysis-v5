@@ -161,6 +161,7 @@ def validate_geodataframe(
     gdf: gpd.GeoDataFrame,
     crs: Optional[str] = None,
     geometry_type: Optional[str] = None,
+    check_crs: bool = True,
     **kwargs
 ) -> Tuple[bool, List[str]]:
     """
@@ -174,6 +175,8 @@ def validate_geodataframe(
         Expected coordinate reference system
     geometry_type : str, optional
         Expected geometry type (Point, LineString, Polygon, etc.)
+    check_crs : bool, optional
+        Whether to check if the GeoDataFrame has a CRS defined
     **kwargs : dict
         Additional arguments to pass to validate_dataframe
         
@@ -183,7 +186,7 @@ def validate_geodataframe(
         (is_valid, error_messages)
     """
     # First validate as a DataFrame
-    is_valid, errors = validate_dataframe(gdf, **kwargs)
+    is_valid, errors = validate_dataframe(gdf, **{k: v for k, v in kwargs.items() if k != 'check_crs'})
     
     # Check if object is a GeoDataFrame
     if not isinstance(gdf, gpd.GeoDataFrame):
@@ -199,6 +202,10 @@ def validate_geodataframe(
         if str(gdf.crs) != str(crs):
             errors.append(f"CRS mismatch: expected {crs}, got {gdf.crs}")
     
+    # Check if CRS is defined
+    if check_crs and not gdf.crs:
+        errors.append("GeoDataFrame missing coordinate reference system (CRS)")
+    
     # Check geometry type
     if geometry_type and len(gdf) > 0:
         geom_types = gdf.geometry.type.unique()
@@ -213,7 +220,7 @@ def validate_time_series(
     max_nulls: int = 0,
     check_stationarity: bool = False,
     check_constant: bool = True,
-    custom_validators: Optional[List[Callable[[Union[pd.Series, np.ndarray]], bool]]] = None
+    custom_validators: Optional[Union[List[Callable[[Union[pd.Series, np.ndarray]], bool]], Dict[str, Callable[[Union[pd.Series, np.ndarray]], bool]]]] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Validate a time series for econometric analysis
@@ -230,8 +237,9 @@ def validate_time_series(
         Whether to check for stationarity
     check_constant : bool, optional
         Whether to check for constant values
-    custom_validators : list of callable, optional
-        List of custom validation functions that take a series and return a boolean
+    custom_validators : list or dict of callable, optional
+        Custom validation functions that take a series and return a boolean.
+        Can be a list of functions or a dict mapping names to functions.
         
     Returns
     -------
@@ -274,12 +282,22 @@ def validate_time_series(
     
     # Apply custom validators
     if custom_validators:
-        for i, validator in enumerate(custom_validators):
-            try:
-                if not validator(series):
-                    errors.append(f"Custom validation {i+1} failed")
-            except Exception as e:
-                errors.append(f"Error in custom validation {i+1}: {str(e)}")
+        if isinstance(custom_validators, dict):
+            # Dictionary of named validators
+            for name, validator in custom_validators.items():
+                try:
+                    if not validator(series):
+                        errors.append(f"Custom validation '{name}' failed")
+                except Exception as e:
+                    errors.append(f"Error in custom validation '{name}': {str(e)}")
+        else:
+            # List of validators
+            for i, validator in enumerate(custom_validators):
+                try:
+                    if not validator(series):
+                        errors.append(f"Custom validation {i+1} failed")
+                except Exception as e:
+                    errors.append(f"Error in custom validation {i+1}: {str(e)}")
     
     return len(errors) == 0, errors
 
@@ -433,22 +451,6 @@ def validate_geojson(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
     
     return len(errors) == 0, errors
 
-def validate_exchange_rate_regime(value: str) -> bool:
-    """
-    Validate exchange rate regime value
-    
-    Parameters
-    ----------
-    value : str
-        Exchange rate regime to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return value in ['north', 'south']
-
 def validate_date_string(date_str: str, format: str = "%Y-%m-%d") -> bool:
     """
     Validate a date string
@@ -471,23 +473,7 @@ def validate_date_string(date_str: str, format: str = "%Y-%m-%d") -> bool:
     except ValueError:
         return False
 
-def validate_admin_region(region: str, valid_regions: List[str]) -> bool:
-    """
-    Validate an administrative region
-    
-    Parameters
-    ----------
-    region : str
-        Region to validate
-    valid_regions : list
-        List of valid regions
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return region in valid_regions
+# This function is already defined above with more functionality
 
 def validate_commodity(commodity: str, valid_commodities: List[str]) -> bool:
     """

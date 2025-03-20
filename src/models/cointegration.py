@@ -16,7 +16,7 @@ from statsmodels.tsa.stattools import coint
 import statsmodels.api as sm
 from scipy import stats
 
-from utils import (
+from src.utils import (
     # Error handling
     handle_errors, ModelError,
     
