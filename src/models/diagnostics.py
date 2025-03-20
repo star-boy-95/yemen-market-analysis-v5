@@ -377,125 +377,95 @@ class ResidualsAnalysis:
         
         return results
 
-    @disk_cache(cache_dir='.cache/diagnostics')
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
-    @timer
-    def create_advanced_diagnostic_plots(
-        self, 
-        residuals: Union[pd.Series, np.ndarray], 
-        save_path: Optional[str] = None,
-        include_bootstrap: bool = True,
-        n_bootstrap: int = 1000,
-        confidence_level: float = 0.95
-    ) -> Dict[str, Any]:
-        """
-        Create advanced diagnostic plots for model residuals.
-        
-        This method generates a comprehensive set of visualizations for
-        analyzing residuals, including time series plots with confidence bands,
-        ACF/PACF plots, QQ plots, histograms, rolling statistics, and CUSUM
-        stability tests.
-        
-        Parameters
-        ----------
-        residuals : array_like
-            Model residuals for analysis
-        save_path : str, optional
-            Base path to save the plots. If provided, creates a directory
-            for the plots if it doesn't exist.
-        include_bootstrap : bool, optional
-            Whether to calculate bootstrap confidence bands
-        n_bootstrap : int, optional
-            Number of bootstrap replications if bootstrap bands are requested
-        confidence_level : float, optional
-            Confidence level for intervals (0-1)
+        @disk_cache
+        @memory_usage_decorator
+        @handle_errors(logger=logger)
+        def create_advanced_diagnostic_plots(
+            self, 
+            residuals: Union[pd.Series, np.ndarray], 
+            save_path: Optional[str] = None,
+            include_bootstrap: bool = True,
+            n_bootstrap: int = 1000,
+            confidence_level: float = 0.95
+        ) -> Dict[str, Any]:
+            """
+            Create advanced diagnostic visualizations.
             
-        Returns
-        -------
-        dict
-            Dictionary containing figure objects for each plot type:
-            - 'time_series': Time series plot with confidence bands
-            - 'acf_pacf': Autocorrelation and partial autocorrelation plots
-            - 'qq_plot': QQ plot with confidence bands
-            - 'histogram': Histogram with KDE and normal overlay
-            - 'rolling_stats': Rolling statistics plots
-            - 'cusum': CUSUM stability test plot
+            Creates an array of plots for comprehensive residual diagnostics:
+            1. Time series with confidence bands
+            2. ACF/PACF with confidence intervals
+            3. QQ plot with theoretical bands
+            4. Rolling statistics
             
-        Notes
-        -----
-        This method applies performance optimizations for M1 Mac hardware
-        when generating bootstrap confidence bands. Bootstrap confidence bands
-        provide robust uncertainty quantification especially for non-normal residuals.
-        """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        # Set plotting style
-        set_plotting_style()
-        
-        # Convert input to numpy array if pandas Series
-        if isinstance(residuals, pd.Series):
-            residuals_series = residuals
-            residuals_array = residuals.values
-            has_index = True
-            index = residuals.index
-        else:
-            residuals_array = np.asarray(residuals)
-            residuals_series = pd.Series(residuals_array)
-            has_index = False
-            index = np.arange(len(residuals_array))
-        
-        # Create output directory if saving plots
-        if save_path:
-            save_dir = Path(save_path)
-            save_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created directory for diagnostic plots: {save_dir}")
-        
-        # Initialize results dictionary
-        figures = {}
-        
-        # 1. Time series plot with confidence bands
-        figures['time_series'] = self._create_time_series_plot(
-            residuals_array, index, has_index, 
-            include_bootstrap, n_bootstrap, confidence_level
-        )
-        
-        # 2. ACF/PACF plots
-        figures['acf_pacf'] = self._create_acf_pacf_plot(residuals_array)
-        
-        # 3. QQ plot with confidence bands
-        figures['qq_plot'] = self._create_qq_plot(residuals_array, confidence_level)
-        
-        # 4. Histogram with KDE and normal overlay
-        figures['histogram'] = self._create_histogram_plot(residuals_array)
-        
-        # 5. Rolling statistics
-        figures['rolling_stats'] = self._create_rolling_stats_plot(
-            residuals_array, index, has_index
-        )
-        
-        # 6. CUSUM stability test
-        figures['cusum'] = self._create_cusum_plot(residuals_array, index, has_index)
-        
-        # Save figures if save_path is provided
-        if save_path:
-            for plot_name, fig in figures.items():
-                if fig is not None:
-                    plot_path = Path(save_path) / f"{plot_name}.png"
-                    save_plot(fig, plot_path, dpi=300)
-                    logger.info(f"Saved {plot_name} plot to {plot_path}")
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        logger.info(f"Advanced diagnostic plots created. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return figures
+            Parameters
+            ----------
+            residuals : Union[pd.Series, np.ndarray]
+                Residuals to analyze
+            save_path : Optional[str], default=None
+                Directory to save plots to
+            include_bootstrap : bool, default=True
+                Whether to include bootstrap confidence intervals
+            n_bootstrap : int, default=1000
+                Number of bootstrap samples if include_bootstrap=True
+            confidence_level : float, default=0.95
+                Confidence level for intervals
+                
+            Returns
+            -------
+            Dict[str, Any]
+                Dictionary of matplotlib figures
+            """
+            # Convert to pandas Series if numpy array
+            if isinstance(residuals, np.ndarray):
+                residuals = pd.Series(residuals)
+            
+            # Start memory tracking
+            start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+            
+            # Create directory for plots if needed
+            if save_path:
+                os.makedirs(save_path, exist_ok=True)
+            
+            # Initialize plot dictionary
+            plots = {}
+            
+            # 1. Time series plot
+            logger.info("Creating time series plot with confidence bands")
+            plots['time_series'] = self._create_time_series_plot(
+                residuals, include_bootstrap, n_bootstrap, confidence_level
+            )
+            
+            # 2. ACF/PACF plot
+            logger.info("Creating ACF/PACF plot")
+            plots['acf_pacf'] = self._create_acf_pacf_plot(residuals)
+            
+            # 3. QQ plot
+            logger.info("Creating QQ plot with confidence bands")
+            plots['qq_plot'] = self._create_qq_plot(residuals, confidence_level)
+            
+            # 4. Rolling statistics
+            logger.info("Creating rolling statistics plot")
+            plots['rolling_stats'] = self._create_rolling_stats_plot(residuals)
+            
+            # 5. Histogram with density
+            logger.info("Creating histogram with density plot")
+            plots['histogram'] = self._create_histogram_plot(residuals)
+            
+            # Save plots if requested
+            if save_path:
+                for name, fig in plots.items():
+                    fig.savefig(os.path.join(save_path, f"residuals_{name}.png"), 
+                            bbox_inches='tight', dpi=300)
+                logger.info(f"Saved {len(plots)} diagnostic plots to {save_path}")
+            
+            # Track memory usage
+            end_mem = process.memory_info().rss / (1024 * 1024)  # MB
+            logger.info(f"Memory usage for diagnostic plots: {end_mem - start_mem:.2f} MB")
+            
+            # Return the plots
+            return plots
+
+
 
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
     def _create_time_series_plot(
@@ -728,67 +698,58 @@ class ResidualsAnalysis:
         return fig
 
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
-    def _create_qq_plot(self, residuals: np.ndarray, confidence_level: float) -> plt.Figure:
-        """
-        Create QQ plot with theoretical confidence bands.
-        
-        Parameters
-        ----------
-        residuals : numpy.ndarray
-            Residual values
-        confidence_level : float
-            Confidence level for intervals
-            
-        Returns
-        -------
-        matplotlib.figure.Figure
-            QQ plot figure
-        """
-        from statsmodels.graphics.gofplots import qqplot
-        
-        fig, ax = create_figure(width=10, height=6)
-        
-        # Create QQ plot
-        qq = qqplot(residuals, line='s', ax=ax, fit=True)
-        
-        # Calculate theoretical confidence bands
-        n = len(residuals)
-        alpha = 1 - confidence_level
-        
-        # Generate uniform quantiles
-        p = np.linspace(alpha/2, 1-alpha/2, 100)
-        
-        # Transform to normal quantiles
-        theoretical_quantiles = stats.norm.ppf(p)
-        
-        # Calculate confidence bands
-        se = (1 / stats.norm.pdf(theoretical_quantiles)) * np.sqrt(p * (1 - p) / n)
-        upper_band = theoretical_quantiles + se * stats.norm.ppf(1 - alpha/2)
-        lower_band = theoretical_quantiles - se * stats.norm.ppf(1 - alpha/2)
-        
-        # Add confidence bands to plot
-        ax.plot(theoretical_quantiles, upper_band, 'r--', alpha=0.5,
-                label=f'{confidence_level*100:.0f}% Confidence Band')
-        ax.plot(theoretical_quantiles, lower_band, 'r--', alpha=0.5)
-        
-        # Use project's test_normality utility
-        normality_result = self.test_normality(residuals)
-        
-        # Add test results as annotation
-        add_annotations(ax, {
-            (0.02, 0.95): f"Normality Test Results:\n"
-                         f"Statistic: {normality_result.get('statistic', 0):.4f}\n"
-                         f"p-value: {normality_result.get('p_value', 0):.4f}\n"
-                         f"Normal: {normality_result.get('normal', False)}"
-        }, offset_x=0, offset_y=0, va='top',
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
-        
-        ax.set_title("QQ Plot with Confidence Bands")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        return fig
+def _create_qq_plot(self, residuals, confidence_level=0.95):
+    """Create QQ plot with confidence bands."""
+    from scipy import stats
+    import statsmodels.api as sm
+    
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Calculate standardized residuals
+    std_residuals = (residuals - residuals.mean()) / residuals.std()
+    
+    # Create QQ plot
+    sm.qqplot(std_residuals, line='45', ax=ax)
+    
+    # Add confidence bands
+    n = len(residuals)
+    alpha = 1 - confidence_level
+    
+    # Generate theoretical order statistics from normal distribution
+    ordered = stats.norm.ppf(np.arange(1, n + 1) / (n + 1))
+    
+    # Calculate confidence bands
+    stderr = 1.0 / np.sqrt(n)
+    upper = ordered + stderr * stats.norm.ppf(1 - alpha/2)
+    lower = ordered - stderr * stats.norm.ppf(1 - alpha/2)
+    
+    # Get sorted standardized residuals
+    sorted_residuals = np.sort(std_residuals)
+    
+    # Plot confidence bands
+    ax.plot(ordered, upper, 'r--', alpha=0.5)
+    ax.plot(ordered, lower, 'r--', alpha=0.5, 
+           label=f'{confidence_level:.0%} Confidence Band')
+    
+    # Add normality test information
+    k2, p_value = stats.normaltest(std_residuals)
+    norm_test_text = (
+        f"D'Agostino's K² Test:\n"
+        f"K² = {k2:.4f}, p-value = {p_value:.4f}\n"
+        f"{'Normal at 5%' if p_value > 0.05 else 'Non-normal at 5%'}"
+    )
+    ax.text(
+        0.05, 0.95, norm_test_text, transform=ax.transAxes,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
+    )
+    
+    ax.set_title("Normal Q-Q Plot")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    
+    fig.tight_layout()
+    return fig
+
 
     @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
     def _create_histogram_plot(self, residuals: np.ndarray) -> plt.Figure:
@@ -1192,6 +1153,39 @@ class ResidualsAnalysis:
             return self.residuals
         else:
             raise ModelError("No residuals provided or stored in object")
+
+
+def _create_acf_pacf_plot(self, residuals):
+    """Create ACF/PACF plots for residual diagnostics."""
+    from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Plot ACF and PACF
+    plot_acf(residuals, lags=min(40, len(residuals)//2), ax=ax1, alpha=0.05)
+    plot_pacf(residuals, lags=min(40, len(residuals)//2), ax=ax2, alpha=0.05)
+    
+    # Add titles
+    ax1.set_title("Autocorrelation Function (ACF)")
+    ax2.set_title("Partial Autocorrelation Function (PACF)")
+    
+    # Add LB test information
+    from statsmodels.stats.diagnostic import acorr_ljungbox
+    try:
+        lb_test = acorr_ljungbox(residuals, lags=[10, 20], return_df=True)
+        lb_test_stats = (
+            f"Ljung-Box (10): p={lb_test.iloc[0, 1]:.4f}\n"
+            f"Ljung-Box (20): p={lb_test.iloc[1, 1]:.4f}"
+        )
+        ax1.text(
+            0.05, 0.05, lb_test_stats, transform=ax1.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
+        )
+    except Exception as e:
+        logger.warning(f"Error calculating Ljung-Box test: {e}")
+    
+    fig.tight_layout()
+    return fig
 
 
 class StabilityTesting:
@@ -3587,3 +3581,90 @@ def calculate_fit_statistics(
         'ss_residual': ss_residual,
         'sigma2': sigma2
     }
+    
+    
+
+def _create_rolling_stats_plot(self, residuals):
+    """Create plot with rolling statistics."""
+    # Determine window size (20% of series length, minimum 5)
+    window = max(5, int(len(residuals) * 0.2))
+    
+    # Calculate rolling statistics
+    rolling_mean = residuals.rolling(window=window).mean()
+    rolling_std = residuals.rolling(window=window).std()
+    rolling_acf = residuals.rolling(window=window).apply(
+        lambda x: pd.Series(x).autocorr(1) if len(pd.Series(x).dropna()) > 5 else np.nan
+    )
+    
+    # Create plot
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    
+    # Plot residuals with rolling mean
+    ax1.plot(residuals, color='darkblue', linewidth=1, alpha=0.6, label='Residuals')
+    ax1.plot(rolling_mean, color='red', linewidth=2, label=f'Rolling Mean (w={window})')
+    ax1.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+    ax1.set_title("Residuals with Rolling Mean")
+    ax1.set_ylabel("Value")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot rolling standard deviation
+    ax2.plot(rolling_std, color='green', linewidth=2)
+    ax2.set_title(f"Rolling Standard Deviation (w={window})")
+    ax2.set_ylabel("Standard Deviation")
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot rolling autocorrelation
+    ax3.plot(rolling_acf, color='purple', linewidth=2)
+    ax3.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+    ax3.set_title(f"Rolling Autocorrelation (lag=1, w={window})")
+    ax3.set_xlabel("Time")
+    ax3.set_ylabel("Autocorrelation")
+    ax3.grid(True, alpha=0.3)
+    
+    fig.tight_layout()
+    return fig
+
+def _create_histogram_plot(self, residuals):
+    """Create histogram with normal density overlay."""
+    from scipy import stats
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot histogram
+    sns.histplot(residuals, kde=True, stat="density", ax=ax)
+    
+    # Add normal distribution overlay
+    x = np.linspace(residuals.min(), residuals.max(), 1000)
+    mean = residuals.mean()
+    std = residuals.std()
+    pdf = stats.norm.pdf(x, mean, std)
+    ax.plot(x, pdf, 'r-', linewidth=2, label='Normal Distribution')
+    
+    # Add vertical line for mean
+    ax.axvline(x=mean, color='red', linestyle='--', alpha=0.7, label=f'Mean = {mean:.4f}')
+    
+    # Add statistical tests
+    shapiro_test = stats.shapiro(residuals)
+    jarque_bera = stats.jarque_bera(residuals)
+    
+    stats_text = (
+        f"Skewness: {stats.skew(residuals):.4f}\n"
+        f"Kurtosis: {stats.kurtosis(residuals):.4f}\n"
+        f"Shapiro-Wilk: p={shapiro_test[1]:.4f}\n"
+        f"Jarque-Bera: p={jarque_bera[1]:.4f}"
+    )
+    
+    ax.text(
+        0.95, 0.95, stats_text, transform=ax.transAxes, ha='right', va='top',
+        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8)
+    )
+    
+    ax.set_title("Residuals Distribution")
+    ax.set_xlabel("Residual Value")
+    ax.set_ylabel("Density")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.tight_layout()
+    return fig

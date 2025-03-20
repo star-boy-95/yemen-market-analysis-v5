@@ -4,16 +4,22 @@
 
 This project implements econometric methodologies for analyzing market integration in conflict-affected Yemen. It examines how conflict-induced transaction costs impede arbitrage and impact dual exchange rate regimes, using threshold cointegration and spatial econometric techniques.
 
+The analysis addresses key questions:
+- How do conflict barriers affect price transmission between markets?
+- What are the economic impacts of the dual exchange rate regime?
+- How would exchange rate unification and conflict reduction affect market integration?
+- Which regions and commodities show most resistance to integration?
+
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/yemen-market-integration.git
-cd yemen-market-integration
+git clone https://github.com/star-boy-95/yemen-market-analysis-v5.git
+cd yemen-market-analysis-v5
 
 # Set up a virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\\Scripts\\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -24,11 +30,11 @@ pip install -e .
 
 ## Features
 
-- **Data Processing**: Tools for handling GeoJSON market data with spatial attributes
-- **Time Series Analysis**: Unit root testing, cointegration analysis, and threshold modeling
-- **Spatial Econometrics**: Tools for analyzing geographic dependencies in market integration
-- **Policy Simulation**: Tools for simulating market integration scenarios (e.g., exchange rate unification)
-- **Visualization**: Comprehensive visualization tools for both time series and spatial data
+- **Data Processing**: Comprehensive tools for loading, cleaning, and transforming market data from various sources, including WFP and ACLED. Supports GeoJSON format with spatial attributes.
+- **Time Series Analysis**: Advanced econometric methods for analyzing time series data, including unit root testing (ADF, Zivot-Andrews), cointegration analysis (Engle-Granger, Johansen, Gregory-Hansen), and threshold modeling (TAR, M-TAR).
+- **Spatial Econometrics**: Implementation of spatial econometric models to analyze geographic dependencies in market integration, including spatial weight matrix creation, spatial lag models (SLM), and spatial error models (SEM).
+- **Policy Simulation**: Tools for simulating various policy interventions, such as exchange rate unification and connectivity improvement, to assess their impact on market integration and welfare.
+- **Visualization**: Comprehensive visualization tools for both time series and spatial data, including time series plots with regime highlighting, spatial maps for market integration visualization, and interactive dashboards for data exploration.
 
 ## Usage
 
@@ -52,6 +58,26 @@ loader.save_processed_data(processed_gdf, 'processed_data.geojson')
 
 # Calculate price differentials
 differentials = preprocessor.calculate_price_differentials(processed_gdf)
+
+# Estimate Threshold Cointegration Model
+from src.models.threshold import ThresholdCointegration
+model = ThresholdCointegration(north_price, south_price)
+model.estimate_cointegration()
+result = model.estimate_threshold()
+
+# Simulate Exchange Rate Unification
+from src.models.simulation import MarketIntegrationSimulation
+sim = MarketIntegrationSimulation(markets_data)
+result = sim.simulate_exchange_rate_unification(target_rate='official')
+
+# Create Spatial Weight Matrix
+from src.models.spatial import SpatialEconometrics
+model = SpatialEconometrics(markets_gdf)
+weights = model.create_weight_matrix(
+    k=5,
+    conflict_adjusted=True,
+    conflict_col='conflict_intensity'
+)
 ```
 
 ### Running Tests
@@ -59,10 +85,67 @@ differentials = preprocessor.calculate_price_differentials(processed_gdf)
 ```bash
 # Run all tests
 pytest
-
-# Run specific test module
-pytest tests/test_data_loader.py
 ```
+
+## Installation and Development
+
+### Basic Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/star-boy-95/yemen-market-analysis-v5.git
+cd yemen-market-analysis-v5
+
+# Set up a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\\Scripts\\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install the package in development mode
+pip install -e .
+```
+
+### Development Installation
+
+For development, install additional tools:
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Set up pre-commit hooks
+pre-commit install
+```
+
+### Documentation
+
+For documentation development:
+
+```bash
+# Install documentation dependencies
+pip install -e ".[docs]"
+
+# Build documentation
+cd docs
+make html
+```
+
+## Documentation
+
+The project includes comprehensive documentation:
+
+- **Project Overview**: `docs/project_overview.md` - High-level project goals and methodology
+- **Implementation Plan**: `docs/implementation_plan.md` - Development roadmap and status
+- **Econometric Methods**: `docs/econometric_methods.md` - Mathematical specifications
+- **Data Dictionary**: `docs/data_dictionary.md` - Data sources and structure
+- **API References**:
+  - `docs/api/econometrics_api.md` - Econometric model API
+  - `docs/api/simulation_api.md` - Simulation model API
+  - `docs/api/visualization_api.md` - Visualization API
+- **Best Practices**: `docs/best_practices.md` - Code examples and patterns
+- **Coding Standards**: `docs/coding_standards.md` - Project coding standards
 
 ## Project Structure
 
@@ -70,7 +153,7 @@ pytest tests/test_data_loader.py
 yemen-market-integration/
 │
 ├── data/                          # Data storage
-│   ├── raw/                       # Original GeoJSON data
+│   ├── raw/                       # Original data
 │   └── processed/                 # Cleaned and transformed data
 │
 ├── src/                           # Source code
@@ -80,39 +163,75 @@ yemen-market-integration/
 │   │   └── integration.py         # Data integration utilities
 │   │
 │   ├── models/                    # Econometric models
-│   │   ├── unit_root.py           # Unit root testing module
-│   │   ├── cointegration.py       # Cointegration testing module
-│   │   ├── threshold.py           # Threshold cointegration module
-│   │   ├── threshold_vecm.py      # Threshold VECM implementation
-│   │   └── spatial.py             # Spatial econometrics models
+│   │   ├── unit_root.py           # Unit root testing
+│   │   ├── cointegration.py       # Cointegration testing
+│   │   ├── threshold.py           # Threshold cointegration
+│   │   ├── threshold_vecm.py      # TVECM implementation
+│   │   ├── spatial.py             # Spatial econometrics
+│   │   ├── spatiotemporal.py      # Combined spatial-time series
+│   │   ├── simulation.py          # Policy simulation
+│   │   └── diagnostics.py         # Model diagnostics
 │   │
 │   ├── visualization/             # Visualization tools
-│   │   ├── time_series.py         # Time series visualization tools
-│   │   └── market_maps.py         # Spatial visualization tools
+│   │   ├── time_series.py         # Time series visualization
+│   │   ├── maps.py                # Spatial visualization
+│   │   ├── asymmetric_plots.py    # Asymmetric regime plots
+│   │   ├── spatial_integration.py # Spatial integration maps
+│   │   └── dashboard.py           # Interactive dashboard
+│   │
+│   ├── simulation/                # Simulation pipeline
+│   │   └── simulation_pipeline.py # End-to-end simulation
 │   │
 │   └── utils/                     # Utility functions
-│       ├── error_handler.py       # Error handling utilities
-│       ├── config.py              # Configuration management
-│       └── validation.py          # Data validation utilities
+│       ├── error_handler.py       # Error handling
+│       ├── config.py              # Configuration
+│       ├── validation.py          # Data validation
+│       ├── logging_setup.py       # Logging configuration
+│       ├── performance_utils.py   # Performance optimization
+│       ├── spatial_utils.py       # Spatial utilities
+│       └── plotting_utils.py      # Plotting utilities
 │
 ├── notebooks/                     # Jupyter notebooks
-│   ├── 01_exploratory_analysis.ipynb    # Data exploration
-│   ├── 02_threshold_cointegration.ipynb # Cointegration analysis
-│   ├── 03_spatial_analysis.ipynb        # Spatial econometrics
-│   └── 04_policy_simulations.ipynb      # Policy simulations
+│   ├── 00_project_initialization.ipynb     # Setup
+│   └── policy_simulation_walkthrough.ipynb # Simulation demo
 │
-├── tests/                         # Unit tests
-│   ├── test_data_loader.py        # Tests for data loader
-│   ├── test_preprocessor.py       # Tests for preprocessor
-│   └── test_models.py             # Tests for econometric models
+├── tests/                         # Tests
+│   ├── unit/                      # Unit tests
+│   ├── integration/               # Integration tests
+│   ├── performance/               # Performance tests
+│   └── visualization/             # Visualization tests
+│
+├── docs/                          # Documentation
+│   ├── api/                       # API documentation
+│   ├── guides/                    # User guides
+│   └── archived/                  # Archived documentation
 │
 ├── config/                        # Configuration files
-│   └── settings.yaml              # Project settings
+│   ├── settings.yaml              # Project settings
+│   └── logging.yaml               # Logging configuration
 │
 ├── logs/                          # Log files
-├── figures/                       # Output figures
 │
-├── requirements.txt               # Project dependencies
-├── setup.py                       # Package installation script
-├── .gitignore                     # Git ignore file
-└── README.md                      # Project documentation
+├── requirements.txt               # Core dependencies
+├── requirements-dev.txt           # Development dependencies
+├── setup.py                       # Package installation
+├── setup.cfg                      # Package configuration
+├── .env                           # Environment variables
+├── .pre-commit-config.yaml        # Pre-commit hooks
+├── build.sh                       # Build script
+└── Makefile                       # Project makefile
+
+## Contributing
+
+We welcome contributions to this project! Please follow these guidelines:
+
+1.  Fork the repository.
+2.  Create a new branch for your feature or bug fix.
+3.  Write clear, concise, and well-documented code.
+4.  Follow the project's coding standards (PEP 8).
+5.  Write unit tests for your code.
+6.  Submit a pull request with a detailed description of your changes.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
