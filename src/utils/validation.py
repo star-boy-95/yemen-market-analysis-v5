@@ -212,7 +212,8 @@ def validate_time_series(
     min_length: int = 30,
     max_nulls: int = 0,
     check_stationarity: bool = False,
-    check_constant: bool = True
+    check_constant: bool = True,
+    custom_validators: Optional[List[Callable[[Union[pd.Series, np.ndarray]], bool]]] = None
 ) -> Tuple[bool, List[str]]:
     """
     Validate a time series for econometric analysis
@@ -229,6 +230,8 @@ def validate_time_series(
         Whether to check for stationarity
     check_constant : bool, optional
         Whether to check for constant values
+    custom_validators : list of callable, optional
+        List of custom validation functions that take a series and return a boolean
         
     Returns
     -------
@@ -268,6 +271,15 @@ def validate_time_series(
                 errors.append(f"Time series may not be stationary (ADF test p-value: {pvalue:.4f})")
         except Exception as e:
             errors.append(f"Error checking stationarity: {str(e)}")
+    
+    # Apply custom validators
+    if custom_validators:
+        for i, validator in enumerate(custom_validators):
+            try:
+                if not validator(series):
+                    errors.append(f"Custom validation {i+1} failed")
+            except Exception as e:
+                errors.append(f"Error in custom validation {i+1}: {str(e)}")
     
     return len(errors) == 0, errors
 

@@ -99,7 +99,7 @@ class UnitRootTester:
             return not (np.isnan(array).any() or np.isinf(array).any())
             
         valid, errors = validate_time_series(
-            series, 
+            series,
             min_length=10,
             max_nulls=0,
             check_constant=True,
@@ -327,8 +327,10 @@ class UnitRootTester:
     @handle_errors(logger=logger, error_type=(ValueError, TypeError))
     @timer
     def test_zivot_andrews(
-        self, 
-        series: Union[pd.Series, np.ndarray]
+        self,
+        series: Union[pd.Series, np.ndarray],
+        max_lags: Optional[int] = None,
+        trend: str = 'both'
     ) -> Dict[str, Any]:
         """
         Perform Zivot-Andrews test for unit root with structural break.
@@ -337,11 +339,20 @@ class UnitRootTester:
         ----------
         series : array_like
             The time series to test
+        max_lags : int, optional
+            Maximum number of lags
+        trend : str, optional
+            Trend specification ('intercept', 'trend', 'both')
             
         Returns
         -------
         dict
-            Dictionary with test results
+            Dictionary with test results including:
+            - statistic: test statistic
+            - p_value: p-value
+            - critical_values: critical values
+            - breakpoint: estimated breakpoint
+            - stationary: bool, whether series is stationary
         """
         # Track memory usage
         process = psutil.Process(os.getpid())
@@ -359,8 +370,16 @@ class UnitRootTester:
         if isinstance(series, pd.Series):
             series = series.values
         
-        # Run Zivot-Andrews test
-        result = unitroot.ZivotAndrews(series)
+        # Map trend parameter to unitroot.ZivotAndrews model parameter
+        model_map = {
+            'intercept': 'c',
+            'trend': 't',
+            'both': 'ct'
+        }
+        model = model_map.get(trend, 'ct')  # Default to 'ct' if invalid trend
+        
+        # Run Zivot-Andrews test with specified parameters
+        result = unitroot.ZivotAndrews(series, lags=max_lags, model=model)
         
         # Format result
         za_result = {
