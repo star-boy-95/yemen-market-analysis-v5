@@ -2,12 +2,50 @@
 -r requirements.txt
 
 # Development tools
-pytest>=6.2.0
-black>=21.5b2
-flake8>=3.9.0
+pytest>=7.0.0
+black>=22.0.0
+flake8>=5.0.0
 jupyter>=1.0.0
-sphinx>=4.0.0
-nbsphinx>=0.8.0
-pytest-cov>=2.12.0
-mypy>=0.910
-ipykernel>=6.0.0
+sphinx>=5.0.0
+nbsphinx>=0.8.9
+pytest-cov>=3.0.0
+mypy>=1.0.0
+ipykernel>=6.15.0
+
+# Additional testing and development tools
+pytest-benchmark>=4.0.0  # For performance testing
+pytest-xdist>=3.0.0  # For parallel testing
+pytest-mock>=3.8.0  # For mocking in tests
+hypothesis>=6.56.0  # For property-based testing
+pylint>=2.14.0  # For more comprehensive linting
+memory-profiler>=0.60.0  # For memory profiling
+jupyterlab>=3.5.0  # Enhanced Jupyter environment
+jupytext>=1.14.0  # For storing notebooks as text files
+pydocstyle>=6.1.0  # For docstring style checking
+doc8>=1.0.0  # For documentation style checking
+
+# Econometric development tools
+statsmodels[tools]>=0.14.0  # Enhanced statsmodels with extra tools
+linearmodels>=4.27.0  # Advanced panel data models
+arviz>=0.14.0  # Exploratory analysis of Bayesian models
+pyhdfe>=0.1.0  # High-dimensional fixed effects
+
+# Performance and profiling
+line-profiler>=4.0.0  # Line-by-line profiling
+scalene>=1.5.0  # CPU/GPU/memory profiling
+py-spy>=0.3.0  # Sampling profiler for Python code
+snakeviz>=2.1.0  # Visualization tool for profiling data
+
+# Documentation enhancement
+sphinx-autoapi>=2.0.0  # API documentation generation
+sphinxcontrib-napoleon>=0.7.0  # Google/NumPy style docstrings
+sphinx-rtd-theme>=1.0.0  # Documentation theme
+myst-parser>=0.18.0  # Markdown support in Sphinx
+sphinx-copybutton>=0.5.0  # Copy button for code blocks
+
+# Visualization development
+plotly-geo>=1.0.0  # Geographical plots
+kaleido>=0.2.1  # Static image export for plotly
+matplotlib-venn>=0.11.7  # Venn diagrams
+holoviews>=1.15.0  # High-level visualization
+datashader>=0.14.0  # Big data visualization
