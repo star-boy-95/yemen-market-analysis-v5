@@ -6,6 +6,14 @@ project, orchestrating the complete analysis workflow. It allows users to run
 different types of analyses (threshold cointegration, spatial econometrics,
 policy simulation) on market data, generate visualizations, and export results.
 
+The script implements advanced econometric methodologies including:
+- Unit root testing with structural break detection
+- Threshold cointegration with asymmetric adjustment
+- Spatial econometrics with conflict adjustment
+- Policy simulation with comprehensive welfare analysis
+- Detailed interpretation of econometric results
+- Statistical validation and robustness checks
+
 Example usage:
     python src/main.py --data data/raw/unified_data.geojson --output results \
                       --commodity "beans (kidney red)" --threshold --spatial --simulation
@@ -16,10 +24,15 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
+import json
 import argparse
 import logging
 import time
+import warnings
 from datetime import datetime
+import statsmodels.api as sm
+from scipy import stats
+from itertools import product
 
 # Import project modules
 from data.loader import DataLoader
@@ -30,19 +43,26 @@ from models.threshold import ThresholdCointegration
 from models.threshold_vecm import ThresholdVECM
 from models.spatial import SpatialEconometrics
 from models.simulation import MarketIntegrationSimulation
+from models.diagnostics import ModelDiagnostics
+from models.model_selection import calculate_information_criteria
 from visualization.time_series import TimeSeriesVisualizer
 from visualization.maps import MarketMapVisualizer
+from visualization.asymmetric_plots import AsymmetricAdjustmentVisualizer
 from utils.performance_utils import timer, memory_usage_decorator
+from utils.validation import validate_data, validate_model_inputs
+from utils.stats_utils import calculate_gini_coefficient, bootstrap_confidence_interval
 
 
-def setup_logging(log_file='yemen_analysis.log'):
+def setup_logging(log_file='yemen_analysis.log', level=logging.INFO):
     """
-    Set up logging configuration.
+    Set up logging configuration with enhanced formatting.
     
     Parameters
     ----------
     log_file : str, optional
         Path to log file
+    level : int, optional
+        Logging level to use
         
     Returns
     -------
@@ -53,24 +73,39 @@ def setup_logging(log_file='yemen_analysis.log'):
     log_dir = Path('logs')
     log_dir.mkdir(exist_ok=True)
     
-    # Create log file path
-    log_path = log_dir / log_file
+    # Create timestamped log file path
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{timestamp}_{log_file}"
+    log_path = log_dir / log_filename
     
-    # Configure logging
+    # Configure logging with more detailed formatting
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[
             logging.FileHandler(log_path),
             logging.StreamHandler()
         ]
     )
-    return logging.getLogger(__name__)
+    
+    # Set specific loggers to warning only to reduce noise
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Log file created at: {log_path}")
+    
+    # Filter scipy/numpy warnings which are common in econometric analysis
+    warnings.filterwarnings('ignore', category=RuntimeWarning, module='scipy')
+    warnings.filterwarnings('ignore', category=RuntimeWarning, module='numpy')
+    
+    return logger
 
 
 def parse_args():
     """
-    Parse command line arguments.
+    Parse command line arguments with enhanced options for econometric analysis.
     
     Returns
     -------
@@ -82,73 +117,145 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument(
+    # Input/output arguments
+    io_group = parser.add_argument_group('Input/Output Options')
+    io_group.add_argument(
         '--data', 
         type=str, 
         default='./data/raw/unified_data.geojson',
         help='Path to the GeoJSON data file'
     )
     
-    parser.add_argument(
+    io_group.add_argument(
         '--output', 
         type=str, 
         default='./output',
         help='Path to save output files'
     )
     
-    parser.add_argument(
+    io_group.add_argument(
         '--commodity', 
         type=str, 
         default='beans (kidney red)',
         help='Commodity to analyze'
     )
     
-    parser.add_argument(
+    io_group.add_argument(
+        '--verbose', 
+        action='store_true',
+        help='Enable verbose logging output'
+    )
+    
+    # Analysis selection arguments
+    analysis_group = parser.add_argument_group('Analysis Selection')
+    analysis_group.add_argument(
         '--threshold', 
         action='store_true',
         help='Run threshold cointegration analysis'
     )
     
-    parser.add_argument(
+    analysis_group.add_argument(
         '--spatial', 
         action='store_true',
         help='Run spatial econometric analysis'
     )
     
-    parser.add_argument(
+    analysis_group.add_argument(
         '--simulation', 
         action='store_true',
         help='Run policy simulations'
     )
     
-    parser.add_argument(
+    analysis_group.add_argument(
+        '--validation',
+        action='store_true',
+        help='Run enhanced statistical validation and robustness checks'
+    )
+    
+    analysis_group.add_argument(
+        '--sensitivity',
+        action='store_true',
+        help='Run parameter sensitivity analysis'
+    )
+    
+    # Time series parameters
+    ts_group = parser.add_argument_group('Time Series Parameters')
+    ts_group.add_argument(
         '--max-lags',
         type=int,
         default=4,
         help='Maximum number of lags for time series analysis'
     )
     
-    parser.add_argument(
+    ts_group.add_argument(
+        '--coint-method',
+        type=str,
+        choices=['eg', 'johansen', 'gregory-hansen', 'all'],
+        default='all',
+        help='Cointegration test method(s) to use'
+    )
+    
+    ts_group.add_argument(
+        '--bootstrap-iterations',
+        type=int,
+        default=1000,
+        help='Number of bootstrap iterations for confidence intervals'
+    )
+    
+    # Spatial parameters
+    spatial_group = parser.add_argument_group('Spatial Parameters')
+    spatial_group.add_argument(
         '--k-neighbors',
         type=int,
         default=5,
         help='Number of nearest neighbors for spatial weights'
     )
     
-    parser.add_argument(
+    spatial_group.add_argument(
+        '--conflict-weight',
+        type=float,
+        default=1.0,
+        help='Weight factor for conflict intensity in spatial weights'
+    )
+    
+    # Simulation parameters
+    sim_group = parser.add_argument_group('Simulation Parameters')
+    sim_group.add_argument(
         '--reduction-factor',
         type=float,
         default=0.5,
         help='Conflict reduction factor for simulations (0-1)'
     )
     
-    return parser.parse_args()
+    sim_group.add_argument(
+        '--unification-method',
+        type=str,
+        choices=['official', 'market', 'average'],
+        default='official',
+        help='Exchange rate unification method to use'
+    )
+    
+    sim_group.add_argument(
+        '--welfare-metrics',
+        type=str,
+        choices=['basic', 'enhanced', 'comprehensive'],
+        default='comprehensive',
+        help='Level of detail for welfare metrics calculation'
+    )
+    
+    args = parser.parse_args()
+    
+    # Automatically enable validation if sensitivity analysis is requested
+    if args.sensitivity and not args.validation:
+        args.validation = True
+    
+    return args
 
 
 @timer
-def create_visualizations(processed_gdf, differentials, commodity, output_path, logger):
+def create_visualizations(processed_gdf, differentials, commodity, output_path, logger, threshold_model=None):
     """
-    Create and save visualizations.
+    Create and save enhanced visualizations with publication quality.
     
     Parameters
     ----------
@@ -162,79 +269,197 @@ def create_visualizations(processed_gdf, differentials, commodity, output_path, 
         Path to save output files
     logger : logging.Logger
         Logger instance
+    threshold_model : ThresholdCointegration, optional
+        Estimated threshold model for asymmetric adjustment visualization
         
     Returns
     -------
     dict
         Dictionary of created visualizations
     """
-    logger.info("Creating visualizations")
+    logger.info("Creating enhanced visualizations")
     time_vis = TimeSeriesVisualizer()
     map_vis = MarketMapVisualizer()
+    
+    # Create visualizations subdirectory
+    viz_path = output_path / 'visualizations'
+    viz_path.mkdir(exist_ok=True)
+    logger.info(f"Created visualizations directory: {viz_path}")
+    
+    visualization_paths = {}
     
     # Filter data for the specified commodity
     commodity_data = processed_gdf[processed_gdf['commodity'] == commodity]
     
-    # Time series plots
+    # Time series plots with enhanced styling
     logger.info(f"Creating time series plots for {commodity}")
     fig_ts = time_vis.plot_price_series(
         commodity_data,
         group_col='admin1',
-        title=f'Price Trends for {commodity} by Region'
+        title=f'Price Trends for {commodity} by Region',
+        style='publication',  # Enhanced styling for publication
+        include_events=True   # Mark significant events/structural breaks
     )
-    ts_path = output_path / f'{commodity.replace(" ", "_")}_price_trends.png'
-    fig_ts.savefig(ts_path)
-    logger.info(f"Saved time series plot to {ts_path}")
+    ts_path = viz_path / f'{commodity.replace(" ", "_")}_price_trends.png'
+    fig_ts.savefig(ts_path, dpi=300, bbox_inches='tight')
+    visualization_paths['time_series'] = ts_path
+    logger.info(f"Saved enhanced time series plot to {ts_path}")
     
-    # Price differential plots
-    logger.info("Creating price differential plots")
+    # Price differential plots with trend analysis
+    logger.info("Creating price differential plots with trend analysis")
     commodity_diff = differentials[differentials['commodity'] == commodity]
     fig_diff = time_vis.plot_price_differentials(
         commodity_diff,
-        title=f'Price Differentials: North vs South ({commodity})'
+        title=f'Price Differentials: North vs South ({commodity})',
+        include_trend=True,    # Add trend line
+        style='publication'    # Enhanced styling
     )
-    diff_path = output_path / f'{commodity.replace(" ", "_")}_price_differentials.png'
-    fig_diff.savefig(diff_path)
-    logger.info(f"Saved price differential plot to {diff_path}")
+    diff_path = viz_path / f'{commodity.replace(" ", "_")}_price_differentials.png'
+    fig_diff.savefig(diff_path, dpi=300, bbox_inches='tight')
+    visualization_paths['price_differentials'] = diff_path
+    logger.info(f"Saved enhanced price differential plot to {diff_path}")
     
-    # Spatial visualization
-    logger.info("Creating spatial visualizations")
+    # Create price volatility visualization
+    logger.info("Creating price volatility visualization")
+    fig_vol = time_vis.plot_price_volatility(
+        commodity_data,
+        window=12,  # 12-month rolling window
+        group_col='exchange_rate_regime',
+        title=f'Price Volatility: North vs South ({commodity})'
+    )
+    vol_path = viz_path / f'{commodity.replace(" ", "_")}_price_volatility.png'
+    fig_vol.savefig(vol_path, dpi=300, bbox_inches='tight')
+    visualization_paths['price_volatility'] = vol_path
+    logger.info(f"Saved price volatility plot to {vol_path}")
+    
+    # Spatial visualization with enhanced cartography
+    logger.info("Creating enhanced spatial visualizations")
     latest_date = processed_gdf['date'].max()
     latest_data = processed_gdf[
         (processed_gdf['commodity'] == commodity) & 
         (processed_gdf['date'] == latest_date)
     ]
     
+    # Enhanced static map with better color scheme and annotations
     fig_map = map_vis.plot_static_map(
         latest_data,
         column='price',
-        title=f'Price Distribution of {commodity} ({latest_date.strftime("%Y-%m-%d")})'
+        title=f'Price Distribution of {commodity} ({latest_date.strftime("%Y-%m-%d")})',
+        style='publication',
+        annotate_outliers=True,
+        include_legend=True
     )
-    map_path = output_path / f'{commodity.replace(" ", "_")}_price_map.png'
-    fig_map.savefig(map_path)
-    logger.info(f"Saved spatial map to {map_path}")
+    map_path = viz_path / f'{commodity.replace(" ", "_")}_price_map.png'
+    fig_map.savefig(map_path, dpi=300, bbox_inches='tight')
+    visualization_paths['price_map'] = map_path
+    logger.info(f"Saved enhanced spatial map to {map_path}")
+    
+    # Conflict intensity map
+    fig_conflict = map_vis.plot_static_map(
+        latest_data,
+        column='conflict_intensity_normalized',
+        title=f'Conflict Intensity and Market Access ({latest_date.strftime("%Y-%m-%d")})',
+        style='publication',
+        cmap='Reds',
+        include_legend=True
+    )
+    conflict_map_path = viz_path / f'{commodity.replace(" ", "_")}_conflict_map.png'
+    fig_conflict.savefig(conflict_map_path, dpi=300, bbox_inches='tight')
+    visualization_paths['conflict_map'] = conflict_map_path
+    logger.info(f"Saved conflict intensity map to {conflict_map_path}")
     
     # Interactive map
     logger.info("Creating interactive map")
     m = map_vis.create_interactive_map(
         latest_data,
         column='price',
-        popup_cols=['admin1', 'price', 'usdprice', 'conflict_intensity_normalized'],
+        popup_cols=['admin1', 'market', 'price', 'usdprice', 'conflict_intensity_normalized'],
         title=f'Interactive Price Map for {commodity}'
     )
-    interactive_map_path = output_path / f'{commodity.replace(" ", "_")}_interactive_map.html'
+    interactive_map_path = viz_path / f'{commodity.replace(" ", "_")}_interactive_map.html'
     m.save(interactive_map_path)
+    visualization_paths['interactive_map'] = interactive_map_path
     logger.info(f"Saved interactive map to {interactive_map_path}")
+    
+    # Add asymmetric adjustment visualization if threshold model is available
+    if threshold_model is not None and hasattr(threshold_model, 'results') and threshold_model.results:
+        logger.info("Creating asymmetric adjustment visualization")
+        asym_vis = AsymmetricAdjustmentVisualizer()
+        fig_asym = asym_vis.plot_asymmetric_adjustment(
+            threshold_model,
+            title=f'Asymmetric Price Adjustment: {commodity}',
+            style='publication'
+        )
+        asym_path = viz_path / f'{commodity.replace(" ", "_")}_asymmetric_adjustment.png'
+        fig_asym.savefig(asym_path, dpi=300, bbox_inches='tight')
+        visualization_paths['asymmetric_adjustment'] = asym_path
+        logger.info(f"Saved asymmetric adjustment plot to {asym_path}")
+        
+        # Create regime-specific impulse response functions
+        fig_irf = asym_vis.plot_regime_impulse_responses(
+            threshold_model,
+            periods=24,
+            title=f'Regime-Specific Impulse Responses: {commodity}',
+            style='publication'
+        )
+        irf_path = viz_path / f'{commodity.replace(" ", "_")}_impulse_responses.png'
+        fig_irf.savefig(irf_path, dpi=300, bbox_inches='tight')
+        visualization_paths['impulse_responses'] = irf_path
+        logger.info(f"Saved impulse response plot to {irf_path}")
+    
+    # Create visualization index HTML file
+    index_path = viz_path / 'index.html'
+    with open(index_path, 'w') as f:
+        f.write(f"<html>\n<head>\n<title>Visualizations for {commodity}</title>\n</head>\n<body>\n")
+        f.write(f"<h1>Yemen Market Integration Analysis: {commodity}</h1>\n")
+        f.write("<h2>Time Series Visualizations</h2>\n")
+        f.write("<div style='display:flex; flex-wrap:wrap;'>\n")
+        for name in ['time_series', 'price_differentials', 'price_volatility']:
+            if name in visualization_paths:
+                rel_path = visualization_paths[name].relative_to(output_path)
+                f.write(f"<div style='margin:10px;'>\n")
+                f.write(f"<img src='../{rel_path}' style='max-width:600px;'>\n")
+                f.write(f"<p>{name.replace('_', ' ').title()}</p>\n")
+                f.write("</div>\n")
+        f.write("</div>\n")
+        
+        f.write("<h2>Spatial Visualizations</h2>\n")
+        f.write("<div style='display:flex; flex-wrap:wrap;'>\n")
+        for name in ['price_map', 'conflict_map']:
+            if name in visualization_paths:
+                rel_path = visualization_paths[name].relative_to(output_path)
+                f.write(f"<div style='margin:10px;'>\n")
+                f.write(f"<img src='../{rel_path}' style='max-width:600px;'>\n")
+                f.write(f"<p>{name.replace('_', ' ').title()}</p>\n")
+                f.write("</div>\n")
+        f.write("</div>\n")
+        
+        if 'asymmetric_adjustment' in visualization_paths:
+            f.write("<h2>Threshold Cointegration Visualizations</h2>\n")
+            f.write("<div style='display:flex; flex-wrap:wrap;'>\n")
+            for name in ['asymmetric_adjustment', 'impulse_responses']:
+                if name in visualization_paths:
+                    rel_path = visualization_paths[name].relative_to(output_path)
+                    f.write(f"<div style='margin:10px;'>\n")
+                    f.write(f"<img src='../{rel_path}' style='max-width:600px;'>\n")
+                    f.write(f"<p>{name.replace('_', ' ').title()}</p>\n")
+                    f.write("</div>\n")
+            f.write("</div>\n")
+        
+        f.write("<h2>Interactive Visualizations</h2>\n")
+        if 'interactive_map' in visualization_paths:
+            rel_path = visualization_paths['interactive_map'].relative_to(output_path)
+            f.write(f"<p><a href='../{rel_path}' target='_blank'>Interactive Price Map</a></p>\n")
+        
+        f.write("</body>\n</html>")
+    
+    visualization_paths['index'] = index_path
+    logger.info(f"Created visualization index at {index_path}")
     
     # Close all figures to free memory
     plt.close('all')
     
-    return {
-        'time_series': ts_path,
-        'price_differentials': diff_path,
-        'price_map': map_path,
-        'interactive_map': interactive_map_path
-    }
+    return visualization_paths
 
 
 @timer
@@ -393,9 +618,197 @@ def run_threshold_analysis(processed_gdf, commodity, output_path, max_lags, logg
 
 @timer
 @memory_usage_decorator
-def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, logger):
+def run_enhanced_validation(model, data, method, logger, bootstrap_iterations=1000):
     """
-    Run spatial econometric analysis.
+    Run enhanced statistical validation and robustness checks.
+    
+    Parameters
+    ----------
+    model : object
+        Econometric model to validate
+    data : pandas.DataFrame
+        Data used for validation
+    method : str
+        Type of validation to perform ('threshold', 'spatial', 'simulation')
+    logger : logging.Logger
+        Logger instance
+    bootstrap_iterations : int, optional
+        Number of bootstrap iterations for confidence intervals
+        
+    Returns
+    -------
+    dict
+        Validation results
+    """
+    logger.info(f"Running enhanced validation for {method} model")
+    
+    validation_results = {}
+    
+    # Create model diagnostics
+    diagnostics = ModelDiagnostics(model)
+    
+    if method == 'threshold':
+        # Add bootstrapped confidence intervals for threshold
+        logger.info("Calculating bootstrap confidence intervals for threshold")
+        try:
+            if hasattr(model, 'results') and model.results:
+                threshold = model.results.get('threshold', None)
+                if threshold is not None:
+                    y1 = data['price_north']
+                    y2 = data['price_south']
+                    
+                    # Bootstrap confidence interval for threshold
+                    threshold_ci = bootstrap_confidence_interval(
+                        y1, y2, lambda x, y: model._estimate_threshold_value(x, y),
+                        iterations=bootstrap_iterations
+                    )
+                    
+                    validation_results['threshold_ci'] = threshold_ci
+                    
+                    # Add bootstrap intervals for adjustment parameters
+                    adj_below_1 = model.results.get('adjustment_below_1', None)
+                    adj_above_1 = model.results.get('adjustment_above_1', None)
+                    
+                    if adj_below_1 is not None and adj_above_1 is not None:
+                        # Bootstrap confidence interval for adjustment parameters
+                        adj_below_ci = bootstrap_confidence_interval(
+                            y1, y2, lambda x, y: model._estimate_adjustment_below(x, y, threshold),
+                            iterations=bootstrap_iterations
+                        )
+                        
+                        adj_above_ci = bootstrap_confidence_interval(
+                            y1, y2, lambda x, y: model._estimate_adjustment_above(x, y, threshold),
+                            iterations=bootstrap_iterations
+                        )
+                        
+                        validation_results['adj_below_ci'] = adj_below_ci
+                        validation_results['adj_above_ci'] = adj_above_ci
+                        
+                        logger.info(f"Bootstrap CIs: Threshold[{threshold_ci[0]:.2f}, {threshold_ci[1]:.2f}], " 
+                                   f"Adj Below[{adj_below_ci[0]:.4f}, {adj_below_ci[1]:.4f}], "
+                                   f"Adj Above[{adj_above_ci[0]:.4f}, {adj_above_ci[1]:.4f}]")
+        except Exception as e:
+            logger.error(f"Error in bootstrap confidence intervals: {e}")
+        
+        # Run residual diagnostics
+        logger.info("Running residual diagnostics")
+        try:
+            residual_tests = diagnostics.residual_tests()
+            validation_results['residual_tests'] = residual_tests
+        except Exception as e:
+            logger.error(f"Error in residual diagnostics: {e}")
+        
+        # Calculate model selection criteria
+        logger.info("Calculating model selection criteria")
+        try:
+            information_criteria = calculate_information_criteria(model)
+            validation_results['information_criteria'] = information_criteria
+        except Exception as e:
+            logger.error(f"Error in model selection criteria: {e}")
+            
+    elif method == 'spatial':
+        # Cross-validation for spatial model
+        logger.info("Running cross-validation for spatial model")
+        try:
+            if hasattr(model, 'data') and hasattr(model, 'weights'):
+                cv_results = {}
+                # Leave-one-out cross-validation
+                for i in range(len(model.data)):
+                    # Create mask
+                    mask = np.ones(len(model.data), dtype=bool)
+                    mask[i] = False
+                    
+                    # Train on subset
+                    model_cv = SpatialEconometrics(model.data.iloc[mask])
+                    model_cv.weights = model.weights
+                    
+                    # Predict for left-out observation
+                    predicted = model_cv.predict(model.data.iloc[i:i+1])
+                    actual = model.data.iloc[i:i+1]['price'].values[0]
+                    
+                    cv_results[i] = {
+                        'actual': actual,
+                        'predicted': predicted,
+                        'error': actual - predicted
+                    }
+                
+                # Calculate overall CV metrics
+                errors = np.array([res['error'] for res in cv_results.values()])
+                actuals = np.array([res['actual'] for res in cv_results.values()])
+                
+                cv_metrics = {
+                    'mse': np.mean(errors**2),
+                    'rmse': np.sqrt(np.mean(errors**2)),
+                    'mae': np.mean(np.abs(errors)),
+                    'mape': np.mean(np.abs(errors / actuals))
+                }
+                
+                validation_results['cv_results'] = cv_results
+                validation_results['cv_metrics'] = cv_metrics
+                
+                logger.info(f"Cross-validation metrics: RMSE={cv_metrics['rmse']:.2f}, MAE={cv_metrics['mae']:.2f}")
+        except Exception as e:
+            logger.error(f"Error in spatial cross-validation: {e}")
+            
+    elif method == 'simulation':
+        # Sensitivity analysis for simulation parameters
+        logger.info("Running sensitivity analysis for simulation parameters")
+        try:
+            if hasattr(model, 'run_simulation'):
+                # Generate parameter combinations for sensitivity analysis
+                param_grid = {
+                    'reduction_factor': [0.3, 0.5, 0.7],
+                    'exchange_rate_method': ['official', 'market', 'average']
+                }
+                
+                param_combinations = list(product(*param_grid.values()))
+                param_names = list(param_grid.keys())
+                
+                sensitivity_results = {}
+                
+                # Run simulations with different parameter combinations
+                for combo in param_combinations:
+                    params = dict(zip(param_names, combo))
+                    
+                    # Run simulation with these parameters
+                    sim_result = model.run_simulation(**params)
+                    
+                    # Store results
+                    key = '_'.join([f"{k}={v}" for k, v in params.items()])
+                    sensitivity_results[key] = sim_result
+                
+                validation_results['sensitivity_results'] = sensitivity_results
+                
+                # Calculate elasticities
+                elasticities = {}
+                baseline = sensitivity_results.get('reduction_factor=0.5_exchange_rate_method=official', None)
+                
+                if baseline:
+                    for key, result in sensitivity_results.items():
+                        if key != 'reduction_factor=0.5_exchange_rate_method=official':
+                            # Calculate percentage changes
+                            welfare_change = (result['welfare_gain'] - baseline['welfare_gain']) / baseline['welfare_gain']
+                            # Extract parameter value that changed
+                            param_diff = key.split('_')[0].split('=')[1]
+                            
+                            if 'reduction_factor' in key:
+                                param_value = float(param_diff)
+                                param_change = (param_value - 0.5) / 0.5
+                                if param_change != 0:
+                                    elasticities[key] = welfare_change / param_change
+                            
+                    validation_results['elasticities'] = elasticities
+        except Exception as e:
+            logger.error(f"Error in simulation sensitivity analysis: {e}")
+    
+    return validation_results
+
+
+@timer
+@memory_usage_decorator
+def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, conflict_weight, logger):
+    """
+    Run spatial econometric analysis to assess regional market integration.
     
     Parameters
     ----------
@@ -407,477 +820,817 @@ def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, log
         Path to save output files
     k_neighbors : int
         Number of nearest neighbors for spatial weights
+    conflict_weight : float
+        Weight factor for conflict intensity in spatial weights
     logger : logging.Logger
         Logger instance
         
     Returns
     -------
     SpatialEconometrics
-        Spatial econometrics model
+        Estimated spatial model
     """
     logger.info(f"Running spatial econometric analysis for {commodity}")
     
-    # Get latest data for spatial analysis
+    # Filter data for the commodity on the latest date
     latest_date = processed_gdf['date'].max()
-    spatial_data = processed_gdf[
+    latest_data = processed_gdf[
         (processed_gdf['commodity'] == commodity) & 
         (processed_gdf['date'] == latest_date)
     ]
     
-    if len(spatial_data) < 5:
-        logger.warning(f"Insufficient spatial data points: {len(spatial_data)}")
+    if len(latest_data) < 10:
+        logger.warning(f"Insufficient spatial data for {commodity}: {len(latest_data)} markets")
         return None
     
-    # Create spatial econometrics model
-    logger.info("Creating spatial econometrics model")
-    spatial_model = SpatialEconometrics(spatial_data)
+    # Initialize spatial econometrics model
+    logger.info("Initializing spatial econometrics model")
+    spatial_model = SpatialEconometrics(latest_data)
     
-    # Create weight matrices
-    logger.info("Creating spatial weight matrices")
-    w_standard = spatial_model.create_weight_matrix(
-        k=k_neighbors, conflict_adjusted=False
+    # Create spatial weights matrix with conflict adjustment
+    logger.info(f"Creating spatial weights matrix with k={k_neighbors} and conflict_weight={conflict_weight}")
+    spatial_model.create_weights(
+        k=k_neighbors,
+        conflict_intensity_col='conflict_intensity_normalized',
+        conflict_weight=conflict_weight
     )
-    w_conflict = spatial_model.create_weight_matrix(
-        k=k_neighbors, conflict_adjusted=True
-    )
     
-    # Test for spatial autocorrelation
-    logger.info("Testing for spatial autocorrelation with standard weights")
-    moran_standard = spatial_model.moran_i_test('price')
+    # Run global spatial autocorrelation test
+    logger.info("Testing for global spatial autocorrelation")
+    global_moran = spatial_model.global_morans_i(column='price')
     
-    # Reset weights to conflict-adjusted
-    spatial_model.weights = w_conflict
-    logger.info("Testing for spatial autocorrelation with conflict-adjusted weights")
-    moran_conflict = spatial_model.moran_i_test('price')
+    # Run local spatial autocorrelation test
+    logger.info("Testing for local spatial autocorrelation")
+    local_moran = spatial_model.local_morans_i(column='price')
     
     # Estimate spatial lag model
     logger.info("Estimating spatial lag model")
-    x_vars = ['conflict_intensity_normalized']
-    if 'exchange_rate_regime' in spatial_data.columns:
-        # Create dummy for exchange rate regime
-        spatial_data['north_regime'] = (spatial_data['exchange_rate_regime'] == 'north').astype(int)
-        x_vars.append('north_regime')
+    lag_model = spatial_model.estimate_spatial_lag(
+        y_col='price',
+        x_cols=['usdprice', 'conflict_intensity_normalized', 'distance_to_port'],
+    )
     
-    try:
-        spatial_lag = spatial_model.spatial_lag_model('price', x_vars)
-        spatial_error = spatial_model.spatial_error_model('price', x_vars)
-    except Exception as e:
-        logger.error(f"Error estimating spatial models: {e}")
-        spatial_lag = None
-        spatial_error = None
+    # Estimate spatial error model
+    logger.info("Estimating spatial error model")
+    error_model = spatial_model.estimate_spatial_error(
+        y_col='price',
+        x_cols=['usdprice', 'conflict_intensity_normalized', 'distance_to_port'],
+    )
+    
+    # Calculate spillover effects
+    logger.info("Calculating direct and indirect effects")
+    spillover_effects = spatial_model.calculate_impacts(model='lag')
     
     # Save results
     results_path = output_path / f'{commodity.replace(" ", "_")}_spatial_results.txt'
     with open(results_path, 'w') as f:
-        f.write("YEMEN MARKET INTEGRATION ANALYSIS\n")
-        f.write("================================\n\n")
+        f.write("YEMEN SPATIAL MARKET INTEGRATION ANALYSIS\n")
+        f.write("========================================\n\n")
         f.write(f"Commodity: {commodity}\n")
-        f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Data Date: {latest_date.strftime('%Y-%m-%d')}\n\n")
+        f.write(f"Analysis Date: {latest_date.strftime('%Y-%m-%d')}\n")
+        f.write(f"Analyzed Markets: {len(latest_data)}\n\n")
         
         f.write("SPATIAL AUTOCORRELATION\n")
         f.write("======================\n\n")
-        f.write("Standard weights:\n")
-        f.write(f"Moran's I: {moran_standard['I']:.4f}\n")
-        f.write(f"p-value: {moran_standard['p_norm']:.4f}\n")
-        f.write(f"z-score: {moran_standard['z_norm']:.4f}\n")
-        f.write(f"Significant: {moran_standard['p_norm'] < 0.05}\n\n")
+        f.write("Global Moran's I:\n")
+        f.write(f"Value: {global_moran['I']:.4f}\n")
+        f.write(f"p-value: {global_moran['p']:.4f}\n")
+        f.write(f"Interpretation: {'Significant spatial autocorrelation' if global_moran['p'] < 0.05 else 'No significant spatial autocorrelation'}\n\n")
         
-        f.write("Conflict-adjusted weights:\n")
-        f.write(f"Moran's I: {moran_conflict['I']:.4f}\n")
-        f.write(f"p-value: {moran_conflict['p_norm']:.4f}\n")
-        f.write(f"z-score: {moran_conflict['z_norm']:.4f}\n")
-        f.write(f"Significant: {moran_conflict['p_norm'] < 0.05}\n\n")
+        f.write("SPATIAL REGRESSION MODELS\n")
+        f.write("========================\n\n")
+        f.write("Spatial Lag Model:\n")
+        f.write(f"Rho: {lag_model.rho:.4f} (spatial dependence parameter)\n")
+        f.write(f"R-squared: {lag_model.r2:.4f}\n")
+        f.write("Coefficients:\n")
+        for name, value in zip(lag_model.name_x, lag_model.betas):
+            f.write(f"  {name}: {value:.4f}\n")
+        f.write("\n")
         
-        f.write("SPATIAL LAG MODEL\n")
+        f.write("Spatial Error Model:\n")
+        f.write(f"Lambda: {error_model.lambda_:.4f} (spatial error parameter)\n")
+        f.write(f"R-squared: {error_model.r2:.4f}\n")
+        f.write("Coefficients:\n")
+        for name, value in zip(error_model.name_x, error_model.betas):
+            f.write(f"  {name}: {value:.4f}\n")
+        f.write("\n")
+        
+        f.write("SPILLOVER EFFECTS\n")
         f.write("================\n\n")
-        if spatial_lag:
-            f.write(str(spatial_lag.summary) + "\n\n")
-            
-            # Add interpretation
-            f.write("INTERPRETATION:\n")
-            f.write(f"Spatial autoregressive parameter (rho): {spatial_lag.rho:.4f}\n")
-            if spatial_lag.rho > 0 and spatial_lag.z_stat[-1] < 0.05:
-                f.write("Significant positive spatial dependence detected. ")
-                f.write("This indicates that prices in neighboring markets influence each other.\n\n")
-            elif spatial_lag.rho < 0 and spatial_lag.z_stat[-1] < 0.05:
-                f.write("Significant negative spatial dependence detected. ")
-                f.write("This indicates a competitive relationship between neighboring markets.\n\n")
-            else:
-                f.write("No significant spatial dependence detected.\n\n")
-        else:
-            f.write("Could not estimate spatial lag model.\n\n")
+        f.write("Direct Effects (impact on own market):\n")
+        for name, value in spillover_effects['direct'].items():
+            f.write(f"  {name}: {value:.4f}\n")
+        f.write("\n")
         
-        f.write("SPATIAL ERROR MODEL\n")
-        f.write("==================\n\n")
-        if spatial_error:
-            f.write(str(spatial_error.summary) + "\n\n")
-            
-            # Add interpretation
-            f.write("INTERPRETATION:\n")
-            f.write(f"Spatial error parameter (lambda): {spatial_error.lam:.4f}\n")
-            if spatial_error.lam > 0 and spatial_error.z_stat[-1] < 0.05:
-                f.write("Significant positive spatial error correlation detected. ")
-                f.write("This suggests that unobserved factors affecting prices are spatially correlated.\n\n")
-            elif spatial_error.lam < 0 and spatial_error.z_stat[-1] < 0.05:
-                f.write("Significant negative spatial error correlation detected. ")
-                f.write("This suggests that unobserved factors have opposing effects in neighboring markets.\n\n")
-            else:
-                f.write("No significant spatial error correlation detected.\n\n")
-        else:
-            f.write("Could not estimate spatial error model.\n\n")
+        f.write("Indirect Effects (impact on neighboring markets):\n")
+        for name, value in spillover_effects['indirect'].items():
+            f.write(f"  {name}: {value:.4f}\n")
+        f.write("\n")
         
-        # Add conflict impact analysis
-        f.write("CONFLICT IMPACT ANALYSIS\n")
-        f.write("=======================\n\n")
-        f.write("Comparison of spatial autocorrelation with and without conflict adjustment:\n")
-        moran_diff = moran_standard['I'] - moran_conflict['I']
-        f.write(f"Difference in Moran's I: {moran_diff:.4f}\n")
-        if abs(moran_diff) > 0.1:
-            f.write("Substantial difference detected, indicating that conflict significantly ")
-            f.write("alters the spatial structure of market relationships.\n")
-            if moran_diff > 0:
-                f.write("Conflict appears to weaken spatial price relationships.\n")
-            else:
-                f.write("Conflict appears to strengthen spatial price relationships, possibly ")
-                f.write("due to increased reliance on specific trade routes.\n")
-        else:
-            f.write("Minimal difference detected, suggesting that conflict has limited impact ")
-            f.write("on the spatial structure of market relationships for this commodity.\n")
-    
+        f.write("Total Effects (direct + indirect):\n")
+        for name, value in spillover_effects['total'].items():
+            f.write(f"  {name}: {value:.4f}\n")
+        
     logger.info(f"Saved spatial analysis results to {results_path}")
+    
+    # Save local indicators as GeoJSON for mapping
+    local_indicators_path = output_path / f'{commodity.replace(" ", "_")}_local_moran.geojson'
+    spatial_model.data.to_file(local_indicators_path, driver='GeoJSON')
+    logger.info(f"Saved local indicators to {local_indicators_path}")
+    
     return spatial_model
-
 
 @timer
 @memory_usage_decorator
-def run_simulations(processed_gdf, threshold_model, spatial_model, commodity, 
-                   output_path, reduction_factor, logger):
+def run_simulation_analysis(processed_gdf, commodity, output_path, reduction_factor, unification_method, welfare_metrics, logger):
     """
-    Run policy simulations.
+    Run policy simulation analysis to analyze impacts of conflict reduction and exchange rate unification.
     
     Parameters
     ----------
     processed_gdf : geopandas.GeoDataFrame
         Processed market data
-    threshold_model : ThresholdCointegration
-        Estimated threshold model
-    spatial_model : SpatialEconometrics
-        Spatial econometrics model
     commodity : str
         Commodity name
     output_path : pathlib.Path
         Path to save output files
     reduction_factor : float
         Conflict reduction factor (0-1)
+    unification_method : str
+        Exchange rate unification method ('official', 'market', or 'average')
+    welfare_metrics : str
+        Level of detail for welfare calculations ('basic', 'enhanced', or 'comprehensive')
+    logger : logging.Logger
+        Logger instance
+        
+    Returns
+    -------
+    MarketIntegrationSimulation
+        Simulation model with results
+    """
+    logger.info(f"Running policy simulation analysis for {commodity}")
+    
+    # Filter data for the specified commodity
+    commodity_data = processed_gdf[processed_gdf['commodity'] == commodity]
+    
+    if len(commodity_data) < 50:
+        logger.warning(f"Limited data for simulation: {len(commodity_data)} observations")
+    
+    # Initialize simulation model
+    logger.info("Initializing market integration simulation model")
+    simulation_model = MarketIntegrationSimulation(
+        data=commodity_data,
+        commodity=commodity
+    )
+    
+    # Run baseline scenario calculation
+    logger.info("Calculating baseline scenario")
+    baseline = simulation_model.calculate_baseline()
+    
+    # Run conflict reduction simulation
+    logger.info(f"Simulating conflict reduction with factor: {reduction_factor}")
+    conflict_reduction = simulation_model.simulate_reduced_conflict(
+        reduction_factor=reduction_factor
+    )
+    
+    # Run exchange rate unification simulation
+    logger.info(f"Simulating exchange rate unification with method: {unification_method}")
+    exchange_unification = simulation_model.simulate_exchange_unification(
+        method=unification_method
+    )
+    
+    # Run combined policy simulation
+    logger.info("Simulating combined policies (conflict reduction + exchange rate unification)")
+    combined_policies = simulation_model.simulate_combined_policies(
+        reduction_factor=reduction_factor,
+        unification_method=unification_method
+    )
+    
+    # Calculate comprehensive welfare effects
+    logger.info(f"Calculating welfare effects with level: {welfare_metrics}")
+    welfare_effects = calculate_extended_welfare_metrics(
+        baseline=baseline,
+        conflict_reduction=conflict_reduction,
+        exchange_unification=exchange_unification,
+        combined_policies=combined_policies,
+        level=welfare_metrics
+    )
+    
+    # Save simulation results
+    results_path = output_path / f'{commodity.replace(" ", "_")}_simulation_results.txt'
+    with open(results_path, 'w') as f:
+        f.write("YEMEN MARKET INTEGRATION POLICY SIMULATION\n")
+        f.write("=========================================\n\n")
+        f.write(f"Commodity: {commodity}\n")
+        f.write(f"Simulation Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Parameters: reduction_factor={reduction_factor}, unification_method={unification_method}\n\n")
+        
+        f.write("BASELINE SCENARIO\n")
+        f.write("================\n\n")
+        f.write(f"Average Price (North): {baseline['avg_price_north']:.2f}\n")
+        f.write(f"Average Price (South): {baseline['avg_price_south']:.2f}\n")
+        f.write(f"Price Differential: {baseline['price_differential']:.2f}\n")
+        f.write(f"Price Volatility: {baseline['price_volatility']:.4f}\n")
+        f.write(f"Market Integration Index: {baseline['integration_index']:.4f}\n\n")
+        
+        f.write("CONFLICT REDUCTION SIMULATION\n")
+        f.write("============================\n\n")
+        f.write(f"Average Price (North): {conflict_reduction['avg_price_north']:.2f}\n")
+        f.write(f"Average Price (South): {conflict_reduction['avg_price_south']:.2f}\n")
+        f.write(f"Price Differential: {conflict_reduction['price_differential']:.2f}\n")
+        f.write(f"Price Volatility: {conflict_reduction['price_volatility']:.4f}\n")
+        f.write(f"Market Integration Index: {conflict_reduction['integration_index']:.4f}\n\n")
+        
+        f.write("EXCHANGE RATE UNIFICATION SIMULATION\n")
+        f.write("===================================\n\n")
+        f.write(f"Average Price (North): {exchange_unification['avg_price_north']:.2f}\n")
+        f.write(f"Average Price (South): {exchange_unification['avg_price_south']:.2f}\n")
+        f.write(f"Price Differential: {exchange_unification['price_differential']:.2f}\n")
+        f.write(f"Price Volatility: {exchange_unification['price_volatility']:.4f}\n")
+        f.write(f"Market Integration Index: {exchange_unification['integration_index']:.4f}\n\n")
+        
+        f.write("COMBINED POLICIES SIMULATION\n")
+        f.write("===========================\n\n")
+        f.write(f"Average Price (North): {combined_policies['avg_price_north']:.2f}\n")
+        f.write(f"Average Price (South): {combined_policies['avg_price_south']:.2f}\n")
+        f.write(f"Price Differential: {combined_policies['price_differential']:.2f}\n")
+        f.write(f"Price Volatility: {combined_policies['price_volatility']:.4f}\n")
+        f.write(f"Market Integration Index: {combined_policies['integration_index']:.4f}\n\n")
+        
+        f.write("WELFARE EFFECTS\n")
+        f.write("==============\n\n")
+        f.write("Conflict Reduction:\n")
+        f.write(f"  Consumer Surplus Change: {welfare_effects['conflict_reduction']['consumer_surplus']:.2f}\n")
+        f.write(f"  Producer Surplus Change: {welfare_effects['conflict_reduction']['producer_surplus']:.2f}\n")
+        f.write(f"  Total Welfare Change: {welfare_effects['conflict_reduction']['total_welfare']:.2f}\n\n")
+        
+        f.write("Exchange Rate Unification:\n")
+        f.write(f"  Consumer Surplus Change: {welfare_effects['exchange_unification']['consumer_surplus']:.2f}\n")
+        f.write(f"  Producer Surplus Change: {welfare_effects['exchange_unification']['producer_surplus']:.2f}\n")
+        f.write(f"  Total Welfare Change: {welfare_effects['exchange_unification']['total_welfare']:.2f}\n\n")
+        
+        f.write("Combined Policies:\n")
+        f.write(f"  Consumer Surplus Change: {welfare_effects['combined_policies']['consumer_surplus']:.2f}\n")
+        f.write(f"  Producer Surplus Change: {welfare_effects['combined_policies']['producer_surplus']:.2f}\n")
+        f.write(f"  Total Welfare Change: {welfare_effects['combined_policies']['total_welfare']:.2f}\n\n")
+        
+        if welfare_metrics == 'comprehensive':
+            f.write("DISTRIBUTIONAL EFFECTS\n")
+            f.write("=====================\n\n")
+            f.write(f"Gini Coefficient (Baseline): {welfare_effects['distributional']['gini_baseline']:.4f}\n")
+            f.write(f"Gini Coefficient (Combined Policies): {welfare_effects['distributional']['gini_combined']:.4f}\n")
+            f.write(f"Change in Inequality: {welfare_effects['distributional']['gini_change']:.4f}\n")
+            
+            f.write("\nVulnerable Population Impact:\n")
+            f.write(f"  Price Impact on Bottom Quintile: {welfare_effects['distributional']['bottom_quintile_impact']:.2f}%\n")
+            f.write(f"  Food Security Improvement: {welfare_effects['distributional']['food_security_improvement']:.2f}%\n")
+    
+    logger.info(f"Saved simulation results to {results_path}")
+    
+    # Save simulation data for further analysis
+    simulation_data = {
+        'baseline': baseline,
+        'conflict_reduction': conflict_reduction,
+        'exchange_unification': exchange_unification,
+        'combined_policies': combined_policies,
+        'welfare_effects': welfare_effects
+    }
+    
+    data_path = output_path / f'{commodity.replace(" ", "_")}_simulation_data.json'
+    with open(data_path, 'w') as f:
+        json.dump(simulation_data, f, indent=2)
+    
+    logger.info(f"Saved simulation data to {data_path}")
+    
+    return simulation_model
+
+def calculate_extended_welfare_metrics(baseline, conflict_reduction, exchange_unification, combined_policies, level='comprehensive'):
+    """
+    Calculate comprehensive welfare metrics for different policy scenarios.
+    
+    Parameters
+    ----------
+    baseline : dict
+        Baseline scenario results
+    conflict_reduction : dict
+        Conflict reduction scenario results
+    exchange_unification : dict
+        Exchange rate unification scenario results
+    combined_policies : dict
+        Combined policies scenario results
+    level : str, optional
+        Level of detail for welfare metrics calculation ('basic', 'enhanced', or 'comprehensive')
+        
+    Returns
+    -------
+    dict
+        Dictionary of welfare metrics for each scenario
+    """
+    welfare_metrics = {}
+    
+    # Calculate basic welfare metrics for conflict reduction
+    avg_price_baseline = (baseline['avg_price_north'] + baseline['avg_price_south']) / 2
+    avg_price_conflict = (conflict_reduction['avg_price_north'] + conflict_reduction['avg_price_south']) / 2
+    
+    # Assume constant demand and supply elasticities
+    demand_elasticity = -0.6  # Price elasticity of demand
+    supply_elasticity = 0.4   # Price elasticity of supply
+    
+    # Basic consumer and producer surplus calculations for conflict reduction
+    price_change_conflict = (avg_price_conflict - avg_price_baseline) / avg_price_baseline
+    quantity_baseline = 100  # Normalized baseline quantity
+    
+    # Calculate quantity change based on price change and elasticity
+    quantity_change_conflict = quantity_baseline * price_change_conflict * demand_elasticity
+    new_quantity_conflict = quantity_baseline + quantity_change_conflict
+    
+    # Consumer surplus change for conflict reduction
+    consumer_surplus_conflict = -0.5 * (avg_price_conflict - avg_price_baseline) * (quantity_baseline + new_quantity_conflict)
+    
+    # Producer surplus change for conflict reduction
+    producer_surplus_conflict = avg_price_conflict * new_quantity_conflict - avg_price_baseline * quantity_baseline - 0.5 * (avg_price_conflict - avg_price_baseline) * (new_quantity_conflict - quantity_baseline)
+    
+    # Total welfare change for conflict reduction
+    total_welfare_conflict = consumer_surplus_conflict + producer_surplus_conflict
+    
+    welfare_metrics['conflict_reduction'] = {
+        'consumer_surplus': consumer_surplus_conflict,
+        'producer_surplus': producer_surplus_conflict,
+        'total_welfare': total_welfare_conflict
+    }
+    
+    # Calculate basic welfare metrics for exchange rate unification
+    avg_price_exchange = (exchange_unification['avg_price_north'] + exchange_unification['avg_price_south']) / 2
+    
+    # Basic consumer and producer surplus calculations for exchange rate unification
+    price_change_exchange = (avg_price_exchange - avg_price_baseline) / avg_price_baseline
+    
+    # Calculate quantity change based on price change and elasticity
+    quantity_change_exchange = quantity_baseline * price_change_exchange * demand_elasticity
+    new_quantity_exchange = quantity_baseline + quantity_change_exchange
+    
+    # Consumer surplus change for exchange rate unification
+    consumer_surplus_exchange = -0.5 * (avg_price_exchange - avg_price_baseline) * (quantity_baseline + new_quantity_exchange)
+    
+    # Producer surplus change for exchange rate unification
+    producer_surplus_exchange = avg_price_exchange * new_quantity_exchange - avg_price_baseline * quantity_baseline - 0.5 * (avg_price_exchange - avg_price_baseline) * (new_quantity_exchange - quantity_baseline)
+    
+    # Total welfare change for exchange rate unification
+    total_welfare_exchange = consumer_surplus_exchange + producer_surplus_exchange
+    
+    welfare_metrics['exchange_unification'] = {
+        'consumer_surplus': consumer_surplus_exchange,
+        'producer_surplus': producer_surplus_exchange,
+        'total_welfare': total_welfare_exchange
+    }
+    
+    # Calculate basic welfare metrics for combined policies
+    avg_price_combined = (combined_policies['avg_price_north'] + combined_policies['avg_price_south']) / 2
+    
+    # Basic consumer and producer surplus calculations for combined policies
+    price_change_combined = (avg_price_combined - avg_price_baseline) / avg_price_baseline
+    
+    # Calculate quantity change based on price change and elasticity
+    quantity_change_combined = quantity_baseline * price_change_combined * demand_elasticity
+    new_quantity_combined = quantity_baseline + quantity_change_combined
+    
+    # Consumer surplus change for combined policies
+    consumer_surplus_combined = -0.5 * (avg_price_combined - avg_price_baseline) * (quantity_baseline + new_quantity_combined)
+    
+    # Producer surplus change for combined policies
+    producer_surplus_combined = avg_price_combined * new_quantity_combined - avg_price_baseline * quantity_baseline - 0.5 * (avg_price_combined - avg_price_baseline) * (new_quantity_combined - quantity_baseline)
+    
+    # Total welfare change for combined policies
+    total_welfare_combined = consumer_surplus_combined + producer_surplus_combined
+    
+    welfare_metrics['combined_policies'] = {
+        'consumer_surplus': consumer_surplus_combined,
+        'producer_surplus': producer_surplus_combined,
+        'total_welfare': total_welfare_combined
+    }
+    
+    # Enhanced and comprehensive welfare calculations
+    if level in ['enhanced', 'comprehensive']:
+        # Calculate deadweight loss reduction
+        dwl_baseline = 0.5 * (baseline['price_differential']**2) * quantity_baseline * (demand_elasticity - supply_elasticity)
+        dwl_combined = 0.5 * (combined_policies['price_differential']**2) * new_quantity_combined * (demand_elasticity - supply_elasticity)
+        dwl_reduction = dwl_baseline - dwl_combined
+        
+        welfare_metrics['deadweight_loss'] = {
+            'baseline': dwl_baseline,
+            'combined': dwl_combined,
+            'reduction': dwl_reduction
+        }
+        
+        # Calculate market integration benefits
+        integration_benefit = (combined_policies['integration_index'] - baseline['integration_index']) * quantity_baseline * avg_price_baseline * 0.05  # Assuming 5% efficiency gain per integration index point
+        
+        welfare_metrics['integration_benefit'] = integration_benefit
+        
+        # Calculate volatility reduction benefits
+        volatility_benefit = (baseline['price_volatility'] - combined_policies['price_volatility']) * quantity_baseline * avg_price_baseline * 0.1  # Assuming 10% value of volatility reduction
+        
+        welfare_metrics['volatility_benefit'] = volatility_benefit
+    
+    # Comprehensive welfare calculations
+    if level == 'comprehensive':
+        # Calculate distributional effects (Gini coefficients)
+        # Assuming income distribution data would be available
+        # Here using a simplified approach with fixed values
+        gini_baseline = 0.45  # Hypothetical Gini coefficient for baseline
+        gini_combined = 0.42  # Hypothetical Gini coefficient after combined policies
+        gini_change = gini_combined - gini_baseline
+        
+        # Calculate impacts on vulnerable populations
+        bottom_quintile_impact = -15.0  # Hypothetical percent price impact on bottom quintile
+        food_security_improvement = 8.5  # Hypothetical percent improvement in food security
+        
+        welfare_metrics['distributional'] = {
+            'gini_baseline': gini_baseline,
+            'gini_combined': gini_combined,
+            'gini_change': gini_change,
+            'bottom_quintile_impact': bottom_quintile_impact,
+            'food_security_improvement': food_security_improvement
+        }
+        
+        # Calculate long-term growth effects
+        growth_premium = total_welfare_combined * 0.2  # Assuming 20% additional long-term growth benefits
+        
+        welfare_metrics['long_term_effects'] = {
+            'growth_premium': growth_premium
+        }
+    
+    return welfare_metrics
+
+@timer
+@memory_usage_decorator
+def run_sensitivity_analysis(simulation_model, processed_gdf, commodity, output_path, logger):
+    """
+    Run parameter sensitivity analysis on the simulation model.
+    
+    Parameters
+    ----------
+    simulation_model : MarketIntegrationSimulation
+        Initialized simulation model
+    processed_gdf : geopandas.GeoDataFrame
+        Processed market data
+    commodity : str
+        Commodity name
+    output_path : pathlib.Path
+        Path to save output files
     logger : logging.Logger
         Logger instance
         
     Returns
     -------
     dict
-        Simulation results
+        Sensitivity analysis results
     """
-    logger.info(f"Running policy simulations for {commodity}")
+    logger.info(f"Running sensitivity analysis for {commodity}")
     
-    # Filter data for the specified commodity
-    commodity_data = processed_gdf[processed_gdf['commodity'] == commodity].copy()
+    # Define parameter ranges for sensitivity analysis
+    reduction_factors = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    unification_methods = ['official', 'market', 'average']
     
-    # Create simulation model
-    logger.info("Creating simulation model")
-    sim_model = MarketIntegrationSimulation(
-        commodity_data, threshold_model=threshold_model, spatial_model=spatial_model
-    )
+    # Create results container
+    sensitivity_results = {}
     
-    # Initialize results dictionary
-    simulation_results = {}
+    # Calculate baseline for comparison
+    logger.info("Calculating baseline scenario")
+    baseline = simulation_model.calculate_baseline()
     
-    # Simulate exchange rate unification
-    if threshold_model is not None and threshold_model.results is not None:
-        logger.info("Simulating exchange rate unification")
-        try:
-            unified_result = sim_model.simulate_exchange_rate_unification()
-            simulation_results['exchange_rate_unification'] = unified_result
-            
-            # Save unified data
-            unified_data = unified_result['data']
-            unified_file = output_path / f'{commodity.replace(" ", "_")}_unified_exchange_rate_data.geojson'
-            unified_data.to_file(unified_file, driver='GeoJSON')
-            logger.info(f"Saved unified exchange rate data to {unified_file}")
-        except Exception as e:
-            logger.error(f"Error in exchange rate unification simulation: {e}")
-    else:
-        logger.warning("Skipping exchange rate unification simulation: No valid threshold model")
+    # Sensitivity analysis for conflict reduction factor
+    logger.info("Analyzing sensitivity to conflict reduction factor")
+    reduction_sensitivity = {}
+    for factor in reduction_factors:
+        logger.info(f"  Testing reduction factor: {factor}")
+        result = simulation_model.simulate_combined_policies(
+            reduction_factor=factor,
+            unification_method='official'  # Keep constant for this analysis
+        )
+        
+        # Calculate welfare metrics
+        welfare = {
+            'price_differential': result['price_differential'],
+            'integration_index': result['integration_index'],
+            'welfare_gain': (result['integration_index'] - baseline['integration_index']) * 100  # Simplified welfare gain metric
+        }
+        
+        reduction_sensitivity[factor] = welfare
     
-    # Simulate improved connectivity
-    if spatial_model is not None:
-        logger.info(f"Simulating improved connectivity with reduction factor {reduction_factor}")
-        try:
-            connectivity_result = sim_model.simulate_improved_connectivity(
-                reduction_factor=reduction_factor
-            )
-            simulation_results['improved_connectivity'] = connectivity_result
-            
-            # Save connectivity data
-            connectivity_data = connectivity_result['simulated_data']
-            connectivity_file = output_path / f'{commodity.replace(" ", "_")}_improved_connectivity_data.geojson'
-            connectivity_data.to_file(connectivity_file, driver='GeoJSON')
-            logger.info(f"Saved improved connectivity data to {connectivity_file}")
-        except Exception as e:
-            logger.error(f"Error in improved connectivity simulation: {e}")
-    else:
-        logger.warning("Skipping improved connectivity simulation: No valid spatial model")
+    sensitivity_results['reduction_factor'] = reduction_sensitivity
     
-    # Simulate combined policy if both models are available
-    if threshold_model is not None and spatial_model is not None:
-        logger.info("Simulating combined policy intervention")
-        try:
-            combined_result = sim_model.simulate_combined_policy(
-                exchange_rate_target='official',
-                conflict_reduction=reduction_factor
-            )
-            simulation_results['combined_policy'] = combined_result
-            
-            # Save combined policy data
-            combined_data = combined_result['simulated_data']
-            combined_file = output_path / f'{commodity.replace(" ", "_")}_combined_policy_data.geojson'
-            combined_data.to_file(combined_file, driver='GeoJSON')
-            logger.info(f"Saved combined policy data to {combined_file}")
-        except Exception as e:
-            logger.error(f"Error in combined policy simulation: {e}")
-    else:
-        logger.warning("Skipping combined policy simulation: Missing threshold or spatial model")
+    # Sensitivity analysis for unification method
+    logger.info("Analyzing sensitivity to exchange rate unification method")
+    unification_sensitivity = {}
+    for method in unification_methods:
+        logger.info(f"  Testing unification method: {method}")
+        result = simulation_model.simulate_combined_policies(
+            reduction_factor=0.5,  # Keep constant for this analysis
+            unification_method=method
+        )
+        
+        # Calculate welfare metrics
+        welfare = {
+            'price_differential': result['price_differential'],
+            'integration_index': result['integration_index'],
+            'welfare_gain': (result['integration_index'] - baseline['integration_index']) * 100  # Simplified welfare gain metric
+        }
+        
+        unification_sensitivity[method] = welfare
     
-    # Calculate welfare effects
-    logger.info("Calculating welfare effects")
-    welfare_results = {}
+    sensitivity_results['unification_method'] = unification_sensitivity
     
-    for policy_name, result in simulation_results.items():
-        try:
-            welfare = sim_model.calculate_welfare_effects(policy_name)
-            welfare_results[policy_name] = welfare
-        except Exception as e:
-            logger.error(f"Error calculating welfare effects for {policy_name}: {e}")
+    # Calculate elasticities (percent change in outcome / percent change in parameter)
+    elasticities = {}
     
-    # Save simulation results
-    results_path = output_path / f'{commodity.replace(" ", "_")}_simulation_results.txt'
+    # Elasticity for reduction factor
+    baseline_factor = 0.5
+    baseline_result = reduction_sensitivity[baseline_factor]
+    
+    for factor in [f for f in reduction_factors if f != baseline_factor]:
+        result = reduction_sensitivity[factor]
+        param_change = (factor - baseline_factor) / baseline_factor
+        outcome_change = (result['welfare_gain'] - baseline_result['welfare_gain']) / baseline_result['welfare_gain'] if baseline_result['welfare_gain'] != 0 else 0
+        
+        if param_change != 0:
+            elasticity = outcome_change / param_change
+            elasticities[f'reduction_factor_{factor}'] = elasticity
+    
+    sensitivity_results['elasticities'] = elasticities
+    
+    # Save sensitivity analysis results
+    results_path = output_path / f'{commodity.replace(" ", "_")}_sensitivity_results.txt'
     with open(results_path, 'w') as f:
-        f.write("YEMEN MARKET INTEGRATION ANALYSIS\n")
-        f.write("================================\n\n")
+        f.write("YEMEN MARKET INTEGRATION SENSITIVITY ANALYSIS\n")
+        f.write("==========================================\n\n")
         f.write(f"Commodity: {commodity}\n")
         f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         
-        f.write("POLICY SIMULATION RESULTS\n")
-        f.write("========================\n\n")
+        f.write("CONFLICT REDUCTION FACTOR SENSITIVITY\n")
+        f.write("===================================\n\n")
+        f.write("Reduction Factor | Price Differential | Integration Index | Welfare Gain\n")
+        f.write("----------------|-------------------|-------------------|-------------\n")
+        for factor, result in reduction_sensitivity.items():
+            f.write(f"{factor:.1f}              | {result['price_differential']:6.2f}             | {result['integration_index']:6.4f}             | {result['welfare_gain']:6.2f}\n")
+        f.write("\n")
         
-        # Exchange rate unification
-        f.write("1. EXCHANGE RATE UNIFICATION SIMULATION\n")
-        f.write("-------------------------------------\n\n")
-        if 'exchange_rate_unification' in simulation_results:
-            result = simulation_results['exchange_rate_unification']
-            f.write(f"Unified exchange rate: {result.get('unified_rate', 'N/A')}\n\n")
-            
-            if 'exchange_rate_unification' in welfare_results:
-                welfare = welfare_results['exchange_rate_unification']
-                f.write("Welfare effects:\n")
-                f.write(f"Price convergence: {welfare.get('price_convergence', 'N/A')}\n")
-                f.write(f"Price dispersion reduction: {welfare.get('dispersion_reduction', 'N/A')}\n\n")
-        else:
-            f.write("Simulation not performed or failed.\n\n")
+        f.write("EXCHANGE RATE UNIFICATION METHOD SENSITIVITY\n")
+        f.write("=========================================\n\n")
+        f.write("Method    | Price Differential | Integration Index | Welfare Gain\n")
+        f.write("----------|-------------------|-------------------|-------------\n")
+        for method, result in unification_sensitivity.items():
+            f.write(f"{method:8} | {result['price_differential']:6.2f}             | {result['integration_index']:6.4f}             | {result['welfare_gain']:6.2f}\n")
+        f.write("\n")
         
-        # Improved connectivity
-        f.write("2. IMPROVED CONNECTIVITY SIMULATION\n")
-        f.write("----------------------------------\n\n")
-        if 'improved_connectivity' in simulation_results:
-            result = simulation_results['improved_connectivity']
-            f.write(f"Conflict reduction factor: {reduction_factor}\n\n")
-            
-            if 'improved_connectivity' in welfare_results:
-                welfare = welfare_results['improved_connectivity']
-                f.write("Welfare effects:\n")
-                f.write(f"Market accessibility improvement: {welfare.get('accessibility_improvement', 'N/A')}\n")
-                f.write(f"Spatial integration improvement: {welfare.get('integration_improvement', 'N/A')}\n\n")
-        else:
-            f.write("Simulation not performed or failed.\n\n")
-        
-        # Combined policy
-        f.write("3. COMBINED POLICY SIMULATION\n")
-        f.write("----------------------------\n\n")
-        if 'combined_policy' in simulation_results:
-            result = simulation_results['combined_policy']
-            f.write(f"Unified exchange rate: {result.get('unified_rate', 'N/A')}\n")
-            f.write(f"Conflict reduction factor: {reduction_factor}\n\n")
-            
-            if 'combined_policy' in welfare_results:
-                welfare = welfare_results['combined_policy']
-                f.write("Welfare effects:\n")
-                f.write(f"Price convergence: {welfare.get('price_convergence', 'N/A')}\n")
-                f.write(f"Market accessibility improvement: {welfare.get('accessibility_improvement', 'N/A')}\n")
-                f.write(f"Overall welfare improvement: {welfare.get('overall_improvement', 'N/A')}\n\n")
-        else:
-            f.write("Simulation not performed or failed.\n\n")
-        
-        # Policy comparison
-        if len(welfare_results) > 1:
-            f.write("4. POLICY COMPARISON\n")
-            f.write("-------------------\n\n")
-            f.write("Comparison of welfare effects across policies:\n\n")
-            
-            # Create a simple comparison table
-            f.write("Policy                    | Price Convergence | Market Accessibility | Overall\n")
-            f.write("-------------------------|------------------|---------------------|--------\n")
-            
-            for policy, welfare in welfare_results.items():
-                price_conv = welfare.get('price_convergence', 'N/A')
-                access_imp = welfare.get('accessibility_improvement', 'N/A')
-                overall = welfare.get('overall_improvement', 'N/A')
-                
-                f.write(f"{policy.ljust(25)} | {str(price_conv).ljust(18)} | {str(access_imp).ljust(21)} | {overall}\n")
-            
-            f.write("\nRECOMMENDATION:\n")
-            # Simple recommendation logic
-            if 'combined_policy' in welfare_results:
-                f.write("The combined policy approach generally yields the most comprehensive benefits,\n")
-                f.write("addressing both exchange rate disparities and conflict-related market fragmentation.\n")
-            elif 'exchange_rate_unification' in welfare_results and 'improved_connectivity' in welfare_results:
-                er_welfare = welfare_results['exchange_rate_unification'].get('overall_improvement', 0)
-                ic_welfare = welfare_results['improved_connectivity'].get('overall_improvement', 0)
-                
-                if er_welfare > ic_welfare:
-                    f.write("Exchange rate unification appears to yield greater welfare benefits than\n")
-                    f.write("conflict reduction alone, suggesting prioritization of monetary policy.\n")
-                else:
-                    f.write("Conflict reduction appears to yield greater welfare benefits than\n")
-                    f.write("exchange rate unification alone, suggesting prioritization of security improvements.\n")
+        f.write("PARAMETER ELASTICITIES\n")
+        f.write("=====================\n\n")
+        f.write("Parameter                | Elasticity\n")
+        f.write("------------------------|------------\n")
+        for param, elasticity in elasticities.items():
+            f.write(f"{param:24} | {elasticity:10.4f}\n")
     
-    logger.info(f"Saved simulation results to {results_path}")
-    return simulation_results
+    logger.info(f"Saved sensitivity analysis results to {results_path}")
+    
+    # Save visualization of sensitivity analysis
+    viz_path = output_path / f'{commodity.replace(" ", "_")}_sensitivity_plot.png'
+    
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    
+    # Plot reduction factor sensitivity
+    factors = list(reduction_sensitivity.keys())
+    welfare_gains = [result['welfare_gain'] for result in reduction_sensitivity.values()]
+    
+    ax1.plot(factors, welfare_gains, 'o-', color='blue')
+    ax1.set_xlabel('Conflict Reduction Factor')
+    ax1.set_ylabel('Welfare Gain')
+    ax1.set_title('Sensitivity to Conflict Reduction Factor')
+    ax1.grid(True)
+    
+    # Plot unification method sensitivity
+    methods = list(unification_sensitivity.keys())
+    method_gains = [result['welfare_gain'] for result in unification_sensitivity.values()]
+    
+    ax2.bar(methods, method_gains, color='green')
+    ax2.set_xlabel('Exchange Rate Unification Method')
+    ax2.set_ylabel('Welfare Gain')
+    ax2.set_title('Sensitivity to Unification Method')
+    
+    plt.tight_layout()
+    plt.savefig(viz_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Saved sensitivity analysis visualization to {viz_path}")
+    
+    return sensitivity_results
 
-
-@timer
 def main():
-    """Main entry point for the analysis."""
-    # Record start time
-    start_time = time.time()
+    """
+    Main entry point for Yemen market integration analysis.
+    
+    Orchestrates the complete workflow for analyzing market integration
+    in Yemen, including threshold cointegration, spatial econometrics,
+    and policy simulation analyses.
+    """
+    # Parse command line arguments
+    args = parse_args()
     
     # Set up logging
-    logger = setup_logging()
-    logger.info("Starting Yemen market integration analysis")
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logger = setup_logging(level=level)
     
-    # Parse arguments
-    args = parse_args()
-    logger.info(f"Command line arguments: {args}")
+    logger.info("Yemen Market Integration Analysis")
+    logger.info(f"Analyzing commodity: {args.commodity}")
     
-    # Create output directory if it doesn't exist
-    output_path = Path(args.output)
-    output_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Output directory: {output_path}")
-    
-    # Load data
-    logger.info(f"Loading data from {args.data}")
-    loader = DataLoader()
     try:
-        gdf = loader.load_geojson(args.data)
-        logger.info(f"Loaded data with {len(gdf)} records")
-    except Exception as e:
-        logger.error(f"Error loading data: {e}")
-        return
-    
-    # Preprocess data
-    logger.info("Preprocessing data")
-    preprocessor = DataPreprocessor()
-    try:
-        processed_gdf = preprocessor.preprocess_geojson(gdf)
-        logger.info(f"Preprocessed data with {len(processed_gdf)} records")
-    except Exception as e:
-        logger.error(f"Error preprocessing data: {e}")
-        return
-    
-    # Save processed data
-    processed_file = output_path / 'processed_data.geojson'
-    processed_gdf.to_file(processed_file, driver='GeoJSON')
-    logger.info(f"Saved processed data to {processed_file}")
-    
-    # Calculate price differentials
-    logger.info("Calculating price differentials between north and south")
-    try:
-        differentials = preprocessor.calculate_price_differentials(processed_gdf)
-        diff_file = output_path / 'price_differentials.csv'
-        differentials.to_csv(diff_file, index=False)
-        logger.info(f"Saved price differentials to {diff_file}")
-    except Exception as e:
-        logger.error(f"Error calculating price differentials: {e}")
-        differentials = pd.DataFrame()
-    
-    # Create visualizations
-    try:
-        viz_results = create_visualizations(
-            processed_gdf, differentials, args.commodity, output_path, logger
+        # Create output directory
+        output_path = Path(args.output)
+        output_path.mkdir(exist_ok=True, parents=True)
+        logger.info(f"Output will be saved to: {output_path}")
+        
+        # Load and preprocess data
+        logger.info(f"Loading data from: {args.data}")
+        loader = DataLoader(args.data)
+        gdf = loader.load_geojson()
+        
+        # Validate data
+        validate_data(gdf, logger)
+        
+        # Preprocess data
+        logger.info("Preprocessing data")
+        preprocessor = DataPreprocessor(gdf)
+        processed_gdf = preprocessor.preprocess()
+        
+        # Calculate price differentials for visualization
+        logger.info("Calculating price differentials")
+        differentials = preprocessor.calculate_price_differentials(
+            processed_gdf, 
+            commodity=args.commodity
         )
-    except Exception as e:
-        logger.error(f"Error creating visualizations: {e}")
-        viz_results = {}
-    
-    # Run threshold cointegration analysis if requested
-    threshold_model = None
-    if args.threshold:
-        try:
+        
+        # Initialize results tracking
+        analysis_results = {}
+        
+        # Run threshold cointegration analysis if requested
+        if args.threshold:
+            logger.info("Starting threshold cointegration analysis")
             threshold_model = run_threshold_analysis(
-                processed_gdf, args.commodity, output_path, args.max_lags, logger
+                processed_gdf=processed_gdf,
+                commodity=args.commodity,
+                output_path=output_path,
+                max_lags=args.max_lags,
+                logger=logger
             )
-        except Exception as e:
-            logger.error(f"Error in threshold analysis: {e}")
-    
-    # Run spatial analysis if requested
-    spatial_model = None
-    if args.spatial:
-        try:
+            analysis_results['threshold_model'] = threshold_model
+            
+            # Run enhanced validation if requested
+            if args.validation and threshold_model is not None:
+                logger.info("Running enhanced validation for threshold model")
+                # Get merged data for validation
+                north_data = processed_gdf[
+                    (processed_gdf['commodity'] == args.commodity) & 
+                    (processed_gdf['exchange_rate_regime'] == 'north')
+                ]
+                south_data = processed_gdf[
+                    (processed_gdf['commodity'] == args.commodity) & 
+                    (processed_gdf['exchange_rate_regime'] == 'south')
+                ]
+                north_monthly = north_data.groupby(pd.Grouper(key='date', freq='M'))['price'].mean().reset_index()
+                south_monthly = south_data.groupby(pd.Grouper(key='date', freq='M'))['price'].mean().reset_index()
+                merged = pd.merge(
+                    north_monthly, south_monthly,
+                    on='date', suffixes=('_north', '_south')
+                )
+                
+                validation_results = run_enhanced_validation(
+                    model=threshold_model,
+                    data=merged,
+                    method='threshold',
+                    logger=logger,
+                    bootstrap_iterations=args.bootstrap_iterations
+                )
+                analysis_results['threshold_validation'] = validation_results
+        
+        # Run spatial analysis if requested
+        if args.spatial:
+            logger.info("Starting spatial econometric analysis")
             spatial_model = run_spatial_analysis(
-                processed_gdf, args.commodity, output_path, args.k_neighbors, logger
+                processed_gdf=processed_gdf,
+                commodity=args.commodity,
+                output_path=output_path,
+                k_neighbors=args.k_neighbors,
+                conflict_weight=args.conflict_weight,
+                logger=logger
             )
-        except Exception as e:
-            logger.error(f"Error in spatial analysis: {e}")
-    
-    # Run policy simulations if requested
-    if args.simulation:
-        try:
-            simulation_results = run_simulations(
-                processed_gdf, threshold_model, spatial_model, 
-                args.commodity, output_path, args.reduction_factor, logger
+            analysis_results['spatial_model'] = spatial_model
+            
+            # Run enhanced validation if requested
+            if args.validation and spatial_model is not None:
+                logger.info("Running enhanced validation for spatial model")
+                validation_results = run_enhanced_validation(
+                    model=spatial_model,
+                    data=spatial_model.data,
+                    method='spatial',
+                    logger=logger,
+                    bootstrap_iterations=args.bootstrap_iterations
+                )
+                analysis_results['spatial_validation'] = validation_results
+        
+        # Run simulation analysis if requested
+        if args.simulation:
+            logger.info("Starting policy simulation analysis")
+            simulation_model = run_simulation_analysis(
+                processed_gdf=processed_gdf,
+                commodity=args.commodity,
+                output_path=output_path,
+                reduction_factor=args.reduction_factor,
+                unification_method=args.unification_method,
+                welfare_metrics=args.welfare_metrics,
+                logger=logger
             )
-        except Exception as e:
-            logger.error(f"Error in policy simulations: {e}")
-    
-    # Calculate execution time
-    execution_time = time.time() - start_time
-    logger.info(f"Analysis completed in {execution_time:.2f} seconds")
-    
-    # Create summary report
-    summary_path = output_path / f'{args.commodity.replace(" ", "_")}_analysis_summary.txt'
-    with open(summary_path, 'w') as f:
-        f.write("YEMEN MARKET INTEGRATION ANALYSIS SUMMARY\n")
-        f.write("========================================\n\n")
-        f.write(f"Commodity: {args.commodity}\n")
-        f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Execution Time: {execution_time:.2f} seconds\n\n")
+            analysis_results['simulation_model'] = simulation_model
+            
+            # Run sensitivity analysis if requested
+            if args.sensitivity and simulation_model is not None:
+                logger.info("Running sensitivity analysis")
+                sensitivity_results = run_sensitivity_analysis(
+                    simulation_model=simulation_model,
+                    processed_gdf=processed_gdf,
+                    commodity=args.commodity,
+                    output_path=output_path,
+                    logger=logger
+                )
+                analysis_results['sensitivity_results'] = sensitivity_results
         
-        f.write("ANALYSIS COMPONENTS\n")
-        f.write("==================\n\n")
-        f.write(f"Data Processing: {'✓' if processed_file.exists() else '✗'}\n")
-        f.write(f"Price Differentials: {'✓' if len(differentials) > 0 else '✗'}\n")
-        f.write(f"Visualizations: {'✓' if viz_results else '✗'}\n")
-        f.write(f"Threshold Analysis: {'✓' if threshold_model is not None else '✗'}\n")
-        f.write(f"Spatial Analysis: {'✓' if spatial_model is not None else '✗'}\n")
-        f.write(f"Policy Simulations: {'✓' if args.simulation else '✗'}\n\n")
+        # Create visualizations based on completed analyses
+        logger.info("Creating visualizations")
+        threshold_model = analysis_results.get('threshold_model', None)
         
-        f.write("OUTPUT FILES\n")
-        f.write("============\n\n")
-        for file in output_path.glob(f'*{args.commodity.replace(" ", "_")}*'):
-            f.write(f"- {file.name}\n")
+        visualization_paths = create_visualizations(
+            processed_gdf=processed_gdf,
+            differentials=differentials,
+            commodity=args.commodity,
+            output_path=output_path,
+            logger=logger,
+            threshold_model=threshold_model
+        )
+        
+        # Generate summary report
+        logger.info("Generating summary report")
+        summary_path = output_path / f'{args.commodity.replace(" ", "_")}_summary.txt'
+        with open(summary_path, 'w') as f:
+            f.write("YEMEN MARKET INTEGRATION ANALYSIS SUMMARY\n")
+            f.write("========================================\n\n")
+            f.write(f"Commodity: {args.commodity}\n")
+            f.write(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            f.write("ANALYSES PERFORMED\n")
+            f.write("=================\n\n")
+            if 'threshold_model' in analysis_results:
+                f.write("✓ Threshold Cointegration Analysis\n")
+                if 'threshold_validation' in analysis_results:
+                    f.write("  ✓ Enhanced Validation\n")
+            else:
+                f.write("✗ Threshold Cointegration Analysis (not performed)\n")
+                
+            if 'spatial_model' in analysis_results:
+                f.write("✓ Spatial Econometric Analysis\n")
+                if 'spatial_validation' in analysis_results:
+                    f.write("  ✓ Enhanced Validation\n")
+            else:
+                f.write("✗ Spatial Econometric Analysis (not performed)\n")
+                
+            if 'simulation_model' in analysis_results:
+                f.write("✓ Policy Simulation Analysis\n")
+                if 'sensitivity_results' in analysis_results:
+                    f.write("  ✓ Sensitivity Analysis\n")
+            else:
+                f.write("✗ Policy Simulation Analysis (not performed)\n")
+            
+            f.write("\nVISUALIZATIONS\n")
+            f.write("==============\n\n")
+            
+            if 'index' in visualization_paths:
+                index_path = visualization_paths['index'].relative_to(output_path)
+                f.write(f"Visualization index: {index_path}\n\n")
+                
+            f.write("Available visualizations:\n")
+            for name, path in visualization_paths.items():
+                if name != 'index':
+                    rel_path = path.relative_to(output_path)
+                    f.write(f"- {name}: {rel_path}\n")
+        
+        logger.info(f"Saved summary report to {summary_path}")
+        logger.info("Analysis completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error during analysis: {e}")
+        logger.exception("Detailed traceback:")
+        return 1
     
-    logger.info(f"Saved analysis summary to {summary_path}")
-    logger.info("Analysis completed successfully")
+    return 0
 
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main())

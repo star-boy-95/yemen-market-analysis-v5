@@ -29,12 +29,18 @@ statsmodels[tools]>=0.14.0  # Enhanced statsmodels with extra tools
 linearmodels>=4.27.0  # Advanced panel data models
 arviz>=0.14.0  # Exploratory analysis of Bayesian models
 pyhdfe>=0.1.0  # High-dimensional fixed effects
+statsforecast[dev]>=1.0.0  # Development extras for statsforecast
+r-bridge-arrow>=1.0.0  # For interoperability with R's robust econometric packages
+bayesian-econometrics>=0.1.0  # For advanced Bayesian econometric analysis
+sktime>=0.14.0  # For advanced time series analysis
 
 # Performance and profiling
 line-profiler>=4.0.0  # Line-by-line profiling
 scalene>=1.5.0  # CPU/GPU/memory profiling
 py-spy>=0.3.0  # Sampling profiler for Python code
 snakeviz>=2.1.0  # Visualization tool for profiling data
+filprofiler>=2022.1.0  # Memory profiler focused on finding leaks
+speedscope>=0.1.0  # Interactive flamegraph visualization
 
 # Documentation enhancement
 sphinx-autoapi>=2.0.0  # API documentation generation
@@ -42,6 +48,8 @@ sphinxcontrib-napoleon>=0.7.0  # Google/NumPy style docstrings
 sphinx-rtd-theme>=1.0.0  # Documentation theme
 myst-parser>=0.18.0  # Markdown support in Sphinx
 sphinx-copybutton>=0.5.0  # Copy button for code blocks
+sphinx-math-dollar>=1.2.0  # LaTeX math in RST files
+sphinx-autodoc-typehints>=1.19.0  # Type hints in documentation
 
 # Visualization development
 plotly-geo>=1.0.0  # Geographical plots
@@ -49,3 +57,11 @@ kaleido>=0.2.1  # Static image export for plotly
 matplotlib-venn>=0.11.7  # Venn diagrams
 holoviews>=1.15.0  # High-level visualization
 datashader>=0.14.0  # Big data visualization
+hvplot>=0.8.0  # High-level plotting API for pandas/xarray objects
+altair>=4.2.0  # Declarative statistical visualization
+pydeck>=0.8.0  # Large-scale WebGL-powered geospatial visualization
+
+# Specialized econometric testing
+pandas-stubs>=1.5.0  # Type stubs for pandas
+pytest-statsmodels>=0.1.0  # Statsmodels-specific pytest extensions
+econometrics-sandbox>=0.1.0  # Sandbox for testing econometric models
