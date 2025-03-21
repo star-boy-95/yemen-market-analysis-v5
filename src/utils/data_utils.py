@@ -17,7 +17,7 @@ from .decorators import timer, m1_optimized
 
 logger = logging.getLogger(__name__)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     Clean column names: lowercase, replace spaces with underscores
@@ -36,7 +36,7 @@ def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [re.sub(r'[^\w\s]', '', column).lower().replace(' ', '_') for column in df.columns]
     return df
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def convert_dates(
     df: pd.DataFrame, 
     date_columns: List[str], 
@@ -68,7 +68,7 @@ def convert_dates(
             df[column] = pd.to_datetime(df[column], format=format, errors=errors)
     return df
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def fill_missing_values(
     df: pd.DataFrame,
     numeric_strategy: str = 'median',
@@ -189,7 +189,7 @@ def fill_missing_values(
     
     return df
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def detect_outliers(
     df: pd.DataFrame,
     columns: List[str],
@@ -254,7 +254,7 @@ def detect_outliers(
     return result
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def normalize_columns(
     df: pd.DataFrame,
     columns: List[str],
@@ -328,7 +328,7 @@ def normalize_columns(
     return result
 
 @m1_optimized(use_numba=True)
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def compute_price_differentials(
     north_prices: np.ndarray,
     south_prices: np.ndarray
@@ -363,7 +363,7 @@ def compute_price_differentials(
     
     return absolute_diff, percentage_diff
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def split_by_exchange_regime(
     df: pd.DataFrame,
     regime_col: str = 'exchange_rate_regime'
@@ -409,7 +409,7 @@ def split_by_exchange_regime(
     
     return north_data, south_data
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def aggregate_time_series(
     df: pd.DataFrame,
     date_column: str,
@@ -475,7 +475,7 @@ def aggregate_time_series(
     
     return df_agg
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_lag_features(
     df: pd.DataFrame,
     columns: List[str],
@@ -530,7 +530,7 @@ def create_lag_features(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_rolling_features(
     df: pd.DataFrame,
     columns: List[str],
@@ -629,7 +629,7 @@ def create_rolling_features(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def convert_exchange_rates(
     df: pd.DataFrame,
     price_column: str,
@@ -676,7 +676,7 @@ def convert_exchange_rates(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_price_changes(
     df: pd.DataFrame,
     price_column: str,
@@ -760,7 +760,7 @@ def calculate_price_changes(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_date_features(
     df: pd.DataFrame,
     date_column: str,
@@ -822,7 +822,7 @@ def create_date_features(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def pivot_data(
     df: pd.DataFrame,
     index_columns: List[str],
@@ -888,7 +888,7 @@ def pivot_data(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def unpivot_data(
     df: pd.DataFrame,
     id_columns: List[str],
@@ -928,7 +928,7 @@ def unpivot_data(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def merge_dataframes(
     left_df: pd.DataFrame,
     right_df: pd.DataFrame,
@@ -1006,7 +1006,7 @@ def merge_dataframes(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def bin_numeric_column(
     df: pd.DataFrame,
     column: str,
@@ -1062,7 +1062,7 @@ def bin_numeric_column(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def encode_categorical(
     df: pd.DataFrame,
     columns: List[str],
@@ -1128,7 +1128,7 @@ def encode_categorical(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def winsorize_columns(
     df: pd.DataFrame,
     columns: List[str],
@@ -1173,7 +1173,7 @@ def winsorize_columns(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def explode_geojson_features(geojson_path: Union[str, Path]) -> gpd.GeoDataFrame:
     """
     Read GeoJSON and explode multi-part geometries into single parts
@@ -1201,7 +1201,7 @@ def explode_geojson_features(geojson_path: Union[str, Path]) -> gpd.GeoDataFrame
     
     return gdf
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_distance_matrix(
     gdf: gpd.GeoDataFrame,
     id_column: str = 'admin1',

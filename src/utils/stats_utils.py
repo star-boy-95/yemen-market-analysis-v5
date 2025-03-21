@@ -18,7 +18,7 @@ from .decorators import timer, m1_optimized
 
 logger = logging.getLogger(__name__)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_stationarity(
     series: Union[pd.Series, np.ndarray],
     test: str = 'adf',
@@ -129,7 +129,7 @@ def test_stationarity(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_cointegration(
     y: Union[pd.Series, np.ndarray],
     x: Union[pd.Series, np.ndarray, List[Union[pd.Series, np.ndarray]]],
@@ -290,7 +290,7 @@ def test_cointegration(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_granger_causality(
     y: Union[pd.Series, np.ndarray],
     x: Union[pd.Series, np.ndarray],
@@ -365,7 +365,7 @@ def test_granger_causality(
     return result
 
 @m1_optimized(use_numba=True)
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def estimate_threshold_model(
     y: np.ndarray, 
     x: np.ndarray, 
@@ -500,7 +500,7 @@ def estimate_threshold_model(
         }
     }
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_causality_extended(
     y: Union[pd.Series, np.ndarray],
     x: Union[pd.Series, np.ndarray],
@@ -607,7 +607,7 @@ def test_causality_extended(
     return result
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def fit_var_model(
     data: Union[pd.DataFrame, np.ndarray],
@@ -675,7 +675,7 @@ def fit_var_model(
     return var_results
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def fit_vecm_model(
     data: Union[pd.DataFrame, np.ndarray],
@@ -736,7 +736,7 @@ def fit_vecm_model(
     
     return vecm_results
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_autocorrelation(
     series: Union[pd.Series, np.ndarray], 
     lags: int = 10,
@@ -798,7 +798,7 @@ def test_autocorrelation(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @timer
 def test_white_noise(
     series: Union[pd.Series, np.ndarray],
@@ -871,7 +871,7 @@ def test_white_noise(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_covariate_significance(
     y: Union[pd.Series, np.ndarray],
     X: Union[pd.DataFrame, np.ndarray],
@@ -949,7 +949,7 @@ def test_covariate_significance(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def compute_rolling_correlation(
     series1: Union[pd.Series, np.ndarray],
     series2: Union[pd.Series, np.ndarray],
@@ -988,7 +988,7 @@ def compute_rolling_correlation(
     return rolling_corr
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def estimate_threshold_tar3(
     y: Union[pd.Series, np.ndarray],
@@ -1248,7 +1248,7 @@ def estimate_threshold_tar3(
     return result
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def estimate_threshold_tar(
     y: Union[pd.Series, np.ndarray],
@@ -1481,7 +1481,7 @@ def estimate_threshold_tar(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_threshold_ci(
     y: Union[pd.Series, np.ndarray],
     threshold_var: Union[pd.Series, np.ndarray],
@@ -1632,7 +1632,7 @@ def calculate_threshold_ci(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @timer
 def test_linearity(
     y: Union[pd.Series, np.ndarray],
@@ -1886,7 +1886,7 @@ def test_linearity(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def fit_threshold_vecm(
     data: Union[pd.DataFrame, np.ndarray],
     k_ar_diff: int = 1,
@@ -2050,7 +2050,7 @@ def fit_threshold_vecm(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def calculate_half_life(
     ar_coefficient: float,
@@ -2093,7 +2093,7 @@ def calculate_half_life(
     else:
         raise ValueError(f"Unknown regime: {regime}")
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(use_numba=True)
 def bootstrap_confidence_interval(
     data: Union[pd.Series, np.ndarray],
@@ -2209,7 +2209,7 @@ def bootstrap_confidence_interval(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def compute_variance_ratio(
     series: Union[pd.Series, np.ndarray],
     periods: List[int] = [2, 5, 10],
@@ -2357,7 +2357,7 @@ def calculate_gini_coefficient(
     return gini
 
 @m1_optimized()
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def test_structural_break(
     y: Union[pd.Series, np.ndarray],
     X: Optional[Union[pd.DataFrame, np.ndarray]] = None,

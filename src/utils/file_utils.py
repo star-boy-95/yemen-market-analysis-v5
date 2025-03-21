@@ -24,7 +24,7 @@ from .decorators import timer
 
 logger = logging.getLogger(__name__)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IsADirectoryError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IsADirectoryError), reraise=True)
 def ensure_dir(directory: Union[str, Path]) -> Path:
     """
     Ensure a directory exists
@@ -43,7 +43,7 @@ def ensure_dir(directory: Union[str, Path]) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError), reraise=True)
 def delete_file(file_path: Union[str, Path]) -> bool:
     """
     Delete a file
@@ -64,7 +64,7 @@ def delete_file(file_path: Union[str, Path]) -> bool:
         return True
     return False
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError), reraise=True)
 def move_file(source: Union[str, Path], destination: Union[str, Path], 
              overwrite: bool = False) -> bool:
     """
@@ -100,7 +100,7 @@ def move_file(source: Union[str, Path], destination: Union[str, Path],
     shutil.move(str(source), str(destination))
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError), reraise=True)
 def copy_file(source: Union[str, Path], destination: Union[str, Path], 
              overwrite: bool = False) -> bool:
     """
@@ -136,7 +136,7 @@ def copy_file(source: Union[str, Path], destination: Union[str, Path],
     shutil.copy2(str(source), str(destination))
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, json.JSONDecodeError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, json.JSONDecodeError), reraise=True)
 def read_json(file_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Read JSON from a file
@@ -156,7 +156,7 @@ def read_json(file_path: Union[str, Path]) -> Dict[str, Any]:
     with open(file_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def write_json(data: Dict[str, Any], file_path: Union[str, Path], indent: int = 2) -> bool:
     """
     Write JSON to a file
@@ -183,7 +183,7 @@ def write_json(data: Dict[str, Any], file_path: Union[str, Path], indent: int = 
     
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError), reraise=True)
 def read_yaml(file_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Read YAML from a file
@@ -203,7 +203,7 @@ def read_yaml(file_path: Union[str, Path]) -> Dict[str, Any]:
     with open(file_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError), reraise=True)
 def write_yaml(data: Dict[str, Any], file_path: Union[str, Path]) -> bool:
     """
     Write YAML to a file
@@ -228,7 +228,7 @@ def write_yaml(data: Dict[str, Any], file_path: Union[str, Path]) -> bool:
     
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, csv.Error, pd.errors.EmptyDataError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, csv.Error, pd.errors.EmptyDataError), reraise=True)
 def read_csv(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
     """
     Read CSV file with enhanced error handling
@@ -248,7 +248,7 @@ def read_csv(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
     file_path = Path(file_path)
     return pd.read_csv(file_path, **kwargs)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def write_csv(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool:
     """
     Write DataFrame to CSV
@@ -273,7 +273,7 @@ def write_csv(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> bool:
     df.to_csv(file_path, **kwargs)
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def read_geojson(file_path: Union[str, Path], **kwargs) -> gpd.GeoDataFrame:
     """
     Read GeoJSON file
@@ -293,7 +293,7 @@ def read_geojson(file_path: Union[str, Path], **kwargs) -> gpd.GeoDataFrame:
     file_path = Path(file_path)
     return gpd.read_file(file_path, **kwargs)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def write_geojson(gdf: gpd.GeoDataFrame, file_path: Union[str, Path], **kwargs) -> bool:
     """
     Write GeoDataFrame to GeoJSON
@@ -322,7 +322,7 @@ def write_geojson(gdf: gpd.GeoDataFrame, file_path: Union[str, Path], **kwargs) 
     gdf.to_file(file_path, **kwargs)
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, pickle.PickleError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, pickle.PickleError), reraise=True)
 def read_pickle(file_path: Union[str, Path]) -> Any:
     """
     Read pickle file
@@ -342,7 +342,7 @@ def read_pickle(file_path: Union[str, Path]) -> Any:
     with open(file_path, 'rb') as f:
         return pickle.load(f)
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, pickle.PickleError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, pickle.PickleError), reraise=True)
 def write_pickle(obj: Any, file_path: Union[str, Path]) -> bool:
     """
     Write object to pickle file
@@ -367,7 +367,7 @@ def write_pickle(obj: Any, file_path: Union[str, Path]) -> bool:
     
     return True
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def file_size(file_path: Union[str, Path]) -> int:
     """
     Get file size in bytes
@@ -385,7 +385,7 @@ def file_size(file_path: Union[str, Path]) -> int:
     file_path = Path(file_path)
     return file_path.stat().st_size
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def file_hash(file_path: Union[str, Path], algorithm: str = 'md5') -> str:
     """
     Calculate file hash
@@ -421,7 +421,7 @@ def file_hash(file_path: Union[str, Path], algorithm: str = 'md5') -> str:
     
     return hash_func.hexdigest()
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def list_files(directory: Union[str, Path], pattern: str = '*', 
               recursive: bool = False) -> List[Path]:
     """
@@ -448,7 +448,7 @@ def list_files(directory: Union[str, Path], pattern: str = '*',
     else:
         return list(directory.glob(pattern))
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def compress_file(file_path: Union[str, Path], output_path: Optional[Union[str, Path]] = None) -> Path:
     """
     Compress a file using gzip
@@ -480,7 +480,7 @@ def compress_file(file_path: Union[str, Path], output_path: Optional[Union[str, 
     
     return output_path
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, gzip.BadGzipFile))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, gzip.BadGzipFile), reraise=True)
 def decompress_file(file_path: Union[str, Path], output_path: Optional[Union[str, Path]] = None) -> Path:
     """
     Decompress a gzip file
@@ -569,7 +569,7 @@ class AtomicFileWriter:
                 pass
 
 @timer
-@handle_errors(logger=logger, error_type=(IOError, ValueError, UnicodeDecodeError))
+@handle_errors(logger=logger, error_type=(IOError, ValueError, UnicodeDecodeError), reraise=True)
 def read_large_file_chunks(file_path: Union[str, Path], chunk_size: int = 1024 * 1024) -> Iterator[str]:
     """
     Read a large file in chunks
@@ -596,7 +596,7 @@ def read_large_file_chunks(file_path: Union[str, Path], chunk_size: int = 1024 *
             yield chunk
 
 @timer
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def read_large_csv_chunks(file_path: Union[str, Path], chunk_size: int = 10000, **kwargs) -> Iterator[pd.DataFrame]:
     """
     Read a large CSV file in chunks
@@ -621,7 +621,7 @@ def read_large_csv_chunks(file_path: Union[str, Path], chunk_size: int = 10000, 
     return pd.read_csv(file_path, chunksize=chunk_size, **kwargs)
 
 @timer
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, fiona.errors.DriverError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError, fiona.errors.DriverError), reraise=True)
 def read_large_geojson_chunks(file_path: Union[str, Path], chunk_size: int = 1000) -> Iterator[gpd.GeoDataFrame]:
     """
     Read a large GeoJSON file in chunks
@@ -660,7 +660,7 @@ def read_large_geojson_chunks(file_path: Union[str, Path], chunk_size: int = 100
         gdf = gpd.GeoDataFrame.from_features(chunk_data)
         yield gdf
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def create_backup(file_path: Union[str, Path], backup_dir: Optional[Union[str, Path]] = None) -> Path:
     """
     Create a backup of a file
@@ -699,7 +699,7 @@ def create_backup(file_path: Union[str, Path], backup_dir: Optional[Union[str, P
     
     return backup_path
 
-@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError))
+@handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, IOError), reraise=True)
 def clear_directory(directory: Union[str, Path], pattern: str = '*', 
                    recursive: bool = False) -> int:
     """

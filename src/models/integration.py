@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
-from src.utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -427,7 +427,7 @@ class MarketIntegrationAnalysis:
             f"{len(self.market_pairs)} market pairs, and {self.n_periods} time periods"
         )
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _validate_price_data(self, price_data: pd.DataFrame) -> None:
         """
         Validate price data for integrated analysis.
@@ -457,7 +457,7 @@ class MarketIntegrationAnalysis:
         if n_markets < 2:
             raise ValidationError(f"Need at least 2 markets, got {n_markets}")
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _validate_spatial_data(self, spatial_data: gpd.GeoDataFrame) -> None:
         """
         Validate spatial data for integrated analysis.
@@ -485,7 +485,7 @@ class MarketIntegrationAnalysis:
                 f"{', '.join(str(m) for m in missing_markets)}"
             )
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _validate_conflict_data(self, conflict_data: pd.DataFrame) -> None:
         """
         Validate conflict data for integrated analysis.
@@ -502,7 +502,7 @@ class MarketIntegrationAnalysis:
         )
         raise_if_invalid(valid, errors, "Invalid conflict data for integrated analysis")
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _prepare_market_pairs(self) -> None:
         """
         Prepare market pairs for analysis based on data availability.
@@ -544,7 +544,7 @@ class MarketIntegrationAnalysis:
     @timer
     @memory_usage_decorator
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def analyze_market_pair(
         self,
         market1: str,
@@ -649,7 +649,7 @@ class MarketIntegrationAnalysis:
         
         return result
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _add_spatial_context(self, market1: str, market2: str) -> Dict[str, Any]:
         """
         Add spatial context to market pair analysis.
@@ -722,7 +722,7 @@ class MarketIntegrationAnalysis:
     @timer
     @memory_usage_decorator
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def analyze_all_market_pairs(
         self,
         max_lags: int = 4,
@@ -799,7 +799,7 @@ class MarketIntegrationAnalysis:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_spatial_analysis(
         self,
         conflict_adjusted: bool = True,
@@ -928,7 +928,7 @@ class MarketIntegrationAnalysis:
             raise
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_market_accessibility(
         self,
         population_data: Optional[gpd.GeoDataFrame] = None,
@@ -978,7 +978,7 @@ class MarketIntegrationAnalysis:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_market_integration_index(
         self,
         windows: Optional[List[int]] = None,
@@ -1031,7 +1031,7 @@ class MarketIntegrationAnalysis:
         return integration_df
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_integrated_analysis(self) -> IntegrationResults:
         """
         Run a complete integrated market analysis.
@@ -1095,7 +1095,7 @@ class MarketIntegrationAnalysis:
         
         return results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_integrated_metrics(
         self,
         time_series_results: Dict[str, Dict[str, Any]],
@@ -1198,7 +1198,7 @@ class MarketIntegrationAnalysis:
         
         return integrated_metrics
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _create_visualization_hooks(
         self,
         time_series_results: Dict[str, Dict[str, Any]],
@@ -1297,7 +1297,7 @@ class MarketIntegrationAnalysis:
         return hooks
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _calculate_integration_score(
     cointegrated: bool,
     asymmetric: bool,

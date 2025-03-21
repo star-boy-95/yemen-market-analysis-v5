@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 YEMEN_EPSG = 32638  # UTM Zone 38N, suitable for Yemen
 WGS84_EPSG = 4326   # Standard GPS coordinates
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def reproject_geometry(
     geometry, 
     from_crs: Union[str, int, CRS] = WGS84_EPSG, 
@@ -61,7 +61,7 @@ def reproject_geometry(
     # Transform the geometry
     return project(geometry)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def reproject_gdf(
     gdf: gpd.GeoDataFrame, 
     to_crs: Union[str, int, CRS] = YEMEN_EPSG
@@ -88,7 +88,7 @@ def reproject_gdf(
     # This is already optimized internally
     return gdf.to_crs(to_crs)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_point_from_coords(
     x: float, 
     y: float,
@@ -122,7 +122,7 @@ def create_point_from_coords(
     
     return gdf
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_buffer(
     gdf: gpd.GeoDataFrame, 
     distance: float, 
@@ -191,7 +191,7 @@ def create_buffer(
     
     return buffer_gdf
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @timer
 def find_nearest_points(
     source_gdf: gpd.GeoDataFrame, 
@@ -271,7 +271,7 @@ def find_nearest_points(
     
     return source_gdf
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def overlay_layers(
     base_gdf: gpd.GeoDataFrame, 
     overlay_gdf: gpd.GeoDataFrame,
@@ -317,7 +317,7 @@ def overlay_layers(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_distances(
     origin_gdf: gpd.GeoDataFrame, 
     destination_gdf: gpd.GeoDataFrame,
@@ -390,7 +390,7 @@ def calculate_distances(
     
     return distance_df
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_distance_matrix(
     gdf: gpd.GeoDataFrame,
     id_col: str,
@@ -463,7 +463,7 @@ def calculate_distance_matrix(
     
     return distance_df
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_spatial_weight_matrix(
     gdf: gpd.GeoDataFrame,
     method: str = 'knn',
@@ -550,7 +550,7 @@ def create_spatial_weight_matrix(
     
     return w
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def extract_area_of_interest(
     gdf: gpd.GeoDataFrame,
     area_name: str,
@@ -585,7 +585,7 @@ def extract_area_of_interest(
     
     return area_gdf
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def aggregate_points_to_polygons(
     points_gdf: gpd.GeoDataFrame,
     polygons_gdf: gpd.GeoDataFrame,
@@ -659,7 +659,7 @@ def aggregate_points_to_polygons(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @m1_optimized(parallel=True)
 def compute_accessibility_index(
     markets_gdf: gpd.GeoDataFrame,
@@ -744,7 +744,7 @@ def compute_accessibility_index(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_exchange_regime_boundaries(
     gdf: gpd.GeoDataFrame,
     regime_col: str = 'exchange_rate_regime',
@@ -835,7 +835,7 @@ def create_exchange_regime_boundaries(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_market_isolation(
     markets_gdf: gpd.GeoDataFrame,
     transport_network_gdf: Optional[gpd.GeoDataFrame] = None,
@@ -936,7 +936,7 @@ def calculate_market_isolation(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def assign_exchange_rate_regime(
     points_gdf: gpd.GeoDataFrame,
     regime_polygons_gdf: gpd.GeoDataFrame,
@@ -993,7 +993,7 @@ def assign_exchange_rate_regime(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_market_catchments(
     markets_gdf: gpd.GeoDataFrame,
     population_gdf: gpd.GeoDataFrame,
@@ -1085,7 +1085,7 @@ def create_market_catchments(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_conflict_adjusted_weights(
     gdf: gpd.GeoDataFrame,
     k: int = 5,
@@ -1161,7 +1161,7 @@ def create_conflict_adjusted_weights(
     
     return w
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_exchange_rate_boundary(
     markets_gdf: gpd.GeoDataFrame,
     regime_col: str = 'exchange_rate_regime',

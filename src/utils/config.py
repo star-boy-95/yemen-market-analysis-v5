@@ -26,7 +26,7 @@ class Config:
             cls._instance._loaded_paths = []
         return cls._instance
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError, json.JSONDecodeError))
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, yaml.YAMLError, json.JSONDecodeError), reraise=True)
     def load_from_file(self, config_path: Union[str, Path]) -> None:
         """
         Load configuration from a file (yaml or json)

@@ -8,13 +8,13 @@ and generating insights for policy recommendations.
 import numpy as np
 from datetime import datetime
 import logging
-from src.utils import handle_errors
+from yemen_market_integration.utils import handle_errors
 
 # Create logger
 logger = logging.getLogger(__name__)
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def interpret_unit_root_results(unit_root_results, commodity):
     """
     Provide contextual interpretation of unit root test results.
@@ -92,7 +92,7 @@ def interpret_unit_root_results(unit_root_results, commodity):
     return interpretation
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def interpret_cointegration_results(cointegration_results, commodity):
     """
     Provide contextual interpretation of cointegration test results.
@@ -185,7 +185,7 @@ def interpret_cointegration_results(cointegration_results, commodity):
     return interpretation
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def interpret_threshold_results(threshold_results, commodity):
     """
     Provide economic interpretation of threshold cointegration results.
@@ -293,7 +293,7 @@ def interpret_threshold_results(threshold_results, commodity):
     return interpretation
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def interpret_spatial_results(spatial_results, commodity):
     """
     Provide economic interpretation of spatial econometric results.
@@ -393,7 +393,7 @@ def interpret_spatial_results(spatial_results, commodity):
     return interpretation
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def interpret_simulation_results(simulation_results, commodity):
     """
     Provide policy recommendations based on simulation results.

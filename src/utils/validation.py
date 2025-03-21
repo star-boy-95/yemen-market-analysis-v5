@@ -24,27 +24,60 @@ def validate_dataframe(
     custom_validators: Optional[Dict[str, Callable[[pd.Series], bool]]] = None
 ) -> Tuple[bool, List[str]]:
     """
-    Validate a pandas DataFrame
+    Validate a pandas DataFrame against specified requirements.
+    
+    This function performs comprehensive validation of a DataFrame, checking for
+    required columns, column types, minimum row count, null values, and applying
+    custom validation functions.
     
     Parameters
     ----------
-    df : pandas.DataFrame
-        DataFrame to validate
+    df : pd.DataFrame
+        The DataFrame to validate
     required_columns : list of str, optional
-        Required column names
+        Column names that must be present in the DataFrame
     column_types : dict, optional
-        Mapping of column names to expected types
-    min_rows : int, optional
-        Minimum number of rows
-    check_nulls : bool, optional
-        Whether to check for null values
+        Mapping of column names to expected types (e.g., {'price': float})
+    min_rows : int, default=1
+        Minimum number of rows required in the DataFrame
+    check_nulls : bool, default=True
+        Whether to check for null values in required columns
     custom_validators : dict, optional
-        Custom validation functions for specific columns
+        Custom validation functions for specific columns. Each function should
+        take a pandas Series as input and return a boolean.
         
     Returns
     -------
-    tuple
-        (is_valid, error_messages)
+    valid : bool
+        Whether the DataFrame passes all validations
+    errors : list of str
+        List of error messages if validation fails
+        
+    Examples
+    --------
+    >>> df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, None]})
+    >>> valid, errors = validate_dataframe(df, required_columns=['A', 'B'], check_nulls=True)
+    >>> valid
+    False
+    >>> errors
+    ['Column B contains null values']
+    
+    >>> # With custom validators
+    >>> valid, errors = validate_dataframe(
+    ...     df,
+    ...     required_columns=['A'],
+    ...     custom_validators={'A': lambda x: x.min() > 0}
+    ... )
+    >>> valid
+    True
+    
+    >>> # With column type validation
+    >>> valid, errors = validate_dataframe(
+    ...     df,
+    ...     column_types={'A': int, 'B': float}
+    ... )
+    >>> valid
+    True
     """
     errors = []
     
@@ -146,7 +179,7 @@ def validate_admin_region(region: str, valid_regions: Optional[List[str]] = None
     """
     # Get regions from configuration if not provided
     if not valid_regions:
-        from src.utils import config
+        from yemen_market_integration.utils import config
         north = config.get('regions.north', [])
         south = config.get('regions.south', [])
         valid_regions = north + south

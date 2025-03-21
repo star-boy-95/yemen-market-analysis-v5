@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
 import matplotlib.pyplot as plt
 
-from utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -194,9 +194,9 @@ class ThresholdVECM:
         else:
             raise ValidationError("Data must be a pandas DataFrame or numpy ndarray")
     
-    @disk_cache(cache_dir='.cache/threshold_vecm')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/threshold_vecm")
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_linear_vecm(self) -> Dict[str, Any]:
         """
         Estimate linear VECM as a baseline model.
@@ -265,7 +265,7 @@ class ThresholdVECM:
     @timer
     @memory_usage_decorator
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def grid_search_threshold(
         self, 
         ec_term: Optional[np.ndarray] = None,
@@ -452,7 +452,7 @@ class ThresholdVECM:
         return best_threshold, best_llf, thresholds, llfs
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_tvecm(self, run_diagnostics: bool = False) -> Dict[str, Any]:
         """
         Estimate the Threshold Vector Error Correction Model.
@@ -564,7 +564,7 @@ class ThresholdVECM:
         
         return tvecm_results
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _interpret_tvecm_results(self, results: Dict[str, Any]) -> str:
         """
         Generate interpretation of TVECM results.
@@ -647,7 +647,7 @@ class ThresholdVECM:
         return interpretation
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_diagnostics(self) -> Dict[str, Any]:
         """
         Run diagnostic tests on the TVECM.
@@ -746,9 +746,9 @@ class ThresholdVECM:
         
         return diagnostics
     
-    @disk_cache(cache_dir='.cache/threshold_vecm')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/threshold_vecm")
     @m1_optimized()
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def test_threshold_significance(
         self, 
         n_bootstrap: int = DEFAULT_BOOTSTRAP_REPS
@@ -888,7 +888,7 @@ class ThresholdVECM:
         return bootstrap_data
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_regime_transition_matrix(self) -> Dict[str, Any]:
         """
         Calculate transition matrix between regimes.
@@ -967,7 +967,7 @@ class ThresholdVECM:
         return result
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_half_lives(self) -> Dict[str, Any]:
         """
         Calculate half-lives of price adjustments in each regime.
@@ -1036,7 +1036,7 @@ class ThresholdVECM:
         return half_lives
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_regime_dynamics(
         self, 
         save_path: Optional[str] = None,
@@ -1213,7 +1213,7 @@ class ThresholdVECM:
         return fig
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_full_analysis(self) -> Dict[str, Any]:
         """
         Run complete TVECM analysis workflow.
@@ -1378,7 +1378,7 @@ class ThresholdVECM:
         )
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def combine_tvecm_results(
     models: Dict[str, ThresholdVECM],
     market_pairs: Dict[str, Tuple[str, str]]
@@ -1521,7 +1521,7 @@ def combine_tvecm_results(
     return result
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def _interpret_combined_results(result: Dict[str, Any]) -> str:
     """
     Generate interpretation of combined TVECM results.

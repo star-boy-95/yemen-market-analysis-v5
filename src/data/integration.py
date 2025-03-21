@@ -7,10 +7,10 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Union
 
-from utils import handle_errors, validate_geodataframe, raise_if_invalid
-from utils import read_geojson, read_csv, merge_dataframes
-from utils import convert_dates, fill_missing_values
-from utils import validate_dataframe
+from yemen_market_integration.utils import handle_errors, validate_geodataframe, raise_if_invalid
+from yemen_market_integration.utils import read_geojson, read_csv, merge_dataframes
+from yemen_market_integration.utils import convert_dates, fill_missing_values
+from yemen_market_integration.utils import validate_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class DataIntegrator:
         self.data_path = Path(data_path)
         self.raw_path = self.data_path / "raw"
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError), reraise=True)
     def integrate_conflict_data(
         self, market_gdf: gpd.GeoDataFrame, conflict_file: str
     ) -> gpd.GeoDataFrame:
@@ -103,7 +103,7 @@ class DataIntegrator:
         logger.info(f"Integrated conflict data, {len(result)} records in result")
         return result
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError), reraise=True)
     def integrate_exchange_rates(
         self, market_gdf: gpd.GeoDataFrame, exchange_file: str
     ) -> gpd.GeoDataFrame:
@@ -162,7 +162,7 @@ class DataIntegrator:
         logger.info(f"Integrated exchange rate data, {len(result)} records in result")
         return result
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError), reraise=True)
     def get_spatial_boundaries(self, boundary_file: str) -> gpd.GeoDataFrame:
         """
         Load administrative boundaries for spatial analysis.

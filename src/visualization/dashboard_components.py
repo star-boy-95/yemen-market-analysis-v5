@@ -93,7 +93,7 @@ class DashboardCreator:
         
         logger.info(f"Initialized DashboardCreator with backend='{self.backend}', style='{self.style}'")
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     @memory_usage_decorator
     @timer
     def create_market_integration_dashboard(
@@ -263,7 +263,7 @@ class DashboardCreator:
             
         return dashboard
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     @memory_usage_decorator
     @timer
     def create_simulation_results_dashboard(
@@ -436,7 +436,7 @@ class DashboardCreator:
             
         return dashboard
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     @memory_usage_decorator
     @timer
     def create_threshold_analysis_dashboard(
@@ -643,7 +643,7 @@ class DashboardCreator:
             
         return dashboard
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def create_market_map_component(
         self,
         spatial_data: pd.DataFrame,
@@ -692,7 +692,7 @@ class DashboardCreator:
             }
         }
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def create_time_series_component(
         self,
         time_series_data: pd.DataFrame,
@@ -737,7 +737,7 @@ class DashboardCreator:
             }
         }
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def create_model_diagnostics_component(
         self,
         model_results: Dict[str, Any],
@@ -783,7 +783,7 @@ class DashboardCreator:
             'params': params
         }
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _save_dashboard(self, dashboard, output_file: str) -> None:
         """
         Save dashboard to file.

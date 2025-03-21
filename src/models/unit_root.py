@@ -15,7 +15,7 @@ from statsmodels.tsa.stattools import adfuller, kpss
 import arch.unitroot as unitroot
 import ruptures as rpt
 
-from src.utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError,
     
@@ -45,7 +45,7 @@ class UnitRootTester:
     """Perform unit root tests on time series data."""
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def __init__(self):
         """Initialize the unit root tester."""
         # Get number of available workers based on CPU count
@@ -59,7 +59,7 @@ class UnitRootTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_adf(
         self, 
@@ -133,7 +133,7 @@ class UnitRootTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_adf_gls(
         self, 
@@ -196,7 +196,7 @@ class UnitRootTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_kpss(
         self, 
@@ -263,7 +263,7 @@ class UnitRootTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_phillips_perron(
         self, 
@@ -331,7 +331,7 @@ class UnitRootTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_zivot_andrews(
         self,
@@ -430,7 +430,7 @@ class UnitRootTester:
 
     @timer
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_all_tests(
         self, 
         series: Union[pd.Series, np.ndarray], 
@@ -497,7 +497,7 @@ class UnitRootTester:
         return results
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def determine_integration_order(
         self, 
         series: Union[pd.Series, np.ndarray], 
@@ -593,7 +593,7 @@ class StructuralBreakTester:
     """Detect structural breaks in time series data."""
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def __init__(self):
         """Initialize the structural break tester."""
         # Get number of available workers based on CPU count
@@ -607,7 +607,7 @@ class StructuralBreakTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_bai_perron(
         self,
@@ -715,7 +715,7 @@ class StructuralBreakTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_gregory_hansen(
         self,
@@ -876,7 +876,7 @@ class StructuralBreakTester:
         
         return gh_result
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _process_gregory_hansen_parallel(
         self,
         y_array: np.ndarray,
@@ -1006,7 +1006,7 @@ class StructuralBreakTester:
     
     @memoize
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def _process_gh_batch(
         self,

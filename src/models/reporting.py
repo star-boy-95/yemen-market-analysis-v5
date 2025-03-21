@@ -10,13 +10,13 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import logging
-from src.utils import handle_errors
+from yemen_market_integration.utils import handle_errors
 
 # Create logger
 logger = logging.getLogger(__name__)
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def generate_comprehensive_report(all_results, commodity, output_path, logger):
     """
     Generate a comprehensive report of all analysis results.
@@ -239,7 +239,7 @@ def generate_comprehensive_report(all_results, commodity, output_path, logger):
     return report_path
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_executive_summary(all_results, commodity, output_path, logger):
     """
     Create a concise executive summary of key findings.
@@ -355,7 +355,7 @@ def create_executive_summary(all_results, commodity, output_path, logger):
     return summary_path
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def export_results_for_publication(all_results, commodity, output_path, logger):
     """
     Format results for academic publication.

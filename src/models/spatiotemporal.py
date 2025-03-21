@@ -8,13 +8,13 @@ results to create a comprehensive market integration analysis framework.
 import numpy as np
 import pandas as pd
 import logging
-from src.utils import handle_errors
+from yemen_market_integration.utils import handle_errors
 
 # Create logger
 logger = logging.getLogger(__name__)
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def integrate_time_series_spatial_results(time_series_results, spatial_results, commodity):
     """
     Integrate time series and spatial analysis results for comprehensive market analysis.
@@ -92,7 +92,7 @@ def integrate_time_series_spatial_results(time_series_results, spatial_results, 
     return integrated_results
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def calculate_integration_index(time_series_results, spatial_results):
     """
     Calculate a composite market integration index combining time series and spatial metrics.
@@ -185,7 +185,7 @@ def calculate_integration_index(time_series_results, spatial_results):
     return integration_index
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def identify_market_clusters(time_series_results, spatial_results):
     """
     Identify market clusters based on integration patterns.
@@ -288,7 +288,7 @@ def identify_market_clusters(time_series_results, spatial_results):
     return clusters
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def analyze_regime_boundaries(time_series_results, spatial_results):
     """
     Analyze price transmission across exchange rate regime boundaries.

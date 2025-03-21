@@ -15,22 +15,22 @@ import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
 
-# Add the src directory to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from src.models.spatiotemporal import integrate_time_series_spatial_results
-from src.models.interpretation import (
+# Import project modules using consistent package imports
+from yemen_market_integration.models.spatiotemporal import integrate_time_series_spatial_results
+from yemen_market_integration.models.interpretation import (
     interpret_unit_root_results,
     interpret_cointegration_results,
     interpret_threshold_results,
     interpret_spatial_results,
     interpret_simulation_results
 )
-from src.models.reporting import (
+from yemen_market_integration.models.reporting import (
     generate_comprehensive_report,
     create_executive_summary,
     export_results_for_publication
 )
+from yemen_market_integration.utils.error_handler import capture_error
+from yemen_market_integration.utils.config import config
 
 
 class TestIntegratedAnalysis(unittest.TestCase):
@@ -38,9 +38,20 @@ class TestIntegratedAnalysis(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        # Create a temporary output directory
-        self.output_dir = Path('tests/output')
-        self.output_dir.mkdir(exist_ok=True, parents=True)
+        try:
+            # Create a temporary output directory
+            self.output_dir = Path(config.get('tests.output_dir', 'tests/output'))
+            self.output_dir.mkdir(exist_ok=True, parents=True)
+            
+            # Set up logger
+            import logging
+            self.logger = logging.getLogger('test_logger')
+            self.logger.setLevel(logging.INFO)
+            if not self.logger.handlers:
+                handler = logging.StreamHandler()
+                self.logger.addHandler(handler)
+                
+            self.logger.info(f"Test setup complete. Using output directory: {self.output_dir}")
         
         # Create mock data for unit root results
         self.unit_root_results = {
@@ -232,114 +243,161 @@ class TestIntegratedAnalysis(unittest.TestCase):
 
     def tearDown(self):
         """Tear down test fixtures."""
+        self.logger.info("Cleaning up test resources")
+        
         # Clean up created files
         for file in self.output_dir.glob('*'):
             try:
                 file.unlink()
-            except:
-                pass
+                self.logger.debug(f"Removed file: {file}")
+            except Exception as e:
+                self.logger.warning(f"Failed to remove file {file}: {e}")
         
+        # Try to remove the output directory
         try:
             self.output_dir.rmdir()
-        except:
-            pass
+            self.logger.debug(f"Removed directory: {self.output_dir}")
+        except Exception as e:
+            self.logger.warning(f"Failed to remove directory {self.output_dir}: {e}")
+            
+        # Force garbage collection
+        gc.collect()
 
     def test_spatiotemporal_integration(self):
         """Test spatiotemporal integration module."""
-        time_series_results = {
-            'unit_root': self.unit_root_results,
-            'cointegration': self.cointegration_results,
-            'tvecm': self.threshold_results['tvecm']
-        }
-        
-        integrated_results = integrate_time_series_spatial_results(
-            time_series_results=time_series_results,
-            spatial_results=self.spatial_results,
-            commodity='beans (kidney red)'
-        )
-        
-        # Check that the integration was successful
-        self.assertIsNotNone(integrated_results)
-        self.assertIn('integration_index', integrated_results)
-        self.assertIn('spatial_time_correlation', integrated_results)
-        self.assertIn('regime_boundary_effect', integrated_results)
+        try:
+            time_series_results = {
+                'unit_root': self.unit_root_results,
+                'cointegration': self.cointegration_results,
+                'tvecm': self.threshold_results['tvecm']
+            }
+            
+            commodity = config.get('analysis.default_commodity', 'beans (kidney red)')
+            
+            integrated_results = integrate_time_series_spatial_results(
+                time_series_results=time_series_results,
+                spatial_results=self.spatial_results,
+                commodity=commodity
+            )
+            
+            # Check that the integration was successful
+            self.assertIsNotNone(integrated_results)
+            self.assertIn('integration_index', integrated_results)
+            self.assertIn('spatial_time_correlation', integrated_results)
+            self.assertIn('regime_boundary_effect', integrated_results)
+        except Exception as e:
+            capture_error(e, context="Spatiotemporal integration test", logger=self.logger)
+            self.fail(f"Spatiotemporal integration test failed with error: {e}")
 
     def test_interpretation_modules(self):
         """Test interpretation modules."""
-        # Test unit root interpretation
-        unit_root_interp = interpret_unit_root_results(
-            self.unit_root_results, 
-            'beans (kidney red)'
-        )
-        self.assertIn('summary', unit_root_interp)
-        self.assertIn('details', unit_root_interp)
-        self.assertIn('implications', unit_root_interp)
-        
-        # Test cointegration interpretation
-        coint_interp = interpret_cointegration_results(
-            self.cointegration_results, 
-            'beans (kidney red)'
-        )
-        self.assertIn('summary', coint_interp)
-        self.assertIn('details', coint_interp)
-        self.assertIn('implications', coint_interp)
-        
-        # Test threshold interpretation
-        threshold_interp = interpret_threshold_results(
-            self.threshold_results, 
-            'beans (kidney red)'
-        )
-        self.assertIn('summary', threshold_interp)
-        self.assertIn('details', threshold_interp)
-        self.assertIn('implications', threshold_interp)
-        
-        # Test spatial interpretation
-        spatial_interp = interpret_spatial_results(
-            self.spatial_results, 
-            'beans (kidney red)'
-        )
-        self.assertIn('summary', spatial_interp)
-        self.assertIn('details', spatial_interp)
-        self.assertIn('implications', spatial_interp)
-        
-        # Test simulation interpretation
-        sim_interp = interpret_simulation_results(
-            self.simulation_results, 
-            'beans (kidney red)'
-        )
-        self.assertIn('summary', sim_interp)
-        self.assertIn('policy_recommendations', sim_interp)
-        self.assertIn('welfare_effects', sim_interp)
-        self.assertIn('implementation_considerations', sim_interp)
+        try:
+            commodity = config.get('analysis.default_commodity', 'beans (kidney red)')
+            
+            # Test unit root interpretation
+            self.logger.info("Testing unit root interpretation")
+            unit_root_interp = interpret_unit_root_results(
+                self.unit_root_results,
+                commodity
+            )
+            self.assertIn('summary', unit_root_interp)
+            self.assertIn('details', unit_root_interp)
+            self.assertIn('implications', unit_root_interp)
+            
+            # Test cointegration interpretation
+            self.logger.info("Testing cointegration interpretation")
+            coint_interp = interpret_cointegration_results(
+                self.cointegration_results,
+                commodity
+            )
+            self.assertIn('summary', coint_interp)
+            self.assertIn('details', coint_interp)
+            self.assertIn('implications', coint_interp)
+            
+            # Test threshold interpretation
+            self.logger.info("Testing threshold interpretation")
+            threshold_interp = interpret_threshold_results(
+                self.threshold_results,
+                commodity
+            )
+            self.assertIn('summary', threshold_interp)
+            self.assertIn('details', threshold_interp)
+            self.assertIn('implications', threshold_interp)
+            
+            # Test spatial interpretation
+            self.logger.info("Testing spatial interpretation")
+            spatial_interp = interpret_spatial_results(
+                self.spatial_results,
+                commodity
+            )
+            self.assertIn('summary', spatial_interp)
+            self.assertIn('details', spatial_interp)
+            self.assertIn('implications', spatial_interp)
+            
+            # Test simulation interpretation
+            self.logger.info("Testing simulation interpretation")
+            sim_interp = interpret_simulation_results(
+                self.simulation_results,
+                commodity
+            )
+            self.assertIn('summary', sim_interp)
+            self.assertIn('policy_recommendations', sim_interp)
+            self.assertIn('welfare_effects', sim_interp)
+            self.assertIn('implementation_considerations', sim_interp)
+            
+        except Exception as e:
+            capture_error(e, context="Interpretation modules test", logger=self.logger)
+            self.fail(f"Interpretation modules test failed with error: {e}")
 
     def test_reporting_modules(self):
         """Test reporting modules."""
-        # Test comprehensive report generation
-        report_path = generate_comprehensive_report(
-            all_results=self.all_results,
-            commodity='beans (kidney red)',
-            output_path=self.output_dir,
-            logger=self.logger
-        )
-        self.assertTrue(report_path.exists())
-        
-        # Test executive summary creation
-        summary_path = create_executive_summary(
-            all_results=self.all_results,
-            commodity='beans (kidney red)',
-            output_path=self.output_dir,
-            logger=self.logger
-        )
-        self.assertTrue(summary_path.exists())
-        
-        # Test publication export
-        publication_path = export_results_for_publication(
-            all_results=self.all_results,
-            commodity='beans (kidney red)',
-            output_path=self.output_dir,
-            logger=self.logger
-        )
-        self.assertTrue(publication_path.exists())
+        try:
+            commodity = config.get('analysis.default_commodity', 'beans (kidney red)')
+            report_format = config.get('analysis.report_format', 'markdown')
+            
+            # Test comprehensive report generation
+            self.logger.info("Testing comprehensive report generation")
+            report_path = generate_comprehensive_report(
+                all_results=self.all_results,
+                commodity=commodity,
+                output_path=self.output_dir,
+                logger=self.logger
+            )
+            self.assertTrue(report_path.exists())
+            
+            # Test executive summary creation
+            self.logger.info("Testing executive summary creation")
+            summary_path = create_executive_summary(
+                all_results=self.all_results,
+                commodity=commodity,
+                output_path=self.output_dir,
+                logger=self.logger
+            )
+            self.assertTrue(summary_path.exists())
+            
+            # Test publication export
+            self.logger.info("Testing publication export")
+            publication_path = export_results_for_publication(
+                all_results=self.all_results,
+                commodity=commodity,
+                output_path=self.output_dir,
+                logger=self.logger,
+                format=report_format
+            )
+            self.assertTrue(publication_path.exists())
+            
+            # Verify file contents
+            with open(report_path, 'r') as f:
+                report_content = f.read()
+                self.assertIn(commodity, report_content)
+            
+            with open(summary_path, 'r') as f:
+                summary_content = f.read()
+                self.assertIn(commodity, summary_content)
+                
+        except Exception as e:
+            capture_error(e, context="Reporting modules test", logger=self.logger)
+            self.fail(f"Reporting modules test failed with error: {e}")
 
 
 if __name__ == '__main__':

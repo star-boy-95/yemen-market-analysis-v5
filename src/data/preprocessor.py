@@ -8,10 +8,10 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
-from src.utils import handle_errors, validate_geodataframe, raise_if_invalid
-from src.utils import clean_column_names, convert_dates, fill_missing_values
-from src.utils import normalize_columns, create_date_features, create_lag_features
-from src.utils import validate_dataframe
+from yemen_market_integration.utils import handle_errors, validate_geodataframe, raise_if_invalid
+from yemen_market_integration.utils import clean_column_names, convert_dates, fill_missing_values
+from yemen_market_integration.utils import normalize_columns, create_date_features, create_lag_features
+from yemen_market_integration.utils import validate_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class DataPreprocessor:
         """Initialize the preprocessor."""
         pass
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def preprocess_geojson(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         """
         Preprocess the raw GeoJSON data.
@@ -192,7 +192,7 @@ class DataPreprocessor:
         logger.info("Created additional features for analysis")
         return gdf
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def calculate_price_differentials(self, gdf: gpd.GeoDataFrame, commodity: str = None) -> pd.DataFrame:
         """
         Calculate price differentials between north and south exchange rate regimes.

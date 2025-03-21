@@ -23,7 +23,7 @@ from src.models.threshold import ThresholdCointegration, test_mtar_adjustment
 from src.models.diagnostics import ModelDiagnostics
 
 
-from src.utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ValidationError,
     
@@ -63,7 +63,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def __init__(
         self, 
         data: gpd.GeoDataFrame, 
@@ -146,7 +146,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def simulate_exchange_rate_unification(
         self, 
         target_rate: str = 'official', 
@@ -232,7 +232,7 @@ class MarketIntegrationSimulation:
         
         return results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _convert_to_usd(self, data: gpd.GeoDataFrame) -> None:
         """
         Convert prices to USD using region-specific exchange rates.
@@ -251,7 +251,7 @@ class MarketIntegrationSimulation:
         logger.debug("Converted prices to USD")
     
     @memoize
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _determine_unified_rate(
         self, 
         target_rate: str = 'official', 
@@ -308,7 +308,7 @@ class MarketIntegrationSimulation:
         
         return rate
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_price_changes(
         self,
         original_prices: pd.Series,
@@ -361,10 +361,10 @@ class MarketIntegrationSimulation:
         # Otherwise return all changes
         return changes_df
 
-    @disk_cache(cache_dir='.cache/simulations')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/simulations")
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _reestimate_threshold_model(self, simulated_data: gpd.GeoDataFrame) -> Any:
         """
         Re-estimate threshold model with simulated prices.
@@ -450,7 +450,7 @@ class MarketIntegrationSimulation:
         return reestimated_model
     
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _process_threshold_model_in_chunks(
         self, 
         north_prices: pd.Series, 
@@ -518,7 +518,7 @@ class MarketIntegrationSimulation:
         
         return best_model
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _estimate_threshold_for_chunk(
         self, 
         north_chunk: np.ndarray, 
@@ -567,7 +567,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def simulate_improved_connectivity(
         self, 
         reduction_factor: float = 0.5
@@ -647,8 +647,8 @@ class MarketIntegrationSimulation:
         
         return results
     
-    @disk_cache(cache_dir='.cache/simulations')
-    @handle_errors(logger=logger)
+    @disk_cache(cache_dir=".cache/yemen_market_integration/simulations")
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     @m1_optimized(use_numba=True)
     def _recalculate_spatial_weights(
         self, 
@@ -714,7 +714,7 @@ class MarketIntegrationSimulation:
         return weights
     
     @timer
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _reestimate_spatial_model(
         self, 
         data: gpd.GeoDataFrame, 
@@ -782,7 +782,7 @@ class MarketIntegrationSimulation:
             return None
     
     @timer
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def calculate_integration_index(
         self,
         policy_scenario: Optional[str] = None
@@ -882,7 +882,7 @@ class MarketIntegrationSimulation:
 
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def simulate_combined_policy(
         self, 
         exchange_rate_target: str = 'official',
@@ -960,7 +960,7 @@ class MarketIntegrationSimulation:
         
         return combined_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _apply_exchange_unification(
         self, 
         data: gpd.GeoDataFrame,
@@ -996,7 +996,7 @@ class MarketIntegrationSimulation:
         
         return data
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _apply_improved_connectivity(
         self,
         data: gpd.GeoDataFrame,
@@ -1031,7 +1031,7 @@ class MarketIntegrationSimulation:
         
         return data, spatial_weights
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _reestimate_models(
         self,
         data: gpd.GeoDataFrame,
@@ -1072,7 +1072,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def simulate_combined_policies(
         self, 
         policy_combinations: List[Dict[str, Any]],
@@ -1191,7 +1191,7 @@ class MarketIntegrationSimulation:
         
         return all_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _simulate_single_policy_combination(self, policy: Dict[str, Any]) -> Dict[str, Any]:
         """
         Simulate a single policy combination.
@@ -1242,7 +1242,7 @@ class MarketIntegrationSimulation:
         
         return result
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _analyze_policy_interactions(self, policy_results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Analyze interactions between multiple policy interventions.
@@ -1360,7 +1360,7 @@ class MarketIntegrationSimulation:
         
         return interaction_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _interpret_policy_interactions(self, interaction_results: Dict[str, Dict[str, float]]) -> str:
         """
         Generate interpretation of policy interaction effects.
@@ -1414,7 +1414,7 @@ class MarketIntegrationSimulation:
         return interpretation
     
     @timer
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def calculate_welfare_effects(
         self, 
         policy_scenario: Optional[str] = None
@@ -1500,7 +1500,7 @@ class MarketIntegrationSimulation:
         return welfare_results
     
     @timer
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def calculate_policy_asymmetry_effects(
         self,
         policy_scenario: str
@@ -1587,7 +1587,7 @@ class MarketIntegrationSimulation:
         
         return asymmetry_effects
 
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _interpret_asymmetry_changes(
         self,
         tar_comparison: Dict[str, Any],
@@ -1624,7 +1624,7 @@ class MarketIntegrationSimulation:
         
         return f"{main_finding} {speed_finding}{mtar_insight}"
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_regional_welfare_metrics(
         self, 
         sim_data: gpd.GeoDataFrame
@@ -1674,7 +1674,7 @@ class MarketIntegrationSimulation:
             'price_changes': price_changes
         }
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_commodity_effects(
         self, 
         sim_data: gpd.GeoDataFrame
@@ -1720,7 +1720,7 @@ class MarketIntegrationSimulation:
         
         return commodity_effects
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_price_dispersion(
         self, 
         data: gpd.GeoDataFrame, 
@@ -1754,7 +1754,7 @@ class MarketIntegrationSimulation:
         
         return result
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_price_dispersion_change(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -1814,7 +1814,7 @@ class MarketIntegrationSimulation:
         
         return result
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_price_convergence(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -1874,7 +1874,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def test_robustness(
         self, 
         policy_scenario: Optional[str] = None
@@ -1947,7 +1947,7 @@ class MarketIntegrationSimulation:
         self.results[f'{policy_scenario}_robustness'] = robustness_results
         return robustness_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_structural_breaks(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -2026,7 +2026,7 @@ class MarketIntegrationSimulation:
         
         return structural_break_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_residual_diagnostics(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run diagnostic tests on model residuals.
@@ -2087,7 +2087,7 @@ class MarketIntegrationSimulation:
         
         return diagnostic_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_model_stability(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -2144,7 +2144,7 @@ class MarketIntegrationSimulation:
         
         return stability_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_time_stability(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -2224,7 +2224,7 @@ class MarketIntegrationSimulation:
             }
         }
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_regional_stability(
         self, 
         original_data: gpd.GeoDataFrame, 
@@ -2310,7 +2310,7 @@ class MarketIntegrationSimulation:
         else:
             return {'regional_dimensions': 'Insufficient for stability analysis'}
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _test_parameter_stability(
         self, 
         original_model: Any, 
@@ -2385,7 +2385,7 @@ class MarketIntegrationSimulation:
             'is_stable': is_stable
         }
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _compare_diagnostics(
         self,
         original_diag: Dict[str, Any],
@@ -2461,7 +2461,7 @@ class MarketIntegrationSimulation:
         
         return comparison
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _assess_overall_robustness(
         self,
         structural_break_results: Dict[str, Any],
@@ -2578,7 +2578,7 @@ class MarketIntegrationSimulation:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def run_sensitivity_analysis(
         self,
         sensitivity_type: str = 'conflict_reduction',
@@ -2702,7 +2702,7 @@ class MarketIntegrationSimulation:
         
         return sensitivity_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _run_sensitivity_analysis_for_param(
         self,
         sensitivity_type: str,
@@ -2770,7 +2770,7 @@ class MarketIntegrationSimulation:
         
         return metric_results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_sensitivity_summary(
         self,
         sensitivity_results: Dict[float, Dict[str, float]],
@@ -2862,7 +2862,7 @@ class MarketIntegrationSimulation:
         
         return summary
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _generate_sensitivity_plots(
         self,
         sensitivity_results: Dict[float, Dict[str, float]],

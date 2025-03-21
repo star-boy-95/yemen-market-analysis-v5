@@ -16,24 +16,18 @@ import sys
 import tempfile
 from datetime import datetime, timedelta
 
-# Add the project root to the path to make imports work properly
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-# Import project components
-from src.models.unit_root import UnitRootTester
-from src.models.threshold import ThresholdCointegration
-from src.models.diagnostics import ModelDiagnostics
-from src.models.simulation import MarketIntegrationSimulation
-from src.models.spatial import SpatialEconometrics
+# Import project components using consistent package imports
+from yemen_market_integration.models.unit_root import UnitRootTester
+from yemen_market_integration.models.threshold import ThresholdCointegration
+from yemen_market_integration.models.diagnostics import ModelDiagnostics
+from yemen_market_integration.models.simulation import MarketIntegrationSimulation
+from yemen_market_integration.models.spatial import SpatialEconometrics
 
 # Import performance utilities
-from src.utils import (
-    timer, 
-    handle_errors, 
-    configure_system_for_performance, 
-    config,
-    memory_usage_decorator
-)
+from yemen_market_integration.utils.performance_utils import timer, memory_usage_decorator, parallelize_dataframe
+from yemen_market_integration.utils.error_handler import handle_errors, ModelError, DataError, capture_error
+from yemen_market_integration.utils.config import config
+from yemen_market_integration.utils.performance_utils import configure_system_for_performance
 
 # Configure system for optimal performance
 configure_system_for_performance()

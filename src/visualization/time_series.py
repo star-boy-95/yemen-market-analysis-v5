@@ -8,11 +8,11 @@ import matplotlib.dates as mdates
 import plotly.graph_objects as go
 from typing import Optional, List, Dict, Union, Tuple, Any
 
-from utils import (
-    handle_errors,
-    config,
-    validate_dataframe,
-    raise_if_invalid,
+# Use absolute imports for better module resolution
+from yemen_market_integration.utils.error_handler import handle_errors, VisualizationError
+from yemen_market_integration.utils.config import config
+from yemen_market_integration.utils.validation import validate_dataframe, raise_if_invalid
+from yemen_market_integration.utils.plotting_utils import (
     set_plotting_style,
     format_date_axis,
     format_currency_axis,
@@ -23,9 +23,9 @@ from utils import (
     plot_time_series_by_group,
     plot_dual_axis,
     add_annotations,
-    configure_axes_for_print,
-    VisualizationError
+    configure_axes_for_print
 )
+from yemen_market_integration.utils.performance_utils import memory_usage_decorator, optimize_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class TimeSeriesVisualizer:
         self.south_color = config.get('visualization.south_color', '#ff7f0e')
         self.save_dir = config.get('visualization.save_dir', 'results/plots')
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_price_series(
         self, 
         df: pd.DataFrame, 
@@ -130,7 +130,7 @@ class TimeSeriesVisualizer:
             
         return fig, ax
 
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_price_differentials(
         self, 
         df: pd.DataFrame, 
@@ -232,7 +232,7 @@ class TimeSeriesVisualizer:
             
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_price_volatility(
         self,
         df: pd.DataFrame,
@@ -376,11 +376,12 @@ class TimeSeriesVisualizer:
             
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, ImportError))
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, ImportError), reraise=True)
     def plot_interactive_time_series(
-        self, 
-        df: pd.DataFrame, 
-        price_col: str = 'price', 
+        self,
+        df: pd.DataFrame,
+        price_col: str = 'price',
         date_col: str = 'date',
         group_col: Optional[str] = None,
         title: Optional[str] = None,
@@ -421,6 +422,9 @@ class TimeSeriesVisualizer:
         # Only validate required columns exist, not null values
         raise_if_invalid(valid, [e for e in errors if "null values" not in e],
                         "Invalid data for interactive time series plot")
+        
+        # Optimize dataframe for memory efficiency
+        df = optimize_dataframe(df)
         
         # Get figure dimensions
         width = config.get('visualization.interactive_width', 800)
@@ -469,7 +473,7 @@ class TimeSeriesVisualizer:
             
         return fig
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, AttributeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, AttributeError), reraise=True)
     def plot_threshold_analysis(
         self, 
         threshold_model: Any, 
@@ -585,10 +589,11 @@ class TimeSeriesVisualizer:
             
         return fig, axs
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_simulation_comparison(
-        self, 
-        original_data: pd.DataFrame, 
+        self,
+        original_data: pd.DataFrame,
         simulated_data: pd.DataFrame,
         date_col: str = 'date',
         price_cols: List[str] = None,
@@ -626,10 +631,14 @@ class TimeSeriesVisualizer:
             valid, errors = validate_dataframe(df, required_columns=[date_col])
             raise_if_invalid(valid, errors, "Invalid data for simulation comparison plot")
         
+        # Optimize dataframes for memory efficiency
+        original_data = optimize_dataframe(original_data)
+        simulated_data = optimize_dataframe(simulated_data)
+        
         # Determine price columns if not specified
         if price_cols is None:
-            price_cols = [col for col in original_data.columns 
-                         if col != date_col and 
+            price_cols = [col for col in original_data.columns
+                         if col != date_col and
                          np.issubdtype(original_data[col].dtype, np.number)]
         
         # Create figure with subplots

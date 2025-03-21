@@ -7,8 +7,11 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Union, Tuple
 
-from utils import handle_errors, validate_geodataframe, raise_if_invalid
-from utils import read_geojson, write_geojson, DataError
+# Use absolute imports for better module resolution
+from yemen_market_integration.utils.error_handler import handle_errors, DataError
+from yemen_market_integration.utils.validation import validate_geodataframe, raise_if_invalid
+from yemen_market_integration.utils.file_utils import read_geojson, write_geojson
+from yemen_market_integration.utils.performance_utils import memory_usage_decorator, optimize_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +24,19 @@ class DataLoader:
         self.raw_path = self.data_path / "raw"
         self.processed_path = self.data_path / "processed"
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, OSError))
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, OSError), reraise=True)
     def load_geojson(self, filename: str) -> gpd.GeoDataFrame:
         """Load GeoJSON data file into a GeoDataFrame."""
         file_path = self.raw_path / filename
         
         if not file_path.exists():
-            raise DataError(f"GeoJSON file not found: {file_path}")
+            raise DataError(f"GeoJSON file not found: {file_path}. Please ensure the file exists and you have read permissions.")
         
         gdf = read_geojson(file_path)
+        
+        # Optimize GeoDataFrame for memory efficiency
+        gdf = optimize_dataframe(gdf)
         
         valid, errors = validate_geodataframe(
             gdf,
@@ -48,7 +55,7 @@ class DataLoader:
         logger.info(f"Loaded GeoJSON from {file_path}: {len(gdf)} features")
         return gdf
     
-    @handle_errors(logger=logger, error_type=(PermissionError, OSError))
+    @handle_errors(logger=logger, error_type=(PermissionError, OSError), reraise=True)
     def save_processed_data(self, gdf: gpd.GeoDataFrame, filename: str) -> None:
         """Save processed data to the processed directory."""
         if not isinstance(gdf, gpd.GeoDataFrame):
@@ -109,7 +116,8 @@ class DataLoader:
         logger.info(f"Found {len(regions)} unique administrative regions")
         return regions
     
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError))
+    @memory_usage_decorator
+    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError), reraise=True)
     def load_multiple_periods(self, filenames: List[str]) -> gpd.GeoDataFrame:
         """Load and combine multiple GeoJSON files representing different time periods."""
         gdfs = []
@@ -119,6 +127,9 @@ class DataLoader:
             gdfs.append(gdf)
         
         combined_gdf = pd.concat(gdfs, ignore_index=True)
+        
+        # Optimize the combined GeoDataFrame for memory efficiency
+        combined_gdf = optimize_dataframe(combined_gdf)
         
         logger.info(f"Combined {len(filenames)} files: {len(combined_gdf)} total observations")
         return combined_gdf

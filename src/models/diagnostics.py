@@ -36,7 +36,7 @@ from pathlib import Path
 import warnings
 
 from src.utils.config import config
-from src.utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError,
     
@@ -99,9 +99,9 @@ class ResidualsAnalysis:
         self.residuals = residuals
         self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError), reraise=True)
     @timer
     def test_normality(self, residuals=None) -> Dict[str, Any]:
         """
@@ -142,9 +142,9 @@ class ResidualsAnalysis:
         logger.info(f"Normality test (Jarque-Bera): stat={jb_stat:.4f}, p-value={jb_pval:.4f}, normal={normal}")
         return result
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError), reraise=True)
     @timer
     def test_autocorrelation(self, residuals=None, lags=None) -> Dict[str, Any]:
         """
@@ -213,9 +213,9 @@ class ResidualsAnalysis:
         logger.info(f"Autocorrelation test: no_autocorrelation={result['no_autocorrelation']}")
         return result
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError), reraise=True)
     @timer
     def test_heteroskedasticity(self, residuals=None) -> Dict[str, Any]:
         """
@@ -280,9 +280,9 @@ class ResidualsAnalysis:
         logger.info(f"Heteroskedasticity test: homoskedastic={result['homoskedastic']}")
         return result
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, np.linalg.LinAlgError, RuntimeError), reraise=True)
     @timer
     def run_all_tests(self, residuals=None, lags=None) -> Dict[str, Any]:
         """
@@ -380,7 +380,7 @@ class ResidualsAnalysis:
 
         @disk_cache
         @memory_usage_decorator
-        @handle_errors(logger=logger)
+        @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
         def create_advanced_diagnostic_plots(
             self, 
             residuals: Union[pd.Series, np.ndarray], 
@@ -468,7 +468,7 @@ class ResidualsAnalysis:
 
 
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_time_series_plot(
         self, 
         residuals: np.ndarray, 
@@ -568,7 +568,7 @@ class ResidualsAnalysis:
         return fig
 
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _calculate_bootstrap_bands(
         self, 
         residuals: np.ndarray, 
@@ -614,7 +614,7 @@ class ResidualsAnalysis:
         
         return {'lower': lower, 'upper': upper}
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _perform_runs_test(self, residuals: np.ndarray) -> Dict[str, Any]:
         """
         Perform runs test for randomness in residuals.
@@ -655,7 +655,7 @@ class ResidualsAnalysis:
             'random': p_value >= 0.05
         }
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_acf_pacf_plot(self, residuals: np.ndarray) -> plt.Figure:
         """
         Create ACF and PACF plots with significance testing.
@@ -698,7 +698,7 @@ class ResidualsAnalysis:
         plt.tight_layout()
         return fig
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_qq_plot(self, residuals, confidence_level=0.95):
         """Create QQ plot with confidence bands."""
         from scipy import stats
@@ -752,7 +752,7 @@ class ResidualsAnalysis:
         return fig
 
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_histogram_plot(self, residuals: np.ndarray) -> plt.Figure:
         """
         Create histogram with KDE and normal overlay.
@@ -821,7 +821,7 @@ class ResidualsAnalysis:
         plt.tight_layout()
         return fig
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_rolling_stats_plot(
         self, 
         residuals: np.ndarray, 
@@ -927,7 +927,7 @@ class ResidualsAnalysis:
         plt.tight_layout()
         return fig
 
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _create_cusum_plot(
         self, 
         residuals: np.ndarray, 
@@ -1037,7 +1037,7 @@ class ResidualsAnalysis:
         return fig
         
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def plot_diagnostics(self, residuals=None, title=None, save_path=None, 
                         fig_size=(12, 10), dpi=300, plot_acf=True, 
                         plot_dist=True, plot_qq=True, plot_ts=True) -> Dict[str, plt.Figure]:
@@ -1209,9 +1209,9 @@ class StabilityTesting:
         self.data = data
         self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def test_parameter_stability(
         self, data=None, window_size=None, step_size=10, 
@@ -1392,9 +1392,9 @@ class StabilityTesting:
         
         return results
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def test_cusum(self, data=None, model_func=None, significance=0.05, 
                  plot=True, save_path=None) -> Dict[str, Any]:
@@ -1554,9 +1554,9 @@ class StabilityTesting:
         
         return result
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def detect_structural_breaks(
         self, 
@@ -1611,7 +1611,7 @@ class StabilityTesting:
         
         return results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_recursive_residuals(self, data, model):
         """
         Calculate recursive residuals manually.
@@ -1665,7 +1665,7 @@ class StabilityTesting:
         
         return rresid, rparams
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _process_stability_windows_parallel(
         self, 
         data: np.ndarray, 
@@ -1713,7 +1713,7 @@ class StabilityTesting:
         
         return results
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _process_stability_window(
         self, 
         data: np.ndarray, 
@@ -1781,9 +1781,9 @@ class SpatialDiagnostics:
         # Store weights matrix for reuse
         self.weights_matrix = None
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     @m1_optimized(parallel=True)
     def test_spatial_autocorrelation(
@@ -2324,9 +2324,9 @@ class PredictionAnalysis:
         self.default_bootstrap_samples = config.get('analysis.diagnostics.bootstrap_samples', 1000)
         self.default_batch_size = config.get('analysis.diagnostics.batch_size', 100)
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     @m1_optimized(parallel=True)
     def compute_prediction_intervals(
@@ -2616,9 +2616,9 @@ class PredictionAnalysis:
 
         return result
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     @m1_optimized(parallel=True)
     def bootstrap_confidence_intervals(
@@ -2796,7 +2796,7 @@ class PredictionAnalysis:
             'method': method
         }
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _run_prediction_bootstrap_batch(
         self,
         data: np.ndarray, 
@@ -2850,7 +2850,7 @@ class PredictionAnalysis:
         
         return batch_preds
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _run_bootstrap_batch(
         self,
         data: np.ndarray, 
@@ -2897,7 +2897,7 @@ class PredictionAnalysis:
         
         return batch_stats
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _run_jackknife_batch(
         self,
         data: np.ndarray, 
@@ -3001,9 +3001,9 @@ class ModelDiagnostics:
         """Create a specialized prediction analyzer."""
         return PredictionAnalysis()
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def detect_structural_breaks(
         self, 
@@ -3047,9 +3047,9 @@ class ModelDiagnostics:
             model=model
         )
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def test_spatial_autocorrelation(
         self, 
@@ -3101,9 +3101,9 @@ class ModelDiagnostics:
             sparse_threshold=sparse_threshold
         )
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def compute_prediction_intervals(
         self, 
@@ -3167,9 +3167,9 @@ class ModelDiagnostics:
             check_convergence_interval=check_convergence_interval
         )
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def bootstrap_confidence_intervals(
         self,
@@ -3236,9 +3236,9 @@ class ModelDiagnostics:
             random_seed=random_seed
         )
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def test_parameter_stability(
         self, 
@@ -3370,9 +3370,9 @@ class ModelDiagnostics:
             confidence_level=confidence_level
         )
     
-    @disk_cache(cache_dir='.cache/diagnostics')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/diagnostics")
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @timer
     def run_all_diagnostics(
         self, 
@@ -3488,7 +3488,7 @@ class ModelDiagnostics:
 
 
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+@handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
 @timer
 def calculate_fit_statistics(
     observed: Union[pd.Series, np.ndarray], 

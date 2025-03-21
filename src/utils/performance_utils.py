@@ -16,7 +16,7 @@ import gc
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 
-from .decorators import timer
+from .decorators import timer, m1_optimized, disk_cache
 from .error_handler import handle_errors
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ IS_APPLE_SILICON = (
     platform.machine().startswith(("arm", "aarch"))
 )
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def get_system_info() -> Dict[str, Any]:
     """
     Get system information including hardware and memory.
@@ -63,7 +63,7 @@ def get_system_info() -> Dict[str, Any]:
     
     return info
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def configure_system_for_performance() -> None:
     """
     Configure the system for optimal performance based on hardware.
@@ -119,7 +119,7 @@ def configure_system_for_performance() -> None:
     # Force garbage collection to start with clean memory
     gc.collect()
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 @timer
 def parallelize_dataframe(
     df: pd.DataFrame, 
@@ -165,7 +165,7 @@ def parallelize_dataframe(
     # Combine results
     return pd.concat(results)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def parallelize_array_processing(
     array: np.ndarray,
     func: Callable[[np.ndarray], Any],
@@ -220,7 +220,7 @@ def parallelize_array_processing(
         except (ValueError, TypeError):
             return results
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def determine_optimal_chunk_size(
     data_size: int, 
     memory_headroom_mb: int = 1000,
@@ -306,7 +306,7 @@ def determine_optimal_chunk_size(
     
     return chunk_size
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def process_in_batches(
     data: Union[pd.DataFrame, np.ndarray],
     batch_func: Callable,
@@ -354,7 +354,7 @@ def process_in_batches(
     
     return results
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def optimize_dataframe(
     df: pd.DataFrame,
     downcast: bool = True,
@@ -429,7 +429,7 @@ def optimize_dataframe(
     
     return result
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def optimize_numpy_array(
     arr: np.ndarray, 
     convert_to_float32: bool = True
@@ -520,7 +520,7 @@ def memory_usage_decorator(func):
     
     return wrapper
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def track_memory_usage(name: str = "Memory usage"):
     """
     Function to explicitly track current memory usage.
@@ -540,7 +540,7 @@ def track_memory_usage(name: str = "Memory usage"):
     logger.info(f"{name}: {memory_mb:.2f} MB")
     return memory_mb
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def read_large_array_chunks(
     file_path: str, 
     chunk_size: int = 1000, 
@@ -584,7 +584,7 @@ def read_large_array_chunks(
     else:
         raise ValueError(f"Unsupported file format: {file_path}")
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def force_gc():
     """
     Force garbage collection and report memory usage.

@@ -10,7 +10,7 @@ import folium
 from folium.plugins import HeatMap
 from typing import Optional, List, Dict, Union, Tuple, Any
 
-from utils import (
+from yemen_market_integration.utils import (
     handle_errors,
     config,
     validate_geodataframe,
@@ -53,7 +53,7 @@ class MarketMapVisualizer:
         # Set buffer distance for spatial operations
         self.buffer_distance = config.get('analysis.spatial.distance_threshold', 50000)  # meters
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_static_map(
         self, 
         gdf: gpd.GeoDataFrame, 
@@ -148,7 +148,7 @@ class MarketMapVisualizer:
             
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def create_interactive_map(
         self,
         gdf: gpd.GeoDataFrame,
@@ -292,7 +292,7 @@ class MarketMapVisualizer:
             
         return m
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_price_heatmap(
         self, 
         gdf: gpd.GeoDataFrame, 
@@ -418,7 +418,7 @@ class MarketMapVisualizer:
             
         return m
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def create_market_integration_map(
         self, 
         gdf: gpd.GeoDataFrame, 
@@ -482,7 +482,7 @@ class MarketMapVisualizer:
             
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_policy_impact_map(
         self, 
         original_gdf: gpd.GeoDataFrame, 

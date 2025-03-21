@@ -96,7 +96,7 @@ def plotting_context(style: str = 'whitegrid', context: str = 'notebook',
     # Restore original style
     plt.rcParams.update(original_style)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def create_figure(
     width: float = 10.0, 
     height: float = 6.0, 
@@ -122,7 +122,7 @@ def create_figure(
     fig, ax = plt.subplots(figsize=(width, height), constrained_layout=constrained_layout)
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def format_currency_axis(ax: Axes, axis: str = 'y', symbol: str = 'YER') -> None:
     """
     Format axis to display currency values
@@ -152,7 +152,7 @@ def format_currency_axis(ax: Axes, axis: str = 'y', symbol: str = 'YER') -> None
     else:
         ax.xaxis.set_major_formatter(formatter)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_time_series(
     df: pd.DataFrame,
     x: str,
@@ -242,7 +242,7 @@ def plot_time_series(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_multiple_time_series(
     df: pd.DataFrame,
     x: str,
@@ -342,7 +342,7 @@ def plot_multiple_time_series(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_time_series_by_group(
     df: pd.DataFrame,
     x: str,
@@ -450,7 +450,7 @@ def plot_time_series_by_group(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_bar_chart(
     df: pd.DataFrame,
     x: str,
@@ -538,7 +538,7 @@ def plot_bar_chart(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_stacked_bar(
     df: pd.DataFrame,
     x: str,
@@ -632,7 +632,7 @@ def plot_stacked_bar(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_scatter(
     df: pd.DataFrame,
     x: str,
@@ -752,7 +752,7 @@ def plot_scatter(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_heatmap(
     df: pd.DataFrame,
     ax: Optional[Axes] = None,
@@ -836,7 +836,7 @@ def plot_heatmap(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_histogram(
     df: pd.DataFrame,
     column: str,
@@ -921,7 +921,7 @@ def plot_histogram(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def save_plot(
     fig: Figure,
     filename: Union[str, Path],
@@ -971,7 +971,7 @@ def save_plot(
     logger.info(f"Saved plot to {filename}")
     return filename
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def add_annotations(
     ax: Axes,
     annotations: Dict[Tuple[float, float], str],
@@ -1020,7 +1020,7 @@ def add_annotations(
             bbox=bbox
         )
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def configure_axes_for_print(
     ax: Axes,
     fontsize_title: int = 14,
@@ -1057,7 +1057,7 @@ def configure_axes_for_print(
     for spine in ax.spines.values():
         spine.set_linewidth(linewidth)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_dual_axis(
     df: pd.DataFrame,
     x: str,
@@ -1143,7 +1143,7 @@ def plot_dual_axis(
     
     return fig, (ax1, ax2)
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_boxplot(
     df: pd.DataFrame,
     column: str,
@@ -1228,7 +1228,7 @@ def plot_boxplot(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_price_deviation_by_conflict(
     df: pd.DataFrame,
     price_col: str = 'price',
@@ -1339,7 +1339,7 @@ def plot_price_deviation_by_conflict(
     
     return fig, ax
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_yemen_market_integration(
     markets_gdf,
     integration_col: str,
@@ -1419,7 +1419,7 @@ def plot_yemen_market_integration(
     # If we have an exchange rate regime column, add boundary
     if 'exchange_rate_regime' in markets_gdf.columns:
         try:
-            from src.utils import calculate_exchange_rate_boundary
+            from yemen_market_integration.utils import calculate_exchange_rate_boundary
             
             # Calculate boundary
             boundary = calculate_exchange_rate_boundary(markets_gdf, 'exchange_rate_regime')
@@ -1483,7 +1483,7 @@ def has_plotly():
         return False
 
 
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def plot_interactive_map(
     gdf,
     color_col: Optional[str] = None,
@@ -1554,7 +1554,7 @@ def plot_interactive_map(
         )
 
 
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def _create_plotly_map(
     gdf, color_col, size_col, hover_data, title, height, width,
     color_scale, center, zoom, opacity, mapbox_style
@@ -1640,7 +1640,7 @@ def _create_plotly_map(
     return fig
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_matplotlib_map(gdf, color_col, size_col, title, cmap):
     """
     Create a static map with matplotlib as fallback.
@@ -1699,7 +1699,7 @@ def _create_matplotlib_map(gdf, color_col, size_col, title, cmap):
 
 @timer
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def plot_interactive_market_integration(
     markets_gdf,
     integration_col: str,
@@ -1789,7 +1789,7 @@ def plot_interactive_market_integration(
         )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_interactive_market_map(
     markets_gdf, integration_col, conflict_col, title, height, width,
     color_scale, hover_data, show_exchange_boundary, exchange_regime_col,
@@ -1840,7 +1840,7 @@ def _create_interactive_market_map(
     # Add exchange rate boundary if requested
     if show_exchange_boundary and exchange_regime_col in gdf_copy.columns:
         try:
-            from src.utils import calculate_exchange_rate_boundary
+            from yemen_market_integration.utils import calculate_exchange_rate_boundary
             
             # Calculate boundary
             boundary = calculate_exchange_rate_boundary(gdf_copy, exchange_regime_col)
@@ -1895,7 +1895,7 @@ def _create_interactive_market_map(
 
 
 @timer
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def plot_interactive_time_series(
     df: pd.DataFrame,
     x: str,
@@ -1978,7 +1978,7 @@ def plot_interactive_time_series(
         )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_plotly_time_series(
     df, x, y_columns, group_col, title, height, width,
     color_sequence, hover_data, xlabel, ylabel, legend_title, range_slider
@@ -2087,7 +2087,7 @@ def _create_plotly_time_series(
     return fig
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_matplotlib_time_series(
     df, x, y_columns, group_col, title, xlabel, ylabel, legend_title
 ):
@@ -2134,7 +2134,7 @@ def _create_matplotlib_time_series(
 
 @timer
 @m1_optimized(parallel=True)
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def plot_interactive_heatmap(
     df: pd.DataFrame,
     x: Optional[str] = None,
@@ -2241,7 +2241,7 @@ def plot_interactive_heatmap(
         )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_plotly_heatmap(
     df, title, height, width, color_scale,
     hover_data, xlabel, ylabel, zmin, zmax, 
@@ -2299,7 +2299,7 @@ def _create_plotly_heatmap(
     return fig
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_matplotlib_heatmap(
     df, title, cmap, xlabel, ylabel, vmin, vmax, annotation_format
 ):
@@ -2337,7 +2337,7 @@ def _create_matplotlib_heatmap(
 
 
 @timer
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def plot_interactive_dashboard(
     data_dict: Dict[str, Dict[str, Any]],
     layout: Optional[List[List[str]]] = None,
@@ -2468,7 +2468,7 @@ def plot_interactive_dashboard(
     return fig
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_map_to_dashboard(fig, data, params, row, col):
     """
     Add a map to the dashboard.
@@ -2534,7 +2534,7 @@ def _add_map_to_dashboard(fig, data, params, row, col):
     )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_timeseries_to_dashboard(fig, data, params, row, col):
     """
     Add a time series to the dashboard.
@@ -2610,7 +2610,7 @@ def _add_timeseries_to_dashboard(fig, data, params, row, col):
     )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_heatmap_to_dashboard(fig, data, params, row, col):
     """
     Add a heatmap to the dashboard.
@@ -2671,7 +2671,7 @@ def _add_heatmap_to_dashboard(fig, data, params, row, col):
     )
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _create_matplotlib_dashboard(data_dict, title):
     """
     Create a collection of matplotlib figures as fallback.
@@ -2752,7 +2752,7 @@ def _create_matplotlib_dashboard(data_dict, title):
 
 @timer
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError))
+@handle_errors(logger=logger, error_type=(ValueError, ImportError, AttributeError), reraise=True)
 def create_interactive_market_map(
     gdf, 
     value_col, 
@@ -2890,7 +2890,7 @@ def _create_static_market_map(
     return fig
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def plot_interactive_time_series(
     time_series,
     date_col=None,
@@ -3014,7 +3014,7 @@ def _create_matplotlib_time_series(
     
     return fig
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def format_date_axis(ax, rotation=45, date_format=None, interval=None):
     """
     Format the date axis for better readability.

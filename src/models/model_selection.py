@@ -16,7 +16,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
-from utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Configure system for optimal performance
 configure_system_for_performance()
 
-@handle_errors(logger=logger, error_type=(ValueError, AttributeError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, AttributeError, TypeError), reraise=True)
 def calculate_information_criteria(model):
     """
     Calculate information criteria for model selection and comparison.
@@ -153,7 +153,7 @@ class ModelComparer:
     """
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def __init__(
         self,
         data: Union[pd.DataFrame, np.ndarray],
@@ -300,7 +300,7 @@ class ModelComparer:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     @m1_optimized(parallel=True)
     def fit_models(self) -> Dict[str, Any]:
         """
@@ -378,7 +378,7 @@ class ModelComparer:
         
         return results
     
-    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError))
+    @handle_errors(logger=logger, error_type=(ValueError, RuntimeError), reraise=True)
     def _fit_single_model(self, spec: Dict[str, Any], model_idx: int) -> Dict[str, Any]:
         """
         Fit a single model according to its specification.
@@ -460,7 +460,7 @@ class ModelComparer:
                 'memory_usage': 0
             }
     
-    @handle_errors(logger=logger, error_type=(ValueError, AttributeError))
+    @handle_errors(logger=logger, error_type=(ValueError, AttributeError), reraise=True)
     def _extract_model_info(self, model: Any) -> Dict[str, Any]:
         """
         Extract relevant information from a fitted model.
@@ -516,7 +516,7 @@ class ModelComparer:
         return info
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def compare_information_criteria(self) -> Dict[str, Any]:
         """
         Compare models using AIC, BIC, and other information criteria.
@@ -599,7 +599,7 @@ class ModelComparer:
         return comparison
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def compare_performance_metrics(self) -> Dict[str, Any]:
         """
         Compare models based on computational performance metrics.
@@ -657,7 +657,7 @@ class ModelComparer:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def evaluate_models(
         self,
         test_data: Optional[Union[pd.DataFrame, np.ndarray]] = None,
@@ -828,7 +828,7 @@ class ModelComparer:
         return evaluation
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def get_best_model(
         self, 
         criterion: str = 'aic', 
@@ -887,7 +887,7 @@ class ModelComparer:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def get_comprehensive_report(self) -> Dict[str, Any]:
         """
         Generate a comprehensive report of all model comparisons.
@@ -972,7 +972,7 @@ class ModelComparer:
         
         return report
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError))
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
     def _generate_recommendations(
         self, 
         best_models: Dict[str, str],

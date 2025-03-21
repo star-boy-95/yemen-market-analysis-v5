@@ -18,7 +18,7 @@ import contextily as ctx
 from typing import Optional, Tuple, List, Dict, Any, Union
 import os
 
-from src.utils import (
+from yemen_market_integration.utils import (
     handle_errors,
     config,
     validate_dataframe,
@@ -59,7 +59,7 @@ class SpatialIntegrationVisualizer:
             logger.warning("Contextily not available. Basemaps will not be added to maps.")
             self.has_contextily = False
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_market_network(
         self,
         market_gdf: gpd.GeoDataFrame,
@@ -304,7 +304,7 @@ class SpatialIntegrationVisualizer:
         
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_integration_choropleth(
         self,
         market_gdf: gpd.GeoDataFrame,
@@ -455,7 +455,7 @@ class SpatialIntegrationVisualizer:
         
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_conflict_adjusted_network(
         self,
         market_gdf: gpd.GeoDataFrame,
@@ -689,7 +689,7 @@ class SpatialIntegrationVisualizer:
         
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_market_integration_comparison(
         self,
         original_gdf: gpd.GeoDataFrame,

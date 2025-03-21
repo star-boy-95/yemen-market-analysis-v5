@@ -14,7 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from typing import Optional, Tuple, List, Dict, Any, Union
 import datetime
 
-from utils import (
+from yemen_market_integration.utils import (
     handle_errors,
     config,
     validate_dataframe,
@@ -46,7 +46,7 @@ class AsymmetricAdjustmentVisualizer:
         self.below_color = config.get('visualization.below_threshold_color', '#4575b4')
         self.middle_color = config.get('visualization.middle_regime_color', '#ffffbf')
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_regime_dynamics(
         self,
         price_diff: np.ndarray,
@@ -156,7 +156,7 @@ class AsymmetricAdjustmentVisualizer:
         
         return fig, ax
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_asymmetric_adjustment(
         self,
         threshold_model: Any,
@@ -333,7 +333,7 @@ class AsymmetricAdjustmentVisualizer:
         
         return fig, axs
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def plot_regime_transitions(
         self,
         price_diff: np.ndarray,
@@ -458,7 +458,7 @@ class AsymmetricAdjustmentVisualizer:
         
         return fig, axs
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
     def compare_adjustment_patterns(
         self,
         original_model: Any,

@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional, Union, List, Tuple
 import matplotlib.pyplot as plt
 
-from utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -141,8 +141,8 @@ class ThresholdCointegration:
                 f"Time series must have equal length, got {len(data1)} and {len(data2)}"
             )
     
-    @disk_cache(cache_dir='.cache/threshold')
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @disk_cache(cache_dir=".cache/yemen_market_integration/threshold")
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_cointegration(self) -> Dict[str, Any]:
         """
         Estimate the cointegration relationship.
@@ -207,7 +207,7 @@ class ThresholdCointegration:
     @timer
     @memory_usage_decorator
     @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_threshold(
         self, 
         n_grid: int = 300, 
@@ -315,7 +315,7 @@ class ThresholdCointegration:
     @timer
     @memory_usage_decorator
     @m1_optimized()
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _compute_ssr_for_threshold(self, threshold: float) -> float:
         """
         Compute sum of squared residuals for a given threshold.
@@ -396,7 +396,7 @@ class ThresholdCointegration:
         return best_threshold, best_ssr, thresholds, ssrs
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_tvecm(self, run_diagnostics: bool = False) -> Dict[str, Any]:
         """
         Estimate the Threshold Vector Error Correction Model.
@@ -500,7 +500,7 @@ class ThresholdCointegration:
         return self.results
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def estimate_mtar(self, run_diagnostics: bool = False) -> Dict[str, Any]:
         """
         Estimate the Momentum-Threshold model for asymmetric price adjustment.
@@ -565,7 +565,7 @@ class ThresholdCointegration:
         return mtar_results
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_diagnostics(self) -> Dict[str, Any]:
         """
         Run diagnostic tests on the TVECM model.
@@ -657,7 +657,7 @@ class ThresholdCointegration:
         return diagnostic_results
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def run_full_analysis(self) -> Dict[str, Any]:
         """
         Run complete threshold cointegration analysis workflow.
@@ -823,7 +823,7 @@ class ThresholdCointegration:
             'cointegration_beta': self.beta1
         }
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def export_equilibrium_errors(self) -> pd.DataFrame:
         """
         Export equilibrium errors (residuals) with regime information.
@@ -878,7 +878,7 @@ class ThresholdCointegration:
         
         return df
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _extract_regime_residuals(self, regime: str) -> pd.Series:
         """
         Extract equilibrium errors for a specific regime.
@@ -914,7 +914,7 @@ class ThresholdCointegration:
         else:
             return pd.Series(self.eq_errors[mask])
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def prepare_simulation_data(self) -> Dict[str, Any]:
         """
         Prepare model results for use in simulation module.
@@ -986,7 +986,7 @@ class ThresholdCointegration:
         
         return simulation_data
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def plot_regime_dynamics(self, 
                            save_path: Optional[str] = None,
                            fig_size: Tuple[int, int] = (12, 10),
@@ -1124,10 +1124,10 @@ class ThresholdCointegration:
         
         return fig
     
-    @disk_cache(cache_dir='.cache/threshold')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/threshold")
     @memory_usage_decorator
     @m1_optimized()
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def test_threshold_significance(self, n_bootstrap: int = DEFAULT_N_BOOTSTRAP) -> Dict[str, Any]:
         """
         Test for significance of threshold effect using bootstrap.
@@ -1198,10 +1198,10 @@ class ThresholdCointegration:
         
         return result
     
-    @disk_cache(cache_dir='.cache/threshold')
+    @disk_cache(cache_dir=".cache/yemen_market_integration/threshold")
     @memory_usage_decorator
     @m1_optimized()
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_threshold_confidence_intervals(
         self, 
         confidence_level: float = 0.95,
@@ -1294,7 +1294,7 @@ class ThresholdCointegration:
 
 
 @timer
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def calculate_asymmetric_adjustment(
     model_results: Dict[str, Any]
 ) -> Dict[str, float]:
@@ -1382,7 +1382,7 @@ def calculate_asymmetric_adjustment(
     }
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def test_asymmetric_adjustment(
     residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
     threshold: Optional[float] = None
@@ -1494,7 +1494,7 @@ def test_asymmetric_adjustment(
 
 
 @m1_optimized()
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def test_mtar_adjustment(
     residuals: Union[pd.DataFrame, pd.Series, np.ndarray], 
     threshold: Optional[float] = DEFAULT_MTAR_THRESHOLD
@@ -1615,7 +1615,7 @@ def test_mtar_adjustment(
 
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def _interpret_adjustment_speeds(adj_below: float, adj_above: float, market1_name: str, market2_name: str) -> str:
     """
     Interpret adjustment speed coefficients in Yemen market context.
@@ -1672,7 +1672,7 @@ def _interpret_adjustment_speeds(adj_below: float, adj_above: float, market1_nam
                     f"magnitude, suggesting relatively efficient market integration.")
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def _interpret_asymmetric_test(is_asymmetric: bool, adj_below: float, adj_above: float) -> str:
     """
     Interpret asymmetric adjustment test results.
@@ -1708,7 +1708,7 @@ def _interpret_asymmetric_test(is_asymmetric: bool, adj_below: float, adj_above:
                 "breaks, or complex market dynamics requiring further investigation.")
 
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative: float) -> str:
     """
     Interpret M-TAR test results in Yemen market context.
@@ -1762,7 +1762,7 @@ def _interpret_mtar_test(is_asymmetric: bool, adj_positive: float, adj_negative:
         return ("No effective price adjustment mechanism detected. Neither rising nor falling "
                 "prices trigger correction, suggesting severely fragmented markets.")
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _interpret_three_regime_tar(result: Dict[str, Any]) -> str:
     """
     Generate interpretation of three-regime TAR model results.
@@ -1855,7 +1855,7 @@ def _interpret_three_regime_tar(result: Dict[str, Any]) -> str:
     
     return interpretation
 
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def _assess_market_integration(asymm_adj: Dict[str, Any], cointegrated: bool) -> str:
     """
     Assess market integration based on cointegration and adjustment speeds.

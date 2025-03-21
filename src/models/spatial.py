@@ -13,7 +13,7 @@ from spreg import ML_Lag, ML_Error
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from utils import (
+from yemen_market_integration.utils import (
     # Error handling
     handle_errors, ModelError, ValidationError,
     
@@ -75,7 +75,7 @@ class SpatialEconometrics:
         self.error_model = None
         logger.info(f"Initialized SpatialEconometrics with {len(gdf)} observations")
     
-    @handle_errors(logger=logger, error_type=(ValidationError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValidationError, TypeError), reraise=True)
     def _validate_input(self, gdf):
         """Validate input GeoDataFrame."""
         # Check if GeoDataFrame
@@ -91,7 +91,7 @@ class SpatialEconometrics:
         raise_if_invalid(valid, errors, "Invalid GeoDataFrame for spatial analysis")
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def create_weight_matrix(
         self, 
         k=DEFAULT_KNN, 
@@ -158,7 +158,7 @@ class SpatialEconometrics:
         return self.weights
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def moran_i_test(self, variable):
         """
         Test for spatial autocorrelation using Moran's I.
@@ -202,7 +202,7 @@ class SpatialEconometrics:
         return result
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def local_moran_test(self, variable):
         """
         Conduct Local Moran's I test to identify spatial clusters.
@@ -246,7 +246,7 @@ class SpatialEconometrics:
         
         return result_gdf
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _classify_moran_clusters(self, gdf, variable, local_moran):
         """
         Classify clusters based on Local Moran's I results.
@@ -276,7 +276,7 @@ class SpatialEconometrics:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def spatial_lag_model(self, y_col, x_cols, name_y=None, name_x=None):
         """
         Estimate a spatial lag model.
@@ -325,7 +325,7 @@ class SpatialEconometrics:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def spatial_error_model(self, y_col, x_cols, name_y=None, name_x=None):
         """
         Estimate a spatial error model.
@@ -372,7 +372,7 @@ class SpatialEconometrics:
         
         return self.error_model
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _prepare_model_data(self, y_col, x_cols):
         """
         Prepare data for spatial regression models.
@@ -408,7 +408,7 @@ class SpatialEconometrics:
         
         return model_data, y, X
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def visualize_conflict_adjusted_weights(
         self,
         save_path=None,
@@ -454,7 +454,7 @@ class SpatialEconometrics:
         
         return fig
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _draw_network_comparison(self, ax1, ax2, node_color_col, 
                               base_node_size=100, edge_scale=5, labels=False):
         """
@@ -509,7 +509,7 @@ class SpatialEconometrics:
                               pad=0.05, aspect=40)
             cbar.set_label(node_color_col)
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _create_network_graph(self, weights):
         """
         Create networkx graph from weights matrix.
@@ -538,7 +538,7 @@ class SpatialEconometrics:
         
         return G
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _draw_network(self, G, pos, node_colors, node_size, edge_scale, 
                     labels, ax, vmin=None, vmax=None):
         """
@@ -580,7 +580,7 @@ class SpatialEconometrics:
     
     @timer
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_impacts(self, model_type='lag'):
         """
         Calculate direct, indirect, and total effects for spatial models.
@@ -607,7 +607,7 @@ class SpatialEconometrics:
         else:
             raise ValueError(f"Model type '{model_type}' not available or not estimated")
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_lag_impacts(self):
         """
         Calculate impacts for spatial lag model.
@@ -648,7 +648,7 @@ class SpatialEconometrics:
             'model_type': 'lag'
         }
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_error_impacts(self):
         """
         Calculate impacts for spatial error model.
@@ -692,7 +692,7 @@ class SpatialEconometrics:
             'model_type': 'error'
         }
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def prepare_simulation_data(self):
         """
         Prepare model results for use in simulation module.
@@ -730,7 +730,7 @@ class SpatialEconometrics:
         
         return simulation_data
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _validate_model_columns(self, columns):
         """
         Validate that columns exist in the GeoDataFrame.
@@ -744,7 +744,7 @@ class SpatialEconometrics:
         if missing_cols:
             raise ValueError(f"Column(s) not found in GeoDataFrame: {', '.join(missing_cols)}")
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def calculate_spatial_barriers(self, conflict_col, threshold=0.5, return_gdf=True):
         """
         Identify and quantify critical spatial barriers between markets.
@@ -780,7 +780,7 @@ class SpatialEconometrics:
         else:
             return barrier_metrics
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _calculate_barrier_metrics(self, conflict_col, threshold):
         """
         Calculate barrier metrics for each market.
@@ -844,7 +844,7 @@ class SpatialEconometrics:
             
         return result_gdf
     
-    @handle_errors(logger=logger)
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
     def _summarize_barrier_results(self, result_gdf, threshold):
         """
         Summarize barrier analysis results.
@@ -889,7 +889,7 @@ class SpatialEconometrics:
 
 @timer
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def calculate_market_accessibility(markets_gdf, population_gdf, max_distance=50000,
                                  distance_decay=2.0, weight_col='population'):
     """
@@ -929,7 +929,7 @@ def calculate_market_accessibility(markets_gdf, population_gdf, max_distance=500
     return result_gdf
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _validate_accessibility_inputs(markets_gdf, population_gdf, weight_col):
     """
     Validate inputs for accessibility calculation.
@@ -965,7 +965,7 @@ def _validate_accessibility_inputs(markets_gdf, population_gdf, weight_col):
 
 @timer
 @m1_optimized(parallel=True)
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def simulate_improved_connectivity(markets_gdf, conflict_reduction, conflict_col='conflict_intensity_normalized',
                                 price_col='price', spatial_model=None):
     """
@@ -1021,7 +1021,7 @@ def simulate_improved_connectivity(markets_gdf, conflict_reduction, conflict_col
     return results
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _validate_simulation_inputs(markets_gdf, conflict_reduction, conflict_col, price_col):
     """
     Validate inputs for connectivity simulation.
@@ -1049,7 +1049,7 @@ def _validate_simulation_inputs(markets_gdf, conflict_reduction, conflict_col, p
         raise ValidationError(f"conflict_reduction must be between 0 and 1, got {conflict_reduction}")
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _prepare_simulation_data(markets_gdf, conflict_reduction, conflict_col):
     """
     Prepare data for connectivity simulation.
@@ -1078,7 +1078,7 @@ def _prepare_simulation_data(markets_gdf, conflict_reduction, conflict_col):
     return sim_data
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _run_spatial_analysis(markets_gdf, sim_data, conflict_col, price_col, 
                        spatial_model, conflict_reduction, results):
     """
@@ -1210,7 +1210,7 @@ def _run_spatial_analysis(markets_gdf, sim_data, conflict_col, price_col,
     return results
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_price_differential_metrics(markets_gdf, conflict_reduction, price_col, results):
     """
     Add price differential metrics to simulation results.
@@ -1275,7 +1275,7 @@ def _add_price_differential_metrics(markets_gdf, conflict_reduction, price_col, 
             results['metrics']['price_convergence_pct'] = 0
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_simulation_visualizations(results):
     """
     Add visualizations to simulation results.
@@ -1326,7 +1326,7 @@ def _add_simulation_visualizations(results):
 
 @timer
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 def market_integration_index(prices_df: pd.DataFrame, weights_matrix, market_id_col: str, 
                           price_col: str = 'price', time_col: str = 'date', windows: Optional[List[int]] = None,
                           return_components: bool = False) -> pd.DataFrame:
@@ -1430,7 +1430,7 @@ def market_integration_index(prices_df: pd.DataFrame, weights_matrix, market_id_
 
 
 @m1_optimized(parallel=True)
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _process_periods_parallel(
     prices_df: pd.DataFrame, time_periods: List, windows: List[int], markets: List,
     market_id_col: str, price_col: str, time_col: str, weights_matrix,
@@ -1513,7 +1513,7 @@ def _process_periods_parallel(
     return results_dfs.to_dict('records') if not results_dfs.empty else []
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _validate_integration_inputs(prices_df, weights_matrix, market_id_col, price_col, time_col):
     """
     Validate inputs for market integration analysis.
@@ -1545,7 +1545,7 @@ def _validate_integration_inputs(prices_df, weights_matrix, market_id_col, price
     raise_if_invalid(valid, errors, "Invalid price data for integration analysis")
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _calculate_period_metrics(period_data, prices_df, time_periods, t, windows,
                           market_id_col, price_col, time_col, weights_matrix, period,
                           return_components=False):
@@ -1604,7 +1604,7 @@ def _calculate_period_metrics(period_data, prices_df, time_periods, t, windows,
     return period_metrics
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_current_period_metrics(period_metrics, price_vector, weights_matrix):
     """
     Add current period metrics to results.
@@ -1638,7 +1638,7 @@ def _add_current_period_metrics(period_metrics, price_vector, weights_matrix):
 
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _add_window_metrics(period_metrics, prices_df, time_periods, t, window,
                      market_id_col, price_col, current_prices, return_components=False):
     """
@@ -1701,7 +1701,7 @@ def _add_window_metrics(period_metrics, prices_df, time_periods, t, window,
 
 
 @timer
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _calculate_convergence_metrics(period_metrics, current_prices, past_prices, window,
                                return_components=False):
     """
@@ -1766,7 +1766,7 @@ def _calculate_convergence_metrics(period_metrics, current_prices, past_prices, 
     logger.debug(f"Convergence metrics for window {window} used {end_mem - start_mem:.2f} MB memory")
 
 
-@handle_errors(logger=logger)
+@handle_errors(logger=logger, error_type=(ValueError, TypeError, OSError), reraise=True)
 def _calculate_integration_index(period_metrics, current_cv, price_change_cv, window,
                              return_components=False):
     """

@@ -16,20 +16,15 @@ from statsmodels.tsa.stattools import coint
 import statsmodels.api as sm
 from scipy import stats
 
-from src.utils import (
-    # Error handling
-    handle_errors, ModelError,
-    
-    # Validation
-    validate_time_series, raise_if_invalid, validate_dataframe,
-    
-    # Performance
-    timer, m1_optimized, memory_usage_decorator, disk_cache, parallelize_dataframe,
-    configure_system_for_performance, optimize_dataframe,
-    
-    # Configuration
-    config
+# Use absolute imports with clear organization
+from yemen_market_integration.utils.error_handler import handle_errors, ModelError
+from yemen_market_integration.utils.validation import validate_time_series, raise_if_invalid, validate_dataframe
+from yemen_market_integration.utils.performance_utils import (
+    timer, memory_usage_decorator, disk_cache,
+    parallelize_dataframe, configure_system_for_performance, optimize_dataframe
 )
+from yemen_market_integration.utils.decorators import m1_optimized
+from yemen_market_integration.utils.config import config
 
 # Initialize module logger
 logger = logging.getLogger(__name__)
@@ -46,7 +41,7 @@ class CointegrationTester:
     """Perform cointegration tests on time series data."""
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def __init__(self):
         """Initialize the cointegration tester."""
         # Get number of available workers based on CPU count
@@ -58,9 +53,9 @@ class CointegrationTester:
         
         logger.info(f"Initialized CointegrationTester. Memory usage: {memory_usage:.2f} MB")
     
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def test_engle_granger(
         self, 
@@ -176,9 +171,9 @@ class CointegrationTester:
         
         return eg_result
     
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @m1_optimized(parallel=True)
     @timer
     def test_johansen(
@@ -347,7 +342,7 @@ class CointegrationTester:
         
         return johansen_result
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _process_johansen_chunk(
         self, 
         chunk: np.ndarray,
@@ -414,7 +409,7 @@ class CointegrationTester:
             logger.warning(f"Error in Johansen test for chunk {chunk_idx}: {e}")
             return None
     
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def _combine_johansen_results(
         self, 
         chunk_results: List[Dict[str, Any]],
@@ -486,7 +481,7 @@ class CointegrationTester:
         return combined_result
     
     @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     def test_combined(
         self, 
         y: Union[pd.Series, np.ndarray], 
@@ -578,9 +573,9 @@ class CointegrationTester:
         
         return combined
 
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @m1_optimized(use_numba=True)
     @timer
     def test_gregory_hansen(
@@ -758,9 +753,9 @@ class CointegrationTester:
         
         return result
 
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @m1_optimized(parallel=True)
     @timer
     def test_threshold_cointegration(
@@ -1067,9 +1062,9 @@ class CointegrationTester:
         
         return result
 
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @timer
     def calculate_asymmetric_adjustment(
         self, 
@@ -1239,9 +1234,9 @@ class CointegrationTester:
         
         return result
 
-    @disk_cache(cache_dir='.cache/cointegration')
+    @disk_cache(cache_dir='.cache/yemen_market_integration/cointegration')
     @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError))
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
     @m1_optimized(use_numba=True)
     @timer
     def test_for_nonlinearity(
@@ -1358,7 +1353,7 @@ class CointegrationTester:
 
 @m1_optimized(use_numba=True)
 @memory_usage_decorator
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 @timer
 def estimate_cointegration_vector(
     y: Union[pd.Series, np.ndarray],
@@ -1643,7 +1638,7 @@ def estimate_cointegration_vector(
     return beta, residuals 
 
 @m1_optimized()
-@handle_errors(logger=logger, error_type=(ValueError, TypeError))
+@handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
 @timer
 def calculate_half_life(residuals: np.ndarray) -> float:
     """
