@@ -19,18 +19,18 @@ from src.models.diagnostics import (
     bootstrap_confidence_interval
 )
 
-# Threshold models
-from src.models.threshold import (
-    ThresholdCointegration,
-    calculate_asymmetric_adjustment,
-    calculate_half_life,
-    test_asymmetric_adjustment,
-    test_mtar_adjustment
-)
+# Threshold models - import from new unified implementation
+from src.models.threshold_model import ThresholdModel
 
-from src.models.threshold_vecm import (
-    ThresholdVECM,
-    combine_tvecm_results
+# Maintain backward compatibility
+from src.models.threshold import ThresholdCointegration
+from src.models.threshold_fixed import ThresholdFixed
+from src.models.threshold_vecm import ThresholdVECM, combine_tvecm_results
+
+# Helper functions from threshold_model
+from src.models.threshold_model import (
+    process_threshold,
+    process_chunk
 )
 
 # Spatial models
@@ -65,12 +65,13 @@ __all__ = [
     'bootstrap_confidence_interval',
     
     # Threshold models
-    'ThresholdCointegration',
-    'calculate_asymmetric_adjustment',
-    'test_asymmetric_adjustment',
-    'test_mtar_adjustment',
-    'ThresholdVECM',
+    'ThresholdModel',  # New unified model
+    'ThresholdCointegration',  # Backward compatibility
+    'ThresholdFixed',  # Backward compatibility
+    'ThresholdVECM',  # Backward compatibility
     'combine_tvecm_results',
+    'process_threshold',
+    'process_chunk',
     
     # Spatial models
     'SpatialEconometrics',

@@ -35,7 +35,8 @@ from yemen_market_integration.data.loader import DataLoader
 from yemen_market_integration.data.preprocessor import DataPreprocessor
 from yemen_market_integration.models.unit_root import UnitRootTester
 from yemen_market_integration.models.cointegration import CointegrationTester
-from yemen_market_integration.models.threshold import ThresholdCointegration
+# Import the new unified threshold model instead of the old implementation
+from yemen_market_integration.models.threshold_model import ThresholdModel
 from yemen_market_integration.models.spatial import SpatialEconometrics
 from yemen_market_integration.models.simulation import MarketIntegrationSimulation
 from yemen_market_integration.models.diagnostics import ModelDiagnostics
@@ -187,6 +188,15 @@ def parse_args():
         choices=['text', 'markdown', 'latex'],
         default=config.get('analysis.report_format', 'markdown'),
         help='Format for the comprehensive report'
+    )
+    
+    # Add new parameter for threshold model mode
+    parser.add_argument(
+        '--threshold-mode',
+        type=str,
+        choices=['standard', 'fixed', 'vecm', 'mtar'],
+        default=config.get('analysis.threshold.mode', 'standard'),
+        help='Mode for threshold model analysis'
     )
     
     args = parser.parse_args()
@@ -579,7 +589,7 @@ def run_cointegration_analysis(unit_root_results, commodity, output_path, max_la
 
 @timer
 @memory_usage_decorator
-def run_threshold_analysis(cointegration_results, commodity, output_path, max_lags, logger):
+def run_threshold_analysis(cointegration_results, commodity, output_path, max_lags, logger, threshold_mode="standard"):
     """
     Run threshold cointegration analysis with asymmetric adjustment.
     
@@ -595,13 +605,15 @@ def run_threshold_analysis(cointegration_results, commodity, output_path, max_la
         Maximum number of lags for time series analysis
     logger : logging.Logger
         Logger instance
+    threshold_mode : str, optional
+        Mode for threshold model ('standard', 'fixed', 'vecm', or 'mtar')
         
     Returns
     -------
     dict
         Threshold analysis results
     """
-    logger.info(f"Running threshold cointegration analysis for {commodity}")
+    logger.info(f"Running threshold cointegration analysis for {commodity} using {threshold_mode} mode")
     
     # Check if we have valid cointegration results
     if not cointegration_results or 'merged_data' not in cointegration_results:
@@ -627,46 +639,37 @@ def run_threshold_analysis(cointegration_results, commodity, output_path, max_la
     # Get merged data from cointegration results
     merged = cointegration_results['merged_data']
     
-    # Initialize threshold model
-    threshold_model = ThresholdCointegration(
-        merged['price_north'], merged['price_south'],
+    # Initialize threshold model with the specified mode
+    threshold_model = ThresholdModel(
+        merged['price_north'], 
+        merged['price_south'],
+        mode=threshold_mode,
         max_lags=max_lags,
         market1_name="North",
         market2_name="South"
     )
     
-    # Estimate cointegration relationship
-    logger.info("Estimating cointegration relationship")
-    cointegration_result = threshold_model.estimate_cointegration()
+    # Run full analysis
+    logger.info(f"Running full threshold analysis in {threshold_mode} mode")
+    full_results = threshold_model.run_full_analysis()
     
-    # Estimate threshold
-    logger.info("Estimating threshold")
-    threshold_result = threshold_model.estimate_threshold()
+    # Create visualization of threshold dynamics
+    viz_path = output_path / f'{commodity.replace(" ", "_")}_threshold_dynamics.png'
     
-    # Estimate TVECM
-    logger.info("Estimating Threshold Vector Error Correction Model (TVECM)")
-    tvecm_result = threshold_model.estimate_tvecm()
-    
-    # Estimate M-TAR model for directional asymmetry
-    logger.info("Estimating Momentum-TAR model for directional asymmetry")
-    mtar_result = threshold_model.estimate_mtar()
+    # Generate report
+    logger.info(f"Generating standardized report for {threshold_mode} threshold model")
+    report = threshold_model.generate_report(
+        format="markdown", 
+        output_path=str(output_path / f'{commodity.replace(" ", "_")}_threshold_report.md')
+    )
     
     # Compile results
     threshold_results = {
         'cointegrated': True,
-        'cointegration': cointegration_result,
-        'threshold': threshold_result,
-        'tvecm': tvecm_result,
-        'mtar': mtar_result
+        'full_results': full_results,
+        'report': report,
+        'model': threshold_model
     }
-    
-    # Create visualization of threshold dynamics if available
-    if hasattr(threshold_model, 'plot_regime_dynamics'):
-        viz_path = output_path / f'{commodity.replace(" ", "_")}_threshold_dynamics.png'
-        fig, ax = threshold_model.plot_regime_dynamics(title=f'Threshold Dynamics - {commodity}')
-        fig.savefig(viz_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        logger.info(f"Saved threshold dynamics visualization to {viz_path}")
     
     return threshold_results
 
@@ -884,9 +887,12 @@ def run_simulation_analysis(processed_gdf, threshold_results, spatial_results, c
     # Initialize simulation model
     logger.info(f"Initializing market integration simulation model for {commodity}")
     try:
+        # Extract threshold model from results
+        threshold_model = threshold_results.get('model') if threshold_results else None
+        
         simulation_model = MarketIntegrationSimulation(
             data=commodity_data,
-            threshold_model=threshold_results.get('tvecm') if threshold_results else None,
+            threshold_model=threshold_model,
             spatial_model=spatial_results.get('model') if spatial_results else None
         )
     except Exception as e:
@@ -1089,7 +1095,8 @@ def run_integrated_analysis(args, logger):
                 commodity=args.commodity,
                 output_path=output_path,
                 max_lags=args.max_lags,
-                logger=logger
+                logger=logger,
+                threshold_mode=args.threshold_mode
             )
         else:
             logger.warning(f"Skipping threshold analysis for {args.commodity} due to missing cointegration results")
@@ -1132,7 +1139,7 @@ def run_integrated_analysis(args, logger):
                     time_series_results={
                         'unit_root': unit_root_results,
                         'cointegration': cointegration_results,
-                        'tvecm': threshold_results.get('tvecm') if threshold_results else None
+                        'tvecm': threshold_results.get('full_results') if threshold_results else None
                     },
                     spatial_results=spatial_results,
                     commodity=args.commodity
