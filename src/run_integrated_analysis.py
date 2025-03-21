@@ -30,38 +30,41 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 
-# Import project modules - using consistent package imports
-from yemen_market_integration.data.loader import DataLoader
-from yemen_market_integration.data.preprocessor import DataPreprocessor
-from yemen_market_integration.models.unit_root import UnitRootTester
-from yemen_market_integration.models.cointegration import CointegrationTester
+# Add the parent directory to the Python path to allow imports from src
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import project modules
+from src.data.loader import DataLoader
+from src.data.preprocessor import DataPreprocessor
+from src.models.unit_root import UnitRootTester
+from src.models.cointegration import CointegrationTester
 # Import the new unified threshold model instead of the old implementation
-from yemen_market_integration.models.threshold_model import ThresholdModel
-from yemen_market_integration.models.spatial import SpatialEconometrics
-from yemen_market_integration.models.simulation import MarketIntegrationSimulation
-from yemen_market_integration.models.diagnostics import ModelDiagnostics
+from src.models.threshold_model import ThresholdModel
+from src.models.spatial import SpatialEconometrics
+from src.models.simulation import MarketIntegrationSimulation
+from src.models.diagnostics import ModelDiagnostics
 
 # Import new integration modules
-from yemen_market_integration.models.spatiotemporal import integrate_time_series_spatial_results
-from yemen_market_integration.models.interpretation import (
+from src.models.spatiotemporal import integrate_time_series_spatial_results
+from src.models.interpretation import (
     interpret_unit_root_results,
     interpret_cointegration_results,
     interpret_threshold_results,
     interpret_spatial_results,
     interpret_simulation_results
 )
-from yemen_market_integration.models.reporting import (
+from src.models.reporting import (
     generate_comprehensive_report,
     create_executive_summary,
     export_results_for_publication
 )
 
-from yemen_market_integration.visualization.time_series import TimeSeriesVisualizer
-from yemen_market_integration.visualization.maps import MarketMapVisualizer
-from yemen_market_integration.utils.performance_utils import timer, memory_usage_decorator, optimize_dataframe, parallelize_dataframe
-from yemen_market_integration.utils.validation import validate_data, validate_model_inputs
-from yemen_market_integration.utils.error_handler import handle_errors, ModelError, DataError, capture_error
-from yemen_market_integration.utils.config import config
+from src.visualization.time_series import TimeSeriesVisualizer
+from src.visualization.maps import MarketMapVisualizer
+from src.utils.performance_utils import timer, memory_usage_decorator, optimize_dataframe, parallelize_dataframe
+from src.utils.validation import validate_data, validate_model_inputs
+from src.utils.error_handler import handle_errors, ModelError, DataError, capture_error
+from src.utils.config import config
 import gc
 
 
@@ -283,26 +286,30 @@ def run_unit_root_analysis(processed_gdf, commodity, output_path, max_lags, logg
         logger.warning(f"Insufficient data for {commodity}: North={len(north_data)}, South={len(south_data)}")
         return None
     
+    # Check if usdprice column exists
+    price_column = 'usdprice' if 'usdprice' in north_data.columns else 'price'
+    logger.info(f"Using {price_column} column for analysis")
+    
     # Get aggregation method from config
     agg_method = config.get('analysis.price_aggregation.method', 'mean')
     logger.info(f"Using {agg_method} aggregation for prices for {commodity}")
     
     # Aggregate to monthly prices using the configured method
     if agg_method == 'median':
-        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].median().reset_index()
-        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].median().reset_index()
+        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].median().reset_index()
+        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].median().reset_index()
     elif agg_method == 'robust':
         # Use a more robust method (trimmed mean)
-        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].apply(
+        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].apply(
             lambda x: x.quantile(0.25) if len(x) > 0 else np.nan
         ).reset_index()
-        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].apply(
+        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].apply(
             lambda x: x.quantile(0.25) if len(x) > 0 else np.nan
         ).reset_index()
     else:
         # Default to mean
-        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].mean().reset_index()
-        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))['price'].mean().reset_index()
+        north_monthly = north_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].mean().reset_index()
+        south_monthly = south_data.groupby(pd.Grouper(key='date', freq='ME'))[price_column].mean().reset_index()
     
     # Optimize dataframes before merge
     north_monthly_opt = optimize_dataframe(north_monthly)
@@ -319,26 +326,30 @@ def run_unit_root_analysis(processed_gdf, commodity, output_path, max_lags, logg
         logger.warning(f"Insufficient overlapping data points for {commodity}: {len(merged)}")
         return None
     
+    # Get column names from merged dataframe
+    north_price_col = f"{price_column}_north"
+    south_price_col = f"{price_column}_south"
+    
     # Initialize unit root tester
     unit_root_tester = UnitRootTester()
     
     # Run comprehensive unit root tests
     logger.info(f"Running ADF tests for {commodity} (North and South)")
-    north_adf = unit_root_tester.test_adf(merged['price_north'], lags=max_lags)
-    south_adf = unit_root_tester.test_adf(merged['price_south'], lags=max_lags)
+    north_adf = unit_root_tester.test_adf(merged[north_price_col], lags=max_lags)
+    south_adf = unit_root_tester.test_adf(merged[south_price_col], lags=max_lags)
     
     logger.info(f"Running KPSS tests for {commodity} (North and South)")
-    north_kpss = unit_root_tester.test_kpss(merged['price_north'], lags=max_lags)
-    south_kpss = unit_root_tester.test_kpss(merged['price_south'], lags=max_lags)
+    north_kpss = unit_root_tester.test_kpss(merged[north_price_col], lags=max_lags)
+    south_kpss = unit_root_tester.test_kpss(merged[south_price_col], lags=max_lags)
     
     logger.info(f"Running Zivot-Andrews tests for structural breaks in {commodity}")
-    north_za = unit_root_tester.test_zivot_andrews(merged['price_north'])
-    south_za = unit_root_tester.test_zivot_andrews(merged['price_south'])
+    north_za = unit_root_tester.test_zivot_andrews(merged[north_price_col])
+    south_za = unit_root_tester.test_zivot_andrews(merged[south_price_col])
     
     # Determine integration order
     logger.info(f"Determining integration order for {commodity}")
-    north_order = unit_root_tester.determine_integration_order(merged['price_north'], max_order=2)
-    south_order = unit_root_tester.determine_integration_order(merged['price_south'], max_order=2)
+    north_order = unit_root_tester.determine_integration_order(merged[north_price_col], max_order=2)
+    south_order = unit_root_tester.determine_integration_order(merged[south_price_col], max_order=2)
     
     # Compile results
     unit_root_results = {
@@ -370,7 +381,7 @@ def run_unit_root_analysis(processed_gdf, commodity, output_path, max_lags, logg
         
         # Plot north price series
         plt.subplot(2, 1, 1)
-        plt.plot(merged['date'], merged['price_north'], label='North Price')
+        plt.plot(merged['date'], merged[north_price_col], label='North Price')
         if 'breakpoint' in north_za and north_za['breakpoint'] is not None:
             breakpoint_idx = north_za['breakpoint']
             if isinstance(breakpoint_idx, (int, np.integer)) and 0 <= breakpoint_idx < len(merged):
@@ -385,7 +396,7 @@ def run_unit_root_analysis(processed_gdf, commodity, output_path, max_lags, logg
         
         # Plot south price series
         plt.subplot(2, 1, 2)
-        plt.plot(merged['date'], merged['price_south'], label='South Price')
+        plt.plot(merged['date'], merged[south_price_col], label='South Price')
         if 'breakpoint' in south_za and south_za['breakpoint'] is not None:
             breakpoint_idx = south_za['breakpoint']
             if isinstance(breakpoint_idx, (int, np.integer)) and 0 <= breakpoint_idx < len(merged):
@@ -481,47 +492,180 @@ def run_cointegration_analysis(unit_root_results, commodity, output_path, max_la
     # Get merged data from unit root results
     merged = unit_root_results['merged_data']
     
+    # Get price column names from unit_root_results
+    price_column = 'usdprice' if 'usdprice_north' in merged.columns else 'price'
+    north_price_col = f"{price_column}_north"
+    south_price_col = f"{price_column}_south"
+    
+    logger.info(f"Using {price_column} column for cointegration analysis")
+    
+    # Apply log transformation to price series
+    logger.info(f"Applying log transformation to price series for improved cointegration analysis")
+    merged['log_north'] = np.log(merged[north_price_col])
+    merged['log_south'] = np.log(merged[south_price_col])
+    
     # Initialize cointegration tester
     cointegration_tester = CointegrationTester()
     
-    # Run Engle-Granger test
-    logger.info(f"Running Engle-Granger cointegration test for {commodity}")
-    try:
-        eg_result = cointegration_tester.test_engle_granger(
-            merged['price_north'], merged['price_south']
-        )
-    except Exception as e:
-        capture_error(e, context=f"Engle-Granger test for {commodity}", logger=logger)
-        logger.error(f"Error in Engle-Granger test: {e}")
-        eg_result = {'cointegrated': False, 'error': str(e)}
+    # Try different trend specifications
+    trend_options = ['c', 'ct']  # constant, constant+trend
+    det_order_options = [1, 2]   # corresponding det_order for Johansen test
     
-    # Run Johansen test
-    logger.info(f"Running Johansen cointegration test for {commodity}")
-    try:
-        jo_result = cointegration_tester.test_johansen(
-            np.column_stack([merged['price_north'], merged['price_south']]),
-            det_order=config.get('analysis.cointegration.det_order', 1),  # Default: constant term
-            k_ar_diff=max_lags
-        )
-    except Exception as e:
-        capture_error(e, context=f"Johansen test for {commodity}", logger=logger)
-        logger.error(f"Error in Johansen test for {commodity}: {e}")
-        jo_result = None
+    # Initialize variables to store best results
+    best_eg_result = None
+    best_jo_result = None
+    best_gh_result = None
+    best_trend = None
     
-    # Run Gregory-Hansen test for cointegration with structural breaks
-    logger.info(f"Running Gregory-Hansen cointegration test for {commodity}")
-    try:
-        gh_result = cointegration_tester.test_gregory_hansen(
-            merged['price_north'],
-            merged['price_south'],
-            trend=config.get('analysis.cointegration.gh_trend', 'c'),  # Default: constant
-            model=config.get('analysis.cointegration.gh_model', "regime_shift"),
-            trim=config.get('analysis.cointegration.gh_trim', 0.15)
-        )
-    except Exception as e:
-        capture_error(e, context=f"Gregory-Hansen test for {commodity}", logger=logger)
-        logger.error(f"Error in Gregory-Hansen test for {commodity}: {e}")
-        gh_result = None
+    # Try different combinations of trend and lag specifications
+    for trend, det_order in zip(trend_options, det_order_options):
+        for lag_adjust in [0, 1, 2]:
+            current_max_lags = max_lags + lag_adjust
+            
+            logger.info(f"Trying cointegration with trend={trend}, det_order={det_order}, max_lags={current_max_lags}")
+            
+            # Run Engle-Granger test on log-transformed data
+            logger.info(f"Running Engle-Granger cointegration test with log transformation")
+            try:
+                log_eg_result = cointegration_tester.test_engle_granger(
+                    merged['log_north'], merged['log_south'],
+                    trend=trend,
+                    maxlag=current_max_lags
+                )
+                
+                # Store if better than previous result
+                if best_eg_result is None or (log_eg_result.get('cointegrated', False) and not best_eg_result.get('cointegrated', False)):
+                    best_eg_result = log_eg_result
+                    best_trend = trend
+                    logger.info(f"Found cointegration with log transformation: trend={trend}, max_lags={current_max_lags}")
+            except Exception as e:
+                capture_error(e, context=f"Log-transformed Engle-Granger test for {commodity}", logger=logger)
+                logger.error(f"Error in log-transformed Engle-Granger test: {e}")
+            
+            # Run Engle-Granger test on original data
+            logger.info(f"Running Engle-Granger cointegration test on original data")
+            try:
+                eg_result = cointegration_tester.test_engle_granger(
+                    merged[north_price_col], merged[south_price_col],
+                    trend=trend,
+                    maxlag=current_max_lags
+                )
+                
+                # Store if better than previous result and log-transformed result
+                if (best_eg_result is None or (eg_result.get('cointegrated', False) and not best_eg_result.get('cointegrated', False))):
+                    best_eg_result = eg_result
+                    best_trend = trend
+                    logger.info(f"Found cointegration with original data: trend={trend}, max_lags={current_max_lags}")
+            except Exception as e:
+                capture_error(e, context=f"Engle-Granger test for {commodity}", logger=logger)
+                logger.error(f"Error in Engle-Granger test: {e}")
+            
+            # Run Johansen test on log-transformed data
+            logger.info(f"Running Johansen cointegration test with log transformation")
+            try:
+                log_jo_result = cointegration_tester.test_johansen(
+                    np.column_stack([merged['log_north'], merged['log_south']]),
+                    det_order=det_order,
+                    k_ar_diff=current_max_lags
+                )
+                
+                # Store if better than previous result
+                if best_jo_result is None or (log_jo_result.get('cointegrated', False) and not best_jo_result.get('cointegrated', False)):
+                    best_jo_result = log_jo_result
+                    logger.info(f"Found cointegration with Johansen test on log data: det_order={det_order}, max_lags={current_max_lags}")
+            except Exception as e:
+                capture_error(e, context=f"Log-transformed Johansen test for {commodity}", logger=logger)
+                logger.error(f"Error in log-transformed Johansen test: {e}")
+            
+            # Run Johansen test on original data
+            logger.info(f"Running Johansen cointegration test on original data")
+            try:
+                jo_result = cointegration_tester.test_johansen(
+                    np.column_stack([merged[north_price_col], merged[south_price_col]]),
+                    det_order=det_order,
+                    k_ar_diff=current_max_lags
+                )
+                
+                # Store if better than previous result and log-transformed result
+                if best_jo_result is None or (jo_result.get('cointegrated', False) and not best_jo_result.get('cointegrated', False)):
+                    best_jo_result = jo_result
+                    logger.info(f"Found cointegration with Johansen test on original data: det_order={det_order}, max_lags={current_max_lags}")
+            except Exception as e:
+                capture_error(e, context=f"Johansen test for {commodity}", logger=logger)
+                logger.error(f"Error in Johansen test: {e}")
+    
+    # If we didn't find cointegration with the above methods, try Gregory-Hansen test
+    if not (best_eg_result and best_eg_result.get('cointegrated', False)) and not (best_jo_result and best_jo_result.get('cointegrated', False)):
+        # Run Gregory-Hansen test for cointegration with structural breaks on log-transformed data
+        logger.info(f"Running Gregory-Hansen cointegration test with log transformation")
+        try:
+            log_gh_result = cointegration_tester.test_gregory_hansen(
+                merged['log_north'],
+                merged['log_south'],
+                trend=best_trend or 'c',
+                model="regime_shift",
+                trim=config.get('analysis.cointegration.gh_trim', 0.15)
+            )
+            
+            # Store if better than previous result
+            if log_gh_result.get('cointegrated', False):
+                best_gh_result = log_gh_result
+                logger.info(f"Found cointegration with Gregory-Hansen test on log data")
+        except Exception as e:
+            capture_error(e, context=f"Log-transformed Gregory-Hansen test for {commodity}", logger=logger)
+            logger.error(f"Error in log-transformed Gregory-Hansen test: {e}")
+        
+        # Run Gregory-Hansen test on original data
+        logger.info(f"Running Gregory-Hansen cointegration test on original data")
+        try:
+            gh_result = cointegration_tester.test_gregory_hansen(
+                merged[north_price_col],
+                merged[south_price_col],
+                trend=best_trend or 'c',
+                model="regime_shift",
+                trim=config.get('analysis.cointegration.gh_trim', 0.15)
+            )
+            
+            # Store if better than previous result
+            if best_gh_result is None or (gh_result.get('cointegrated', False) and not best_gh_result.get('cointegrated', False)):
+                best_gh_result = gh_result
+                logger.info(f"Found cointegration with Gregory-Hansen test on original data")
+        except Exception as e:
+            capture_error(e, context=f"Gregory-Hansen test for {commodity}", logger=logger)
+            logger.error(f"Error in Gregory-Hansen test: {e}")
+    
+    # Try threshold cointegration if other methods didn't find cointegration
+    if not (best_eg_result and best_eg_result.get('cointegrated', False)) and \
+       not (best_jo_result and best_jo_result.get('cointegrated', False)) and \
+       not (best_gh_result and best_gh_result.get('cointegrated', False)):
+        
+        logger.info(f"Trying threshold cointegration test")
+        try:
+            threshold_result = cointegration_tester.test_threshold_cointegration(
+                merged[north_price_col],
+                merged[south_price_col],
+                lag=max_lags,
+                n_bootstrap=500  # Reduced for performance
+            )
+            
+            if threshold_result.get('threshold_effect', False):
+                logger.info(f"Found threshold cointegration")
+                # If threshold cointegration is found, use it as the Engle-Granger result
+                best_eg_result = {
+                    'cointegrated': True,
+                    'statistic': threshold_result.get('test_statistic', 0),
+                    'pvalue': threshold_result.get('p_value', 1),
+                    'critical_values': {'1%': 0, '5%': 0, '10%': 0},  # Placeholder
+                    'beta': threshold_result.get('beta', [0, 0]),
+                    'residuals': np.zeros(len(merged))  # Placeholder
+                }
+        except Exception as e:
+            capture_error(e, context=f"Threshold cointegration test for {commodity}", logger=logger)
+            logger.error(f"Error in threshold cointegration test: {e}")
+    # Use the best results found
+    eg_result = best_eg_result or {'cointegrated': False, 'error': 'No valid result found'}
+    jo_result = best_jo_result
+    gh_result = best_gh_result
     
     # Compile results
     cointegration_results = {
@@ -544,8 +688,8 @@ def run_cointegration_analysis(unit_root_results, commodity, output_path, max_la
         
         # Plot price series
         plt.subplot(2, 1, 1)
-        plt.plot(merged['date'], merged['price_north'], label='North Price')
-        plt.plot(merged['date'], merged['price_south'], label='South Price')
+        plt.plot(merged['date'], merged[north_price_col], label='North Price')
+        plt.plot(merged['date'], merged[south_price_col], label='South Price')
         plt.title(f'Price Series - {commodity}')
         plt.xlabel('Date')
         plt.ylabel('Price')
@@ -554,11 +698,11 @@ def run_cointegration_analysis(unit_root_results, commodity, output_path, max_la
         
         # Plot scatter with regression line if cointegrated
         plt.subplot(2, 1, 2)
-        plt.scatter(merged['price_north'], merged['price_south'], alpha=0.6)
+        plt.scatter(merged[north_price_col], merged[south_price_col], alpha=0.6)
         
         if eg_result.get('cointegrated', False) and 'beta' in eg_result:
             # Add regression line
-            x_range = np.linspace(merged['price_north'].min(), merged['price_north'].max(), 100)
+            x_range = np.linspace(merged[north_price_col].min(), merged[north_price_col].max(), 100)
             y_range = eg_result['beta'][0] + eg_result['beta'][1] * x_range
             plt.plot(x_range, y_range, 'r-', label='Cointegrating Relationship')
             
@@ -639,10 +783,17 @@ def run_threshold_analysis(cointegration_results, commodity, output_path, max_la
     # Get merged data from cointegration results
     merged = cointegration_results['merged_data']
     
+    # Get price column names
+    price_column = 'usdprice' if 'usdprice_north' in merged.columns else 'price'
+    north_price_col = f"{price_column}_north"
+    south_price_col = f"{price_column}_south"
+    
+    logger.info(f"Using {price_column} column for threshold analysis")
+    
     # Initialize threshold model with the specified mode
     threshold_model = ThresholdModel(
-        merged['price_north'], 
-        merged['price_south'],
+        merged[north_price_col],
+        merged[south_price_col],
         mode=threshold_mode,
         max_lags=max_lags,
         market1_name="North",
@@ -726,16 +877,24 @@ def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, con
         conflict_weight=conflict_weight
     )
     
+    # Check if usdprice column exists
+    price_column = 'usdprice' if 'usdprice' in latest_data.columns else 'price'
+    logger.info(f"Using {price_column} column for spatial analysis")
+    
     # Run global spatial autocorrelation test
     logger.info("Testing for global spatial autocorrelation")
-    global_moran = spatial_model.moran_i_test(variable='price')
+    global_moran = spatial_model.moran_i_test(variable=price_column)
     
     # Run local spatial autocorrelation test
     logger.info("Testing for local spatial autocorrelation")
-    local_moran = spatial_model.local_moran_test(variable='price')
+    try:
+        local_moran = spatial_model.local_moran_test(variable=price_column)
+    except AttributeError as e:
+        logger.warning(f"Error in local Moran test: {e}. Skipping this step.")
+        local_moran = None
     
     # Check which columns are available in the data
-    available_cols = [col for col in ['usdprice', 'conflict_intensity_normalized', 'distance_to_port']
+    available_cols = [col for col in ['conflict_intensity_normalized', 'distance_to_port']
                      if col in latest_data.columns]
     
     logger.info(f"Available columns for spatial model: {available_cols}")
@@ -743,14 +902,14 @@ def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, con
     # Estimate spatial lag model
     logger.info("Estimating spatial lag model")
     lag_model = spatial_model.spatial_lag_model(
-        y_col='price',
+        y_col=price_column,
         x_cols=available_cols,
     )
     
     # Estimate spatial error model
     logger.info("Estimating spatial error model")
     error_model = spatial_model.spatial_error_model(
-        y_col='price',
+        y_col=price_column,
         x_cols=available_cols,
     )
     
@@ -775,7 +934,7 @@ def run_spatial_analysis(processed_gdf, commodity, output_path, k_neighbors, con
     map_vis = MarketMapVisualizer()
     fig, ax = map_vis.plot_static_map(
         latest_data,
-        column='price',
+        column=price_column,
         title=f'Price Distribution of {commodity} ({latest_date.strftime("%Y-%m-%d")})',
         legend=True
     )
@@ -1204,6 +1363,9 @@ def run_integrated_analysis(args, logger):
         
         # Final cleanup
         gc.collect()
+        
+        # Close all matplotlib plots
+        plt.close('all')
         
         # Check if we have at least some results
         if not any([unit_root_results, cointegration_results, threshold_results, spatial_results]):

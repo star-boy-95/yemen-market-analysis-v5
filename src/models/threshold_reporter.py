@@ -95,6 +95,9 @@ class ThresholdReporter:
         if self.output_path:
             self.export_report(report)
         
+        import matplotlib.pyplot as plt
+        plt.close('all')
+        
         return report
     
     @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
@@ -130,7 +133,7 @@ class ThresholdReporter:
                 'title': 'Threshold Estimation',
                 'headers': ['Parameter', 'Value', 'Description'],
                 'rows': [
-                    ['Threshold', f"{self.model.threshold:.4f}", "Estimated transaction cost threshold"],
+                    ['Threshold', f"{self.model.threshold:.4f}" if self.model.threshold is not None else "N/A", "Estimated transaction cost threshold"],
                     ['Below Threshold', f"{below_prop:.1%}", "Proportion of observations below threshold"],
                     ['Above Threshold', f"{above_prop:.1%}", "Proportion of observations above threshold"]
                 ]
@@ -666,6 +669,13 @@ class ThresholdReporter:
     
     def _interpret_threshold(self) -> str:
         """Generate interpretation of threshold results."""
+        if self.model.threshold is None:
+            return (
+                f"No valid threshold could be estimated between {self.model.market1_name} and {self.model.market2_name}. "
+                f"This may be due to insufficient data, lack of cointegration, or complex market dynamics "
+                f"that cannot be captured by the current threshold model specification."
+            )
+            
         below_prop = np.mean(self.model.eq_errors <= self.model.threshold)
         above_prop = 1 - below_prop
         

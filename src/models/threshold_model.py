@@ -320,6 +320,305 @@ class ThresholdModel:
         elif self.mode == "mtar":
             return self._estimate_mtar_threshold(n_grid, trim)
     
+    def _estimate_vecm_threshold(self, n_grid, trim):
+        """
+        VECM threshold estimation based on Hansen & Seo (2002).
+        
+        Parameters
+        ----------
+        n_grid : int
+            Number of grid points to evaluate
+        trim : float
+            Trimming percentage for excluding extreme values
+            
+        Returns
+        -------
+        dict
+            Threshold estimation results
+        """
+        # Validate parameters
+        valid, errors = validate_model_inputs(
+            model_name="threshold_vecm",
+            params={"n_grid": n_grid, "trim": trim},
+            required_params={"n_grid", "trim"},
+            param_validators={
+                "n_grid": lambda x: isinstance(x, int) and x > 0,
+                "trim": lambda x: 0.0 < x < 0.5
+            }
+        )
+        raise_if_invalid(valid, errors, "Invalid VECM threshold estimation parameters")
+        
+        # Make sure we have cointegration results
+        if self.eq_errors is None:
+            logger.info("Running cointegration estimation first")
+            self.estimate_cointegration()
+        
+        # Get VECM-specific parameters
+        k_ar_diff = self.params.get('k_ar_diff', DEFAULT_VECM_K_AR_DIFF)
+        deterministic = self.params.get('deterministic', "ci")
+        coint_rank = self.params.get('coint_rank', 1)
+        
+        # Prepare data for VECM
+        data = np.column_stack([self.data1, self.data2])
+        
+        # Estimate linear VECM first (if not already done)
+        if not hasattr(self, 'linear_model'):
+            from statsmodels.tsa.vector_ar.vecm import VECM
+            try:
+                self.linear_model = VECM(
+                    data,
+                    k_ar_diff=k_ar_diff,
+                    deterministic=deterministic,
+                    coint_rank=coint_rank
+                ).fit()
+                logger.info(f"Estimated linear VECM with k_ar_diff={k_ar_diff}, deterministic='{deterministic}'")
+            except Exception as e:
+                logger.error(f"Failed to estimate linear VECM: {e}")
+                return {
+                    'success': False,
+                    'error': str(e)
+                }
+        
+        # Get residuals from linear model
+        if hasattr(self.linear_model, 'resid'):
+            residuals = self.linear_model.resid
+        else:
+            logger.warning("Linear model does not have residuals, using equilibrium errors")
+            residuals = self.eq_errors
+        
+        # Get threshold candidates
+        candidates = self._get_threshold_candidates(trim, n_grid, values=residuals)
+        
+        # Grid search for optimal threshold
+        logger.info(f"Starting grid search with {len(candidates)} threshold candidates")
+        
+        # Initialize results
+        best_likelihood = -np.inf
+        best_threshold = None
+        all_thresholds = []
+        all_likelihoods = []
+        
+        # Sequential processing for VECM (more stable)
+        for threshold in candidates:
+            try:
+                # Split data into regimes
+                below = residuals <= threshold
+                above = ~below
+                
+                # Check if enough observations in each regime
+                min_obs = max(5, int(len(residuals) * 0.1))
+                if np.sum(below) < min_obs or np.sum(above) < min_obs:
+                    continue
+                
+                # Estimate separate VECMs for each regime
+                from statsmodels.tsa.vector_ar.vecm import VECM
+                
+                # Below threshold regime
+                below_model = VECM(
+                    data[below],
+                    k_ar_diff=k_ar_diff,
+                    deterministic=deterministic,
+                    coint_rank=coint_rank
+                ).fit()
+                
+                # Above threshold regime
+                above_model = VECM(
+                    data[above],
+                    k_ar_diff=k_ar_diff,
+                    deterministic=deterministic,
+                    coint_rank=coint_rank
+                ).fit()
+                
+                # Calculate combined log-likelihood
+                combined_likelihood = below_model.llf + above_model.llf
+                
+                # Store results
+                all_thresholds.append(threshold)
+                all_likelihoods.append(combined_likelihood)
+                
+                # Update best threshold
+                if combined_likelihood > best_likelihood:
+                    best_likelihood = combined_likelihood
+                    best_threshold = threshold
+                    self.below_model = below_model
+                    self.above_model = above_model
+                
+            except Exception as e:
+                logger.warning(f"Error estimating VECM for threshold {threshold}: {e}")
+                continue
+        
+        # Check if we found a valid threshold
+        if best_threshold is None:
+            logger.warning("Could not find a valid threshold for VECM")
+            return {
+                'success': False,
+                'error': "No valid threshold found"
+            }
+        
+        # Store results
+        self.threshold = best_threshold
+        self.likelihood = best_likelihood
+        
+        logger.info(f"VECM threshold estimation complete: threshold={best_threshold:.4f}, likelihood={best_likelihood:.4f}")
+        
+        return {
+            'threshold': best_threshold,
+            'likelihood': best_likelihood,
+            'all_thresholds': all_thresholds,
+            'all_likelihoods': all_likelihoods,
+            'proportion_below': np.mean(residuals <= best_threshold),
+            'proportion_above': np.mean(residuals > best_threshold)
+        }
+        
+    def _estimate_mtar_threshold(self, n_grid, trim):
+        """
+        Momentum-Threshold Autoregressive (M-TAR) model threshold estimation.
+        
+        The M-TAR model extends the TAR model by allowing the threshold to depend
+        on the rate of change (momentum) of the series, capturing directional asymmetry.
+        
+        Parameters
+        ----------
+        n_grid : int
+            Number of grid points to evaluate
+        trim : float
+            Trimming percentage for excluding extreme values
+            
+        Returns
+        -------
+        dict
+            Threshold estimation results
+        """
+        # Validate parameters
+        valid, errors = validate_model_inputs(
+            model_name="threshold_mtar",
+            params={"n_grid": n_grid, "trim": trim},
+            required_params={"n_grid", "trim"},
+            param_validators={
+                "n_grid": lambda x: isinstance(x, int) and x > 0,
+                "trim": lambda x: 0.0 < x < 0.5
+            }
+        )
+        raise_if_invalid(valid, errors, "Invalid MTAR threshold estimation parameters")
+        
+        # Make sure we have cointegration results
+        if self.eq_errors is None:
+            logger.info("Running cointegration estimation first")
+            self.estimate_cointegration()
+        
+        # Calculate momentum (changes in residuals)
+        momentum = np.diff(self.eq_errors)
+        
+        # Get threshold candidates from momentum values
+        candidates = self._get_threshold_candidates(trim, n_grid, values=momentum)
+        
+        # Grid search for optimal threshold
+        logger.info(f"Starting grid search with {len(candidates)} threshold candidates")
+        
+        # Initialize results
+        best_ssr = np.inf
+        best_threshold = None
+        all_thresholds = []
+        all_ssrs = []
+        
+        # Sequential processing for MTAR (more stable)
+        for threshold in candidates:
+            try:
+                # Create indicator variables based on momentum
+                positive = momentum > threshold
+                negative = ~positive
+                
+                # Count observations in each regime
+                n_positive = np.sum(positive)
+                n_negative = np.sum(negative)
+                
+                # Check if enough observations in each regime
+                min_obs = max(5, int(len(momentum) * 0.1))
+                if n_positive < min_obs or n_negative < min_obs:
+                    continue
+                
+                # Prepare data for regression
+                y = np.diff(momentum)  # Second difference
+                X = np.column_stack([
+                    self.eq_errors[1:-1][positive[:-1]],
+                    self.eq_errors[1:-1][negative[:-1]]
+                ])
+                
+                # Add constant
+                X = np.column_stack([np.ones(len(X)), X])
+                
+                # Fit the model
+                beta = np.linalg.lstsq(X, y, rcond=None)[0]
+                
+                # Calculate residuals and SSR
+                residuals = y - X @ beta
+                ssr = np.sum(residuals**2)
+                
+                # Store results
+                all_thresholds.append(threshold)
+                all_ssrs.append(ssr)
+                
+                # Update best threshold
+                if ssr < best_ssr:
+                    best_ssr = ssr
+                    best_threshold = threshold
+                
+            except Exception as e:
+                logger.warning(f"Error estimating MTAR for threshold {threshold}: {e}")
+                continue
+        
+        # Check if we found a valid threshold
+        if best_threshold is None:
+            logger.warning("Could not find a valid threshold for MTAR")
+            return {
+                'success': False,
+                'error': "No valid threshold found"
+            }
+        
+        # Store results
+        self.threshold = best_threshold
+        self.ssr = best_ssr
+        
+        # Estimate regime models with the best threshold
+        positive = momentum > best_threshold
+        negative = ~positive
+        
+        # Prepare data for regression
+        y_pos = np.diff(momentum)[positive[:-1]]
+        X_pos = np.column_stack([np.ones(len(y_pos)), self.eq_errors[1:-1][positive[:-1]]])
+        
+        y_neg = np.diff(momentum)[negative[:-1]]
+        X_neg = np.column_stack([np.ones(len(y_neg)), self.eq_errors[1:-1][negative[:-1]]])
+        
+        # Fit models for each regime
+        try:
+            import statsmodels.api as sm
+            self.positive_model = sm.OLS(y_pos, X_pos).fit()
+            self.negative_model = sm.OLS(y_neg, X_neg).fit()
+            
+            # Extract adjustment speeds safely
+            adjustment_positive = self.positive_model.params.iloc[1] if len(self.positive_model.params) > 1 else self.positive_model.params.iloc[0]
+            adjustment_negative = self.negative_model.params.iloc[1] if len(self.negative_model.params) > 1 else self.negative_model.params.iloc[0]
+            
+            logger.info(f"MTAR adjustment speeds: positive={adjustment_positive:.4f}, negative={adjustment_negative:.4f}")
+        except Exception as e:
+            logger.warning(f"Error estimating regime models: {e}")
+            adjustment_positive = None
+            adjustment_negative = None
+        
+        logger.info(f"MTAR threshold estimation complete: threshold={best_threshold:.4f}, ssr={best_ssr:.4f}")
+        
+        return {
+            'threshold': best_threshold,
+            'ssr': best_ssr,
+            'all_thresholds': all_thresholds,
+            'all_ssrs': all_ssrs,
+            'proportion_positive': np.mean(momentum > best_threshold),
+            'proportion_negative': np.mean(momentum <= best_threshold),
+            'adjustment_positive': adjustment_positive,
+            'adjustment_negative': adjustment_negative
+        }
+        
     def _estimate_standard_threshold(self, n_grid, trim):
         """
         Standard threshold estimation with robust multiprocessing.
@@ -361,13 +660,15 @@ class ThresholdModel:
         
         # Grid search with parallelization for better performance
         logger.info(f"Starting grid search with {len(candidates)} threshold candidates")
+        def process_chunk_wrapper(chunk, model_instance):
+            return process_chunk(chunk, model_instance)
         
         try:
             # Try parallel processing with module-level functions
             df_candidates = pd.DataFrame({'threshold': candidates})
             results_df = parallelize_dataframe(
                 df_candidates,
-                lambda chunk: process_chunk(chunk, self)
+                lambda chunk: process_chunk_wrapper(chunk, self)
             )
         except Exception as e:
             logger.warning(f"Parallel processing failed: {e}. Falling back to sequential processing.")
@@ -880,9 +1181,9 @@ class ThresholdModel:
         model1 = sm.OLS(y1, X).fit()
         model2 = sm.OLS(y2, X).fit()
         
-        # Extract adjustment speeds
-        alpha1 = model1.params[1]
-        alpha2 = model2.params[1]
+        # Extract adjustment speeds safely
+        alpha1 = model1.params.iloc[1] if len(model1.params) > 1 else model1.params.iloc[0]
+        alpha2 = model2.params.iloc[1] if len(model2.params) > 1 else model2.params.iloc[0]
         
         logger.info(f"Linear VECM adjustment speeds: alpha1={alpha1:.4f}, alpha2={alpha2:.4f}")
         
@@ -953,7 +1254,9 @@ class ThresholdModel:
         if n_positive > 5:  # Minimum observations for regression
             X_positive = sm.add_constant(self.eq_errors[1:-1][positive[:-1]])
             positive_model = sm.OLS(y[positive[:-1]], X_positive).fit()
-            logger.info(f"Positive momentum model: adjustment={positive_model.params[1]:.4f}")
+            # Access the adjustment parameter safely (might be at index 1 or have a different name)
+            adjustment_positive = positive_model.params.iloc[1] if len(positive_model.params) > 1 else positive_model.params.iloc[0]
+            logger.info(f"Positive momentum model: adjustment={adjustment_positive:.4f}")
         else:
             logger.warning(f"Not enough observations with positive momentum ({n_positive})")
             positive_model = None
@@ -962,7 +1265,9 @@ class ThresholdModel:
         if n_negative > 5:  # Minimum observations for regression
             X_negative = sm.add_constant(self.eq_errors[1:-1][negative[:-1]])
             negative_model = sm.OLS(y[negative[:-1]], X_negative).fit()
-            logger.info(f"Negative momentum model: adjustment={negative_model.params[1]:.4f}")
+            # Access the adjustment parameter safely (might be at index 1 or have a different name)
+            adjustment_negative = negative_model.params.iloc[1] if len(negative_model.params) > 1 else negative_model.params.iloc[0]
+            logger.info(f"Negative momentum model: adjustment={adjustment_negative:.4f}")
         else:
             logger.warning(f"Not enough observations with negative momentum ({n_negative})")
             negative_model = None

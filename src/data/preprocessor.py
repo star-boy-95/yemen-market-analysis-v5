@@ -170,7 +170,7 @@ class DataPreprocessor:
         
         # Create rolling features for volatility with more lenient min_periods
         gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_return'].transform(
-            lambda x: x.rolling(window=3, min_periods=1).std()
+            lambda x: x.rolling(window=3, min_periods=1).std() if len(x) > 0 else np.nan
         )
         
         # Fill any remaining missing volatility values with the group median

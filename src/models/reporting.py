@@ -670,4 +670,7 @@ def export_results_for_publication(all_results, commodity, output_path, logger):
     
     logger.info(f"Publication-ready results exported to {publication_path}")
     
+    import matplotlib.pyplot as plt
+    plt.close('all')
+    
     return publication_path

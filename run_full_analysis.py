@@ -327,78 +327,107 @@ def main():
     logger = setup_logging(level=level)
     
     logger.info("Yemen Market Integration Threshold Analysis")
-    logger.info(f"Running analysis with {args.mode} mode")
     
-    # Load data
-    logger.info(f"Loading data from: {args.data}")
-    filename = os.path.basename(args.data)
-    data_dir = config.get('data.directory', './data')
-    loader = DataLoader(data_dir)
+    # Define threshold modes
+    threshold_modes = ['standard', 'fixed', 'vecm', 'mtar']
     
-    try:
-        gdf = loader.load_geojson(filename)
-    except Exception as e:
-        capture_error(e, context=f"Loading data from {args.data}", logger=logger)
-        logger.error(f"Failed to load data: {e}")
-        return 1
+    # Store results for each mode
+    all_mode_results = {}
     
-    # Validate data
-    logger.info("Validating input data")
-    if not validate_data(gdf, logger):
-        logger.error("Data validation failed, aborting analysis")
-        return 1
-    logger.info("Data validation completed")
-    
-    # Preprocess data
-    logger.info("Preprocessing data")
-    preprocessor = DataPreprocessor()
-    processed_gdf = preprocessor.preprocess_geojson(gdf)
-    
-    # Get available commodities
-    available_commodities = get_available_commodities(processed_gdf)
-    logger.info(f"Available commodities: {available_commodities}")
-    
-    # Determine which commodities to analyze
-    if args.commodities:
-        commodities = [c for c in args.commodities if c in available_commodities]
-        if not commodities:
-            logger.error(f"None of the specified commodities {args.commodities} are available in the dataset")
-            return 1
-    else:
-        commodities = available_commodities
-    
-    logger.info(f"Analyzing {len(commodities)} commodities: {commodities}")
-    
-    # Analyze each commodity
-    results = []
-    for commodity in commodities:
+    # Iterate through threshold modes
+    for mode in threshold_modes:
+        logger.info(f"Running analysis with {mode} mode")
+        
+        # Load data
+        logger.info(f"Loading data from: {args.data}")
+        filename = os.path.basename(args.data)
+        data_dir = config.get('data.directory', './data')
+        loader = DataLoader(data_dir)
+        
         try:
-            result = analyze_commodity(commodity, processed_gdf, args, logger)
-            # Ensure result is not None and has a success key
-            if result is None:
-                result = {
+            gdf = loader.load_geojson(filename)
+        except Exception as e:
+            capture_error(e, context=f"Loading data from {args.data}", logger=logger)
+            logger.error(f"Failed to load data: {e}")
+            return 1
+        
+        # Validate data
+        logger.info("Validating input data")
+        if not validate_data(gdf, logger):
+            logger.error("Data validation failed, aborting analysis")
+            return 1
+        logger.info("Data validation completed")
+        
+        # Preprocess data
+        logger.info("Preprocessing data")
+        preprocessor = DataPreprocessor()
+        processed_gdf = preprocessor.preprocess_geojson(gdf)
+        
+        # Get available commodities
+        available_commodities = get_available_commodities(processed_gdf)
+        logger.info(f"Available commodities: {available_commodities}")
+        
+        # Determine which commodities to analyze
+        if args.commodities:
+            commodities = [c for c in args.commodities if c in available_commodities]
+            if not commodities:
+                logger.error(f"None of the specified commodities {args.commodities} are available in the dataset")
+                return 1
+        else:
+            commodities = available_commodities
+        
+        logger.info(f"Analyzing {len(commodities)} commodities: {commodities}")
+        
+        # Analyze each commodity
+        results = []
+        for commodity in commodities:
+            try:
+                # Create a new set of args for each commodity
+                commodity_args = argparse.Namespace(**vars(args))
+                commodity_args.mode = mode  # Set the current mode
+        
+                result = analyze_commodity(commodity, processed_gdf, commodity_args, logger)
+                # Ensure result is not None and has a success key
+                if result is None:
+                    result = {
+                        'commodity': commodity,
+                        'success': False,
+                        'error': 'Unknown error - analyze_commodity returned None'
+                    }
+                elif 'success' not in result:
+                    result['success'] = False
+                    result['error'] = 'Result did not contain success status'
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Error analyzing {commodity}: {e}")
+                logger.exception("Detailed traceback:")
+                results.append({
                     'commodity': commodity,
                     'success': False,
-                    'error': 'Unknown error - analyze_commodity returned None'
-                }
-            elif 'success' not in result:
-                result['success'] = False
-                result['error'] = 'Result did not contain success status'
-            results.append(result)
-        except Exception as e:
-            logger.error(f"Error analyzing {commodity}: {e}")
-            logger.exception("Detailed traceback:")
-            results.append({
-                'commodity': commodity,
-                'success': False,
-                'error': str(e)
-            })
+                    'error': str(e)
+                })
+        
+        # Store results for the current mode
+        all_mode_results[mode] = results
+        
+        # Summarize results for the current mode
+        success_count = sum(1 for r in results if r['success'])
+        logger.info(f"Analysis completed for {success_count} out of {len(commodities)} commodities in {mode} mode")
     
-    # Summarize results
-    success_count = sum(1 for r in results if r['success'])
-    logger.info(f"Analysis completed for {success_count} out of {len(commodities)} commodities")
-    # Save summary report
-    summary_path = os.path.join(args.output, f"analysis_summary_{args.mode}.json")
+    # Compare results across modes
+    best_mode = None
+    best_success_count = -1
+    
+    for mode, results in all_mode_results.items():
+        success_count = sum(1 for r in results if r['success'])
+        if success_count > best_success_count:
+            best_success_count = success_count
+            best_mode = mode
+    
+    logger.info(f"Best mode: {best_mode} with {best_success_count} successful commodities")
+    
+    # Save summary report for the best mode
+    summary_path = os.path.join(args.output, f"analysis_summary_{best_mode}.json")
     
     # Create a custom JSON encoder to handle numpy types
     class NumpyEncoder(json.JSONEncoder):
@@ -424,7 +453,7 @@ def main():
     
     # Convert results to a basic Python list with serializable objects
     serializable_results = []
-    for result in results:
+    for result in all_mode_results[best_mode]:
         if result is None:
             serializable_results.append(None)
             continue
