@@ -287,13 +287,16 @@ class ThresholdCointegration:
         
         # Grid search with parallelization for better performance
         logger.info(f"Starting grid search with {len(candidates)} threshold candidates")
-        
         def process_threshold(threshold_candidate):
             return (threshold_candidate, self._compute_ssr_for_threshold(threshold_candidate))
         
+        # Define a function to apply to each dataframe chunk
+        def process_chunk(df_chunk):
+            return df_chunk.apply(
+                lambda row: process_threshold(row['threshold']), axis=1)
+        
         df_candidates = pd.DataFrame({'threshold': candidates})
-        results_df = parallelize_dataframe(df_candidates, lambda df: df.apply(
-            lambda row: process_threshold(row['threshold']), axis=1))
+        results_df = parallelize_dataframe(df_candidates, process_chunk)
         
         # Process results using helper function
         best_threshold, best_ssr, thresholds, ssrs = self._process_threshold_results(results_df)

@@ -42,10 +42,13 @@ def timer(func: Callable[..., T]) -> Callable[..., T]:
         
         return result
     return wrapper
-
 def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
     """
-    Decorator to optimize functions for M1 Mac
+    Decorator to optimize functions for M1 Mac with enhanced compatibility.
+    
+    This decorator attempts to use Numba JIT compilation for functions running on
+    Apple Silicon (M1/M2) hardware. It includes enhanced error handling and
+    compatibility checks to avoid common issues with Numba.
     
     Parameters
     ----------
@@ -58,6 +61,12 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
     -------
     callable
         Decorator function
+        
+    Notes
+    -----
+    - Not all Python constructs are compatible with Numba
+    - Complex operations involving pandas or other high-level libraries may not work
+    - If Numba compilation fails, the function will fall back to the original implementation
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         # Try to import numba if requested
@@ -67,13 +76,25 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
                 # Check if we're on Apple Silicon
                 is_m1 = 'arm' in os.uname().machine.lower()
                 
-                # Apply appropriate JIT decorator
                 if is_m1:
-                    if parallel:
-                        return numba.njit(parallel=True)(func)
-                    else:
-                        return numba.njit()(func)
-                
+                    # Create a wrapper function to handle Numba errors
+                    @functools.wraps(func)
+                    def numba_wrapper(*args, **kwargs):
+                        try:
+                            # Apply appropriate JIT decorator
+                            if parallel:
+                                jitted_func = numba.njit(parallel=True)(func)
+                            else:
+                                jitted_func = numba.njit()(func)
+                            
+                            # Try to run the jitted function
+                            return jitted_func(*args, **kwargs)
+                        except Exception as e:
+                            # If Numba fails, log the error and fall back to the original function
+                            logger.warning(f"Numba optimization failed for {func.__name__}: {str(e)}")
+                            return func(*args, **kwargs)
+                    
+                    return numba_wrapper
             except ImportError:
                 # If numba is not available, fall back to regular function
                 warnings.warn("Numba not available, M1 optimization not applied")
@@ -82,6 +103,7 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
         # If numba is not requested or not available, return the original function
         return func
     
+    return decorator
     return decorator
 
 def disk_cache(
