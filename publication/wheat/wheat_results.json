@@ -1,0 +1,2184 @@
+{
+  "commodity": "wheat",
+  "timestamp": "2025-03-22T14:46:31.549207",
+  "config": {
+    "threshold_modes": [
+      "standard"
+    ],
+    "spatial_analysis": false,
+    "policy_simulation": false,
+    "publication_quality": true,
+    "format": "markdown",
+    "style": "world_bank",
+    "confidence_level": 0.95
+  },
+  "data_summary": {
+    "n_observations": 47,
+    "start_date": "2020-07-01",
+    "end_date": "2024-05-01",
+    "markets": [
+      "abyan",
+      "aden",
+      "al bayda",
+      "al dhale'e",
+      "al hudaydah",
+      "al jawf",
+      "al maharah",
+      "al mahwit",
+      "amanat al asimah",
+      "amran",
+      "dhamar",
+      "hadramaut",
+      "hajjah",
+      "ibb",
+      "lahj",
+      "marib",
+      "raymah",
+      "sana'a",
+      "shabwah",
+      "socotra",
+      "taizz"
+    ]
+  },
+  "unit_root_results": {
+    "abyan_adf": {
+      "statistic": -0.92599279842609,
+      "pvalue": 0.7792921574856413,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 397.71222853167967,
+      "stationary": "False"
+    },
+    "abyan_stationary": "False",
+    "aden_adf": {
+      "statistic": -1.679996386459708,
+      "pvalue": 0.44144728821339096,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 430.3683934913929,
+      "stationary": "False"
+    },
+    "aden_stationary": "False",
+    "al bayda_adf": {
+      "statistic": -0.8966798975999842,
+      "pvalue": 0.7890638086149286,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 283.7880870876062,
+      "stationary": "False"
+    },
+    "al bayda_stationary": "False",
+    "al dhale'e_adf": {
+      "statistic": -1.630251716420587,
+      "pvalue": 0.4673589575379494,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 368.5401852145542,
+      "stationary": "False"
+    },
+    "al dhale'e_stationary": "False",
+    "al hudaydah_adf": {
+      "statistic": -1.0655568989210293,
+      "pvalue": 0.7286102171246813,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 316.28224765994156,
+      "stationary": "False"
+    },
+    "al hudaydah_stationary": "False",
+    "al jawf_adf": {
+      "statistic": -2.133614241155215,
+      "pvalue": 0.23121466373165328,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 284.19058408174965,
+      "stationary": "False"
+    },
+    "al jawf_stationary": "False",
+    "al maharah_adf": {
+      "statistic": -1.068920330508373,
+      "pvalue": 0.7273056850964982,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 404.82493587616153,
+      "stationary": "False"
+    },
+    "al maharah_stationary": "False",
+    "al mahwit_adf": {
+      "statistic": -1.6653562428687154,
+      "pvalue": 0.4490445189742252,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 281.65324459236444,
+      "stationary": "False"
+    },
+    "al mahwit_stationary": "False",
+    "amanat al asimah_adf": {
+      "statistic": -1.4862794423438153,
+      "pvalue": 0.5402874551406482,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 308.84484096985847,
+      "stationary": "False"
+    },
+    "amanat al asimah_stationary": "False",
+    "amran_adf": {
+      "statistic": -1.6410723002280017,
+      "pvalue": 0.4617005397726383,
+      "usedlag": 1,
+      "nobs": 45,
+      "critical_values": {
+        "1%": -3.584828853223594,
+        "5%": -2.9282991495198907,
+        "10%": -2.6023438271604937
+      },
+      "icbest": 316.6897501383741,
+      "stationary": "False"
+    },
+    "amran_stationary": "False",
+    "dhamar_adf": {
+      "statistic": -1.7374835563809734,
+      "pvalue": 0.41191058899330196,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 337.4078143226501,
+      "stationary": "False"
+    },
+    "dhamar_stationary": "False",
+    "hadramaut_adf": {
+      "statistic": -1.3335147352017274,
+      "pvalue": 0.6137032635240273,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 367.72633266098103,
+      "stationary": "False"
+    },
+    "hadramaut_stationary": "False",
+    "hajjah_adf": {
+      "statistic": -1.2199184746230132,
+      "pvalue": 0.6649691366965969,
+      "usedlag": 1,
+      "nobs": 45,
+      "critical_values": {
+        "1%": -3.584828853223594,
+        "5%": -2.9282991495198907,
+        "10%": -2.6023438271604937
+      },
+      "icbest": 316.64933004040836,
+      "stationary": "False"
+    },
+    "hajjah_stationary": "False",
+    "ibb_adf": {
+      "statistic": -3.684647357827051,
+      "pvalue": 0.004334359072951278,
+      "usedlag": 10,
+      "nobs": 36,
+      "critical_values": {
+        "1%": -3.626651907578875,
+        "5%": -2.9459512825788754,
+        "10%": -2.6116707716049383
+      },
+      "icbest": 304.5670890689676,
+      "stationary": "True"
+    },
+    "ibb_stationary": "True",
+    "lahj_adf": {
+      "statistic": -0.9313562865871836,
+      "pvalue": 0.7774710697049017,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 368.8239181939529,
+      "stationary": "False"
+    },
+    "lahj_stationary": "False",
+    "marib_adf": {
+      "statistic": -1.3171395228202096,
+      "pvalue": 0.6212949396917742,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 385.06925761835265,
+      "stationary": "False"
+    },
+    "marib_stationary": "False",
+    "raymah_adf": {
+      "statistic": -2.2187972387271504,
+      "pvalue": 0.19949401323682248,
+      "usedlag": 4,
+      "nobs": 42,
+      "critical_values": {
+        "1%": -3.596635636000432,
+        "5%": -2.933297331821618,
+        "10%": -2.6049909750566895
+      },
+      "icbest": 300.2788208531202,
+      "stationary": "False"
+    },
+    "raymah_stationary": "False",
+    "sana'a_adf": {
+      "statistic": -1.2605621019455755,
+      "pvalue": 0.6470166330627916,
+      "usedlag": 1,
+      "nobs": 45,
+      "critical_values": {
+        "1%": -3.584828853223594,
+        "5%": -2.9282991495198907,
+        "10%": -2.6023438271604937
+      },
+      "icbest": 303.0002876548021,
+      "stationary": "False"
+    },
+    "sana'a_stationary": "False",
+    "shabwah_adf": {
+      "statistic": -1.176588968887157,
+      "pvalue": 0.6835846127986125,
+      "usedlag": 0,
+      "nobs": 46,
+      "critical_values": {
+        "1%": -3.5812576580093696,
+        "5%": -2.9267849124681518,
+        "10%": -2.6015409829867675
+      },
+      "icbest": 375.8121610476384,
+      "stationary": "False"
+    },
+    "shabwah_stationary": "False",
+    "socotra_adf": {
+      "statistic": -1.6279252007082403,
+      "pvalue": 0.4685769316013981,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 377.48715225822787,
+      "stationary": "False"
+    },
+    "socotra_stationary": "False",
+    "taizz_adf": {
+      "statistic": -1.8749771844841054,
+      "pvalue": 0.34392262550464714,
+      "usedlag": 2,
+      "nobs": 44,
+      "critical_values": {
+        "1%": -3.5885733964124715,
+        "5%": -2.929885661157025,
+        "10%": -2.6031845661157025
+      },
+      "icbest": 401.05642150787884,
+      "stationary": "False"
+    },
+    "taizz_stationary": "False"
+  },
+  "cointegration_results": {
+    "cointegrated": true,
+    "method": "johansen",
+    "pairs_tested": [
+      {
+        "market1": "abyan",
+        "market2": "aden",
+        "cointegrated": "True",
+        "statistic": -3.579577762580556,
+        "pvalue": 0.025963346618762394,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al bayda",
+        "cointegrated": "False",
+        "statistic": -0.27479691944809764,
+        "pvalue": 0.9770085968557894,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al dhale'e",
+        "cointegrated": "False",
+        "statistic": -2.9618356653118183,
+        "pvalue": 0.1195581507157234,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al hudaydah",
+        "cointegrated": "False",
+        "statistic": -0.8470821269341754,
+        "pvalue": 0.9282291162043557,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al jawf",
+        "cointegrated": "False",
+        "statistic": -1.4288487896727433,
+        "pvalue": 0.787453724762049,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al maharah",
+        "cointegrated": "True",
+        "statistic": -3.5878844092398596,
+        "pvalue": 0.025359978298279615,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -0.5141284750844523,
+        "pvalue": 0.9633104089134384,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -1.7850180754274398,
+        "pvalue": 0.636970420415584,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -0.9851126294713707,
+        "pvalue": 0.9056345465757968,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -1.0814025313482245,
+        "pvalue": 0.8862891467693758,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "hadramaut",
+        "cointegrated": "True",
+        "statistic": -4.143468592185594,
+        "pvalue": 0.00443604332446846,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -0.9850417295407365,
+        "pvalue": 0.9056476487469189,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -0.08437661613934852,
+        "pvalue": 0.9837359169241687,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "lahj",
+        "cointegrated": "True",
+        "statistic": -3.7072058936652468,
+        "pvalue": 0.017938173575811376,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "marib",
+        "cointegrated": "True",
+        "statistic": -4.059551834075276,
+        "pvalue": 0.005895092351508811,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.0296239177235786,
+        "pvalue": 0.8970831861167743,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.32647295883681177,
+        "pvalue": 0.9746282352546177,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "shabwah",
+        "cointegrated": "True",
+        "statistic": -4.096003685740998,
+        "pvalue": 0.005214762043121328,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -5.127428857350012,
+        "pvalue": 9.534607568293968e-05,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "abyan",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -3.2295297140136525,
+        "pvalue": 0.06512672198463355,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al bayda",
+        "cointegrated": "False",
+        "statistic": -1.528894260967055,
+        "pvalue": 0.7499464065533646,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al dhale'e",
+        "cointegrated": "False",
+        "statistic": -3.170624758075348,
+        "pvalue": 0.07497922959536127,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al hudaydah",
+        "cointegrated": "False",
+        "statistic": -0.947038937673154,
+        "pvalue": 0.9124401755449663,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al jawf",
+        "cointegrated": "False",
+        "statistic": -1.748706335196325,
+        "pvalue": 0.6542860959641459,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al maharah",
+        "cointegrated": "False",
+        "statistic": -3.279465224555362,
+        "pvalue": 0.05761304645403905,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -1.1266125267424416,
+        "pvalue": 0.8760853943508011,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -2.0160093912492143,
+        "pvalue": 0.5202466784747876,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -1.0117771156394304,
+        "pvalue": 0.900590730672454,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -1.4225829259036604,
+        "pvalue": 0.7896676570323589,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -3.2209117965415732,
+        "pvalue": 0.06649972786949546,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -1.3262734492674175,
+        "pvalue": 0.8216669067738452,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -1.6850588395028572,
+        "pvalue": 0.6836938178189782,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "lahj",
+        "cointegrated": "True",
+        "statistic": -3.7988024580257487,
+        "pvalue": 0.01360575823602442,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "marib",
+        "cointegrated": "True",
+        "statistic": -3.4401266637365713,
+        "pvalue": 0.03808507277522929,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.7371425175515811,
+        "pvalue": 0.6597214681479163,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.8606681870906616,
+        "pvalue": 0.9262506951639735,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "shabwah",
+        "cointegrated": "True",
+        "statistic": -4.1018814150507055,
+        "pvalue": 0.005112004712555279,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -3.358562646585087,
+        "pvalue": 0.04716584981677283,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "aden",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.96790668775472,
+        "pvalue": 0.11803251856990299,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "al dhale'e",
+        "cointegrated": "False",
+        "statistic": -2.0672697041655086,
+        "pvalue": 0.49348185602758704,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "al hudaydah",
+        "cointegrated": "True",
+        "statistic": -3.9993900290729063,
+        "pvalue": 0.007195700593189957,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "al jawf",
+        "cointegrated": "True",
+        "statistic": -3.8575871637375156,
+        "pvalue": 0.011339287530038662,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "al maharah",
+        "cointegrated": "False",
+        "statistic": -0.6156344173305272,
+        "pvalue": 0.9550041032343495,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -1.1938408619485603,
+        "pvalue": 0.8595063477582396,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -0.8075685100067912,
+        "pvalue": 0.9337019178772816,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -1.8598918017084203,
+        "pvalue": 0.6002015466085947,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -2.3574604655696536,
+        "pvalue": 0.34525797257113505,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -0.3318570193271088,
+        "pvalue": 0.9743641301624275,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "hajjah",
+        "cointegrated": "True",
+        "statistic": -4.5427991368781475,
+        "pvalue": 0.0010406499583564168,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -1.7234686911742834,
+        "pvalue": 0.6660970328511672,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -0.6268562381761759,
+        "pvalue": 0.9539729625040253,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -1.108711910597663,
+        "pvalue": 0.8802144078257153,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -0.9044252585214234,
+        "pvalue": 0.9195270830517653,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -1.6920601326060591,
+        "pvalue": 0.6805216050480707,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.9580604795600702,
+        "pvalue": 0.550297911680983,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -0.9884668295649883,
+        "pvalue": 0.9050128391733288,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al bayda",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.4820687383271594,
+        "pvalue": 0.28703401026645037,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "al hudaydah",
+        "cointegrated": "False",
+        "statistic": -0.9570539926434083,
+        "pvalue": 0.9106942454776095,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "al jawf",
+        "cointegrated": "False",
+        "statistic": -1.6234252403565856,
+        "pvalue": 0.7109018188476175,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "al maharah",
+        "cointegrated": "False",
+        "statistic": -2.0340948999656994,
+        "pvalue": 0.5108156346944391,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -1.7441523001437251,
+        "pvalue": 0.6564313413710003,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -2.2164800254795543,
+        "pvalue": 0.41588208597906345,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -1.1581740762367614,
+        "pvalue": 0.8685154720371674,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -1.327412413815101,
+        "pvalue": 0.8213107453404794,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "hadramaut",
+        "cointegrated": "True",
+        "statistic": -5.66622552388131,
+        "pvalue": 8.220394075003743e-06,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -1.0817166830962375,
+        "pvalue": 0.8862207889540294,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -0.8728423401555707,
+        "pvalue": 0.9244345526416213,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -2.1803817880093317,
+        "pvalue": 0.43450207349876,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "marib",
+        "cointegrated": "True",
+        "statistic": -3.5855570698160695,
+        "pvalue": 0.025527799525658788,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.6040510731573467,
+        "pvalue": 0.7191770348598012,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.9998764533874027,
+        "pvalue": 0.9028706551558701,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -2.31163026935132,
+        "pvalue": 0.367763962124428,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -4.683140184746727,
+        "pvalue": 0.0006028419725510909,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al dhale'e",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.505948486605165,
+        "pvalue": 0.27645188062659753,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "al jawf",
+        "cointegrated": "True",
+        "statistic": -3.735698542787554,
+        "pvalue": 0.01647632117402067,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "al maharah",
+        "cointegrated": "False",
+        "statistic": -0.6492615812628412,
+        "pvalue": 0.9518414763663691,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -1.7178793162744788,
+        "pvalue": 0.6686866922644374,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -2.161451811482659,
+        "pvalue": 0.44432179106937825,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -2.4240167023454995,
+        "pvalue": 0.31356608814076636,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -2.923341442919188,
+        "pvalue": 0.12956991329445272,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -0.4388398542509275,
+        "pvalue": 0.9684115369695528,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "hajjah",
+        "cointegrated": "True",
+        "statistic": -3.7019283476599156,
+        "pvalue": 0.018221066356670146,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -2.381117934253567,
+        "pvalue": 0.3338493412861102,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.298911159418936,
+        "pvalue": 0.8300639498557298,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -0.56113021694021,
+        "pvalue": 0.9596838577376112,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.4805253728785948,
+        "pvalue": 0.7685837546143353,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.1791119295785855,
+        "pvalue": 0.43515974321125045,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -0.399983331259331,
+        "pvalue": 0.9707364957197614,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -1.255464349432064,
+        "pvalue": 0.8427727199690498,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al hudaydah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -0.9140626317379297,
+        "pvalue": 0.9179719363046184,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "al maharah",
+        "cointegrated": "False",
+        "statistic": -2.1593886756055536,
+        "pvalue": 0.44539391825757024,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "al mahwit",
+        "cointegrated": "True",
+        "statistic": -3.441682770965201,
+        "pvalue": 0.037927204421897696,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -2.9891385966824267,
+        "pvalue": 0.11280986515311586,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "amran",
+        "cointegrated": "True",
+        "statistic": -3.424193562563076,
+        "pvalue": 0.039733485601038405,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "dhamar",
+        "cointegrated": "True",
+        "statistic": -4.592678784770499,
+        "pvalue": 0.0008589063468714812,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -2.2210193926707933,
+        "pvalue": 0.4135521979216996,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "hajjah",
+        "cointegrated": "True",
+        "statistic": -4.828394406251549,
+        "pvalue": 0.00033618341657443444,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -3.1797942564392585,
+        "pvalue": 0.07337236944617587,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -2.174397872136059,
+        "pvalue": 0.4376025782027509,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -2.1924357046512055,
+        "pvalue": 0.42826762671174606,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -3.1378389192347083,
+        "pvalue": 0.08095282418127803,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.9572805988036683,
+        "pvalue": 0.12071231135068455,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -2.1623261138361336,
+        "pvalue": 0.44386755687758644,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -2.4580384120444356,
+        "pvalue": 0.297882103694038,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al jawf",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.3013587538077585,
+        "pvalue": 0.3728749735598255,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "al mahwit",
+        "cointegrated": "False",
+        "statistic": -0.3055479528252428,
+        "pvalue": 0.975625218087146,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "amanat al asimah",
+        "cointegrated": "False",
+        "statistic": -1.4750922244514622,
+        "pvalue": 0.7706187018481419,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -0.564733686185217,
+        "pvalue": 0.9593906698957486,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -0.46513903467402207,
+        "pvalue": 0.9667228311932278,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -2.5556395912051797,
+        "pvalue": 0.2550966130600263,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -0.6897758913524104,
+        "pvalue": 0.9477304919984785,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -0.718600877083895,
+        "pvalue": 0.9445937197592374,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "lahj",
+        "cointegrated": "True",
+        "statistic": -4.4996453191971515,
+        "pvalue": 0.0012263135399548722,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -3.126430050297925,
+        "pvalue": 0.08311674848141376,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -0.8438574268547442,
+        "pvalue": 0.928691311592113,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.5261435898745688,
+        "pvalue": 0.9624174574234696,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -2.490394500671891,
+        "pvalue": 0.2833217000139897,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -5.017072585821406,
+        "pvalue": 0.00015314362635199,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al maharah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.9573759058102236,
+        "pvalue": 0.12068807905082923,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "amanat al asimah",
+        "cointegrated": "True",
+        "statistic": -4.721373462220703,
+        "pvalue": 0.0005178985588118179,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -1.878928959375723,
+        "pvalue": 0.5906543721983011,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -2.3396689262406967,
+        "pvalue": 0.35393430919435676,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -1.5751946886487416,
+        "pvalue": 0.7312452655317556,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -1.4219742801271837,
+        "pvalue": 0.7898818536132386,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -2.0177251836868115,
+        "pvalue": 0.5193527383944128,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.4134512215389001,
+        "pvalue": 0.7928653490469799,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -0.770785572672143,
+        "pvalue": 0.9384361876120844,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -3.0994357706673394,
+        "pvalue": 0.08841618799033102,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.3413072581779097,
+        "pvalue": 0.3531320264195308,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.580106186624095,
+        "pvalue": 0.7292132434913301,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -2.5213438444123004,
+        "pvalue": 0.2697377548581003,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "al mahwit",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.7660516129912263,
+        "pvalue": 0.6460606399847033,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "amran",
+        "cointegrated": "False",
+        "statistic": -2.029150545304853,
+        "pvalue": 0.513395679173024,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -2.3009928533233017,
+        "pvalue": 0.37305746333469947,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -1.7952413485827017,
+        "pvalue": 0.632030680819225,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -1.6991146729864621,
+        "pvalue": 0.6773091140142539,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -2.1217673944365445,
+        "pvalue": 0.4649951294318928,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.6211170188325035,
+        "pvalue": 0.7118948760365216,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -1.512457725569869,
+        "pvalue": 0.7563841213476654,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "raymah",
+        "cointegrated": "True",
+        "statistic": -4.8621396494256,
+        "pvalue": 0.00029274278889769166,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.4613699197303167,
+        "pvalue": 0.2963665176525162,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.7957720172803644,
+        "pvalue": 0.6317735259784203,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -3.1844346068849454,
+        "pvalue": 0.07256965073993664,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amanat al asimah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.2125238822176074,
+        "pvalue": 0.4179149104992252,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "dhamar",
+        "cointegrated": "False",
+        "statistic": -2.574825633992744,
+        "pvalue": 0.24710151843227318,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -0.8809168838707748,
+        "pvalue": 0.9232070538183846,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -2.424293830910101,
+        "pvalue": 0.31343684905334324,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "ibb",
+        "cointegrated": "True",
+        "statistic": -3.6992386515387254,
+        "pvalue": 0.018366737455030528,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.3474275611703805,
+        "pvalue": 0.8149651067921906,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -0.9034175687416338,
+        "pvalue": 0.9196881126527108,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.938536268668404,
+        "pvalue": 0.5603420807134919,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.3181053656132473,
+        "pvalue": 0.36455401123884057,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -0.7498909927581637,
+        "pvalue": 0.9409780554312619,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -1.9329048277306122,
+        "pvalue": 0.5632297386165761,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "amran",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.024308613889424,
+        "pvalue": 0.5159210926274506,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "hadramaut",
+        "cointegrated": "False",
+        "statistic": -1.7921113354038596,
+        "pvalue": 0.6335459602800907,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -3.1532014727202395,
+        "pvalue": 0.07810893346974115,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -2.5688155013840617,
+        "pvalue": 0.2495906579760513,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.7586537687840118,
+        "pvalue": 0.6495793148131246,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -1.8835847872041056,
+        "pvalue": 0.5883087180682419,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.9478949080528194,
+        "pvalue": 0.5555336618783034,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.2965392891316987,
+        "pvalue": 0.3752809159267258,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.9753868121696792,
+        "pvalue": 0.5413462270516252,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -1.696806230282856,
+        "pvalue": 0.6783621033847128,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "dhamar",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.2535061571766692,
+        "pvalue": 0.8433276194596688,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "hajjah",
+        "cointegrated": "False",
+        "statistic": -1.0493882132232435,
+        "pvalue": 0.8930727775529517,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -0.5498565066359883,
+        "pvalue": 0.9605868753162266,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -2.544217229577729,
+        "pvalue": 0.2599237114248479,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "marib",
+        "cointegrated": "True",
+        "statistic": -5.76851508874129,
+        "pvalue": 5.039946700721839e-06,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.790181984426446,
+        "pvalue": 0.6344787141789442,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.23197421585694508,
+        "pvalue": 0.9787831372407936,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "shabwah",
+        "cointegrated": "True",
+        "statistic": -3.447485897585642,
+        "pvalue": 0.03734331306955453,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -2.8317533040943794,
+        "pvalue": 0.15579034535537345,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hadramaut",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.7957155260994766,
+        "pvalue": 0.631800904290803,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "ibb",
+        "cointegrated": "False",
+        "statistic": -1.7522279712059363,
+        "pvalue": 0.6526230373247832,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.1379162322303331,
+        "pvalue": 0.8734170760552691,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -0.8586802462671852,
+        "pvalue": 0.9265433465272914,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.1536790048797678,
+        "pvalue": 0.869616446099515,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.3186886274862766,
+        "pvalue": 0.3642653318702228,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.0678378497997547,
+        "pvalue": 0.8892073618800957,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -0.9928322129970977,
+        "pvalue": 0.90419824212593,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "hajjah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.1599557313885531,
+        "pvalue": 0.8680769756365725,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "lahj",
+        "cointegrated": "False",
+        "statistic": -1.0598440778094613,
+        "pvalue": 0.8908967284040523,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -0.6667190137368126,
+        "pvalue": 0.9501115289632851,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -2.2788657611887806,
+        "pvalue": 0.3841446301231939,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.269700726502715,
+        "pvalue": 0.3887652461456226,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -0.9948646051815088,
+        "pvalue": 0.9038168738004113,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -1.1745554618864087,
+        "pvalue": 0.8644382301135043,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "ibb",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.2977160076360144,
+        "pvalue": 0.3746930297245045,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "marib",
+        "cointegrated": "False",
+        "statistic": -3.14864820961293,
+        "pvalue": 0.07894352045391306,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -1.1165944702037223,
+        "pvalue": 0.8784106932236537,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.7594456239653431,
+        "pvalue": 0.9398286488057378,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -3.012468287482696,
+        "pvalue": 0.10727146284753375,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -5.167241448519319,
+        "pvalue": 8.016626338168059e-05,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "lahj",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.5324562769962038,
+        "pvalue": 0.748537234302158,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "marib",
+        "market2": "raymah",
+        "cointegrated": "False",
+        "statistic": -0.9902575991882118,
+        "pvalue": 0.904679423902812,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "marib",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -0.6096985707614793,
+        "pvalue": 0.9555399240920006,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "marib",
+        "market2": "shabwah",
+        "cointegrated": "True",
+        "statistic": -3.3751434616807807,
+        "pvalue": 0.045187250884786305,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "marib",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -4.4301799034874065,
+        "pvalue": 0.0015912877634244947,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "marib",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.1890903307803713,
+        "pvalue": 0.42999633280193794,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "raymah",
+        "market2": "sana'a",
+        "cointegrated": "False",
+        "statistic": -2.1138786319079825,
+        "pvalue": 0.46911470452605264,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "raymah",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.4321284999760175,
+        "pvalue": 0.7862884838886137,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "raymah",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -2.0295801443879853,
+        "pvalue": 0.5131715542153336,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "raymah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.7730214137885505,
+        "pvalue": 0.6427315779892355,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "sana'a",
+        "market2": "shabwah",
+        "cointegrated": "False",
+        "statistic": -1.119105182293784,
+        "pvalue": 0.8778314010630892,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "sana'a",
+        "market2": "socotra",
+        "cointegrated": "False",
+        "statistic": -1.0831980037591338,
+        "pvalue": 0.8858979872257999,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "sana'a",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.0931054432609413,
+        "pvalue": 0.8837188335246117,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "shabwah",
+        "market2": "socotra",
+        "cointegrated": "True",
+        "statistic": -6.321678797458053,
+        "pvalue": 3.18395020022235e-07,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "shabwah",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -2.6899595018803053,
+        "pvalue": 0.2032105853421129,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      },
+      {
+        "market1": "socotra",
+        "market2": "taizz",
+        "cointegrated": "False",
+        "statistic": -1.7446468963492126,
+        "pvalue": 0.656198648493505,
+        "critical_values": "[-4.150369 -3.472183 -3.137935]"
+      }
+    ]
+  },
+  "threshold_analysis": {
+    "models": {
+      "standard": {
+        "cointegration": {
+          "statistic": -3.579577762580556,
+          "pvalue": 0.025963346618762394,
+          "critical_values": "[-4.150369 -3.472183 -3.137935]",
+          "cointegrated": "True",
+          "beta0": 125.81444536473015,
+          "beta1": 0.6779807146186914,
+          "equilibrium_errors": "date\n2020-07-01    -21.158178\n2020-08-01     24.392305\n2020-09-01     24.392305\n2020-10-01    -13.107695\n2020-11-01    -16.497599\n2020-12-01    -52.091587\n2021-01-01    -29.421876\n2021-02-01    -80.905767\n2021-03-01    -30.905767\n2021-04-01    -64.804803\n2021-05-01    -64.804803\n2021-06-01    -14.804803\n2021-07-01     41.635583\n2021-08-01      1.296162\n2021-09-01    -46.162488\n2021-10-01     67.397126\n2021-11-01     -3.116317\n2021-12-01    -88.668524\n2022-01-01    -68.199017\n2022-02-01    -93.623294\n2022-03-01   -130.492267\n2022-04-01   -112.694196\n2022-05-01    -55.997089\n2022-06-01    -24.695150\n2022-07-01     22.901947\n2022-08-01    131.800983\n2022-09-01     97.901947\n2022-10-01    145.130983\n2022-11-01    127.733099\n2022-12-01    173.326224\n2023-01-01    153.952429\n2023-02-01     87.874840\n2023-03-01    -95.744678\n2023-04-01    -69.896124\n2023-05-01    -97.015353\n2023-06-01     -2.098053\n2023-07-01    -83.455739\n2023-08-01    -95.320401\n2023-09-01      5.103876\n2023-10-01    -76.675931\n2023-11-01    -78.370883\n2023-12-01      5.189162\n2024-01-01     80.952429\n2024-02-01     74.629548\n2024-03-01    113.154358\n2024-04-01    124.456296\n2024-05-01    107.506779\ndtype: float64",
+          "long_run_relationship": "abyan = 125.8144 + 0.6780 \u00d7 aden",
+          "residuals": "date\n2020-07-01    -21.158178\n2020-08-01     24.392305\n2020-09-01     24.392305\n2020-10-01    -13.107695\n2020-11-01    -16.497599\n2020-12-01    -52.091587\n2021-01-01    -29.421876\n2021-02-01    -80.905767\n2021-03-01    -30.905767\n2021-04-01    -64.804803\n2021-05-01    -64.804803\n2021-06-01    -14.804803\n2021-07-01     41.635583\n2021-08-01      1.296162\n2021-09-01    -46.162488\n2021-10-01     67.397126\n2021-11-01     -3.116317\n2021-12-01    -88.668524\n2022-01-01    -68.199017\n2022-02-01    -93.623294\n2022-03-01   -130.492267\n2022-04-01   -112.694196\n2022-05-01    -55.997089\n2022-06-01    -24.695150\n2022-07-01     22.901947\n2022-08-01    131.800983\n2022-09-01     97.901947\n2022-10-01    145.130983\n2022-11-01    127.733099\n2022-12-01    173.326224\n2023-01-01    153.952429\n2023-02-01     87.874840\n2023-03-01    -95.744678\n2023-04-01    -69.896124\n2023-05-01    -97.015353\n2023-06-01     -2.098053\n2023-07-01    -83.455739\n2023-08-01    -95.320401\n2023-09-01      5.103876\n2023-10-01    -76.675931\n2023-11-01    -78.370883\n2023-12-01      5.189162\n2024-01-01     80.952429\n2024-02-01     74.629548\n2024-03-01    113.154358\n2024-04-01    124.456296\n2024-05-01    107.506779\ndtype: float64"
+        },
+        "threshold": {
+          "threshold": 80.9524293439149,
+          "ssr": 153289.78807280964,
+          "all_thresholds": [
+            -83.45573854486088,
+            -80.90576694314126,
+            -78.37088318522069,
+            -76.67593139867381,
+            -69.89612425248697,
+            -68.19901705968323,
+            -64.8048026740758,
+            -64.8048026740758,
+            -55.997088521552314,
+            -52.091586571846904,
+            -46.16248842831874,
+            -30.90576694314126,
+            -29.42187585256653,
+            -24.695150008858718,
+            -21.158177615804846,
+            -16.497599054365594,
+            -14.804802674075802,
+            -13.107695481272117,
+            -3.11631710630013,
+            -2.098052790617885,
+            1.2961615949895986,
+            5.10387574751303,
+            5.18916218840468,
+            22.901947209382115,
+            24.392304518727883,
+            24.392304518727883,
+            41.63558303355035,
+            67.39712586405506,
+            74.62954789603077,
+            80.9524293439149,
+            87.87484001657856,
+            97.90194720938212
+          ],
+          "all_ssrs": [
+            156115.15960882034,
+            157565.01119423748,
+            158572.8311871004,
+            158253.22338787586,
+            157892.86721935356,
+            157464.21452096742,
+            157953.17003023333,
+            157953.17003023333,
+            158025.10373913078,
+            157913.82775628075,
+            159179.0200166241,
+            159067.18470133812,
+            158822.85894985654,
+            158883.65277845785,
+            159154.80547863845,
+            159083.87419089914,
+            159275.47373575365,
+            159229.04617408005,
+            159200.0412704548,
+            159191.39744099305,
+            159196.77155043438,
+            159300.91747385613,
+            159264.32185538835,
+            158907.42313866538,
+            159327.54921413577,
+            159327.54921413577,
+            159488.57617505698,
+            156101.6181605569,
+            153858.66068499026,
+            153289.78807280964,
+            159501.82347054378,
+            159500.39802272798
+          ],
+          "proportion_below": 0.7872340425531915,
+          "proportion_above": 0.2127659574468085
+        },
+        "tvecm": {
+          "success": true,
+          "threshold": 80.9524293439149,
+          "below_model": {
+            "coefficients": [
+              24.968819606795794,
+              0.2168499355532469
+            ],
+            "ssr": 118782.79711213752
+          },
+          "above_model": {
+            "coefficients": [
+              -177.00869665476247,
+              1.313976739533015
+            ],
+            "ssr": 20901.207649956545
+          },
+          "diagnostics": {
+            "below": {
+              "r_squared": 0.040306376676851996,
+              "adj_r_squared": 0.012886558867619247,
+              "aic": 407.74440787827245,
+              "bic": 410.9662437035609
+            },
+            "above": {
+              "r_squared": 0.32329721566049474,
+              "adj_r_squared": 0.22662538932627974,
+              "aic": 99.2939323688614,
+              "bic": 99.68838152353385
+            }
+          }
+        },
+        "summary": {
+          "cointegrated": "True",
+          "threshold": 80.9524293439149,
+          "mode": "standard"
+        }
+      }
+    },
+    "model_comparison": {
+      "information_criteria": {},
+      "performance_metrics": {},
+      "best_model": null
+    },
+    "best_model": null,
+    "best_model_results": {}
+  },
+  "interpretations": {
+    "unit_root": {
+      "commodity": "wheat",
+      "summary": "Incomplete unit root analysis results.",
+      "details": {},
+      "implications": []
+    },
+    "cointegration": {
+      "commodity": "wheat",
+      "summary": "North and south wheat markets do not show strong evidence of cointegration, suggesting market fragmentation.",
+      "details": {
+        "failed_tests": "Cointegration not detected by the following tests: Engle-Granger, Johansen, Gregory-Hansen."
+      },
+      "implications": [
+        "The lack of cointegration suggests that conflict barriers have effectively fragmented markets.",
+        "Price deviations between markets can persist indefinitely, indicating inefficient resource allocation.",
+        "Policy interventions may be needed to restore market integration."
+      ]
+    }
+  },
+  "report_paths": {
+    "comprehensive_report": "publication/wheat/wheat_model_comparison.markdown",
+    "executive_summary": "publication/wheat/wheat_summary.markdown"
+  }
+}

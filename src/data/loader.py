@@ -49,11 +49,62 @@ class DataLoader:
             if "null values" in error:
                 logger.warning(error)
             else:
-                # Only raise for critical errors
-                raise_if_invalid(False, [error], f"Invalid GeoJSON file: {filename}")
+                logger.error(error)
         
-        logger.info(f"Loaded GeoJSON from {file_path}: {len(gdf)} features")
+        raise_if_invalid(valid, errors)
+        
         return gdf
+    
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
+    def filter_by_date(self, gdf: gpd.GeoDataFrame, start_date: Optional[str] = None, end_date: Optional[str] = None) -> gpd.GeoDataFrame:
+        """Filter GeoDataFrame by date range."""
+        if not isinstance(gdf, gpd.GeoDataFrame):
+            raise ValueError("Input must be a GeoDataFrame")
+        
+        # Convert date column to datetime if it's not already
+        if 'date' in gdf.columns and not pd.api.types.is_datetime64_any_dtype(gdf['date']):
+            gdf['date'] = pd.to_datetime(gdf['date'])
+        
+        # Apply date filters
+        if start_date:
+            start_date = pd.to_datetime(start_date)
+            gdf = gdf[gdf['date'] >= start_date]
+        
+        if end_date:
+            end_date = pd.to_datetime(end_date)
+            gdf = gdf[gdf['date'] <= end_date]
+        
+        return gdf
+    
+    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
+    def preprocess_commodity_data(self, gdf: gpd.GeoDataFrame, commodity: str) -> pd.DataFrame:
+        """Preprocess commodity data for analysis."""
+        if not isinstance(gdf, gpd.GeoDataFrame):
+            raise ValueError("Input must be a GeoDataFrame")
+        
+        # Filter by commodity if specified
+        if commodity and 'commodity' in gdf.columns:
+            gdf = gdf[gdf['commodity'] == commodity]
+        
+        # Check if we have data
+        if len(gdf) == 0:
+            raise DataError(f"No data found for commodity: {commodity}")
+        
+        # Convert to time series format
+        df = gdf.pivot_table(
+            index='date',
+            columns='admin1',
+            values='price',
+            aggfunc='mean'
+        )
+        
+        # Sort by date
+        df = df.sort_index()
+        
+        # Handle missing values
+        df = df.interpolate(method='linear')
+        
+        return df
     
     @handle_errors(logger=logger, error_type=(PermissionError, OSError), reraise=True)
     def save_processed_data(self, gdf: gpd.GeoDataFrame, filename: str) -> None:
@@ -61,106 +112,12 @@ class DataLoader:
         if not isinstance(gdf, gpd.GeoDataFrame):
             raise DataError(f"Expected GeoDataFrame, got {type(gdf)}")
         
-        self.processed_path.mkdir(parents=True, exist_ok=True)
+        file_path = self.processed_path / filename
         
-        output_path = self.processed_path / filename
-        write_geojson(gdf, output_path)
+        # Ensure the directory exists
+        self.processed_path.mkdir(exist_ok=True, parents=True)
         
-        logger.info(f"Saved processed data to {output_path}: {len(gdf)} features")
-    
-    @handle_errors(logger=logger, error_type=ValueError)
-    def split_by_exchange_regime(self, gdf: gpd.GeoDataFrame) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-        """Split data by exchange rate regime."""
-        if 'exchange_rate_regime' not in gdf.columns:
-            raise ValueError("Column 'exchange_rate_regime' not found in GeoDataFrame")
+        # Save the data
+        write_geojson(gdf, file_path)
         
-        north = gdf[gdf['exchange_rate_regime'] == 'north'].copy()
-        south = gdf[gdf['exchange_rate_regime'] == 'south'].copy()
-        
-        logger.info(f"Split data by exchange regime: {len(north)} north, {len(south)} south")
-        return north, south
-    
-    @handle_errors(logger=logger, error_type=ValueError)
-    def get_time_series(self, gdf: gpd.GeoDataFrame, admin_region: str, commodity: str) -> gpd.GeoDataFrame:
-        """Extract time series for specific region and commodity."""
-        required_cols = ['admin1', 'commodity', 'date']
-        for col in required_cols:
-            if col not in gdf.columns:
-                raise ValueError(f"Required column '{col}' not found in GeoDataFrame")
-        
-        mask = (gdf['admin1'] == admin_region) & (gdf['commodity'] == commodity)
-        result = gdf[mask].sort_values('date').copy()
-        
-        logger.info(f"Extracted time series for {admin_region}, {commodity}: {len(result)} observations")
-        return result
-    
-    @handle_errors(logger=logger, error_type=ValueError)
-    def get_commodity_list(self, gdf: gpd.GeoDataFrame) -> List[str]:
-        """Get list of available commodities in the data."""
-        if 'commodity' not in gdf.columns:
-            raise ValueError("Column 'commodity' not found in GeoDataFrame")
-        
-        commodities = sorted(gdf['commodity'].unique())
-        
-        logger.info(f"Found {len(commodities)} unique commodities")
-        return commodities
-    
-    @handle_errors(logger=logger, error_type=ValueError)
-    def get_region_list(self, gdf: gpd.GeoDataFrame) -> List[str]:
-        """Get list of available administrative regions."""
-        if 'admin1' not in gdf.columns:
-            raise ValueError("Column 'admin1' not found in GeoDataFrame")
-        
-        regions = sorted(gdf['admin1'].unique())
-        
-        logger.info(f"Found {len(regions)} unique administrative regions")
-        return regions
-    
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, ValueError), reraise=True)
-    def load_multiple_periods(self, filenames: List[str]) -> gpd.GeoDataFrame:
-        """Load and combine multiple GeoJSON files representing different time periods."""
-        gdfs = []
-        
-        for filename in filenames:
-            gdf = self.load_geojson(filename)
-            gdfs.append(gdf)
-        
-        combined_gdf = pd.concat(gdfs, ignore_index=True)
-        
-        # Optimize the combined GeoDataFrame for memory efficiency
-        combined_gdf = optimize_dataframe(combined_gdf)
-        
-        logger.info(f"Combined {len(filenames)} files: {len(combined_gdf)} total observations")
-        return combined_gdf
-    
-    @handle_errors(logger=logger, error_type=ValueError)
-    def filter_data(self, 
-                   gdf: gpd.GeoDataFrame,
-                   commodities: Optional[List[str]] = None,
-                   regions: Optional[List[str]] = None,
-                   start_date: Optional[str] = None,
-                   end_date: Optional[str] = None,
-                   exchange_regime: Optional[str] = None) -> gpd.GeoDataFrame:
-        """Filter data by various criteria."""
-        filtered_gdf = gdf.copy()
-        
-        if commodities:
-            filtered_gdf = filtered_gdf[filtered_gdf['commodity'].isin(commodities)]
-        
-        if regions:
-            filtered_gdf = filtered_gdf[filtered_gdf['admin1'].isin(regions)]
-        
-        if start_date:
-            filtered_gdf = filtered_gdf[filtered_gdf['date'] >= pd.to_datetime(start_date)]
-        
-        if end_date:
-            filtered_gdf = filtered_gdf[filtered_gdf['date'] <= pd.to_datetime(end_date)]
-        
-        if exchange_regime:
-            if exchange_regime not in ['north', 'south']:
-                raise ValueError("exchange_regime must be 'north' or 'south'")
-            filtered_gdf = filtered_gdf[filtered_gdf['exchange_rate_regime'] == exchange_regime]
-        
-        logger.info(f"Filtered data: {len(filtered_gdf)} observations remaining")
-        return filtered_gdf
+        logger.info(f"Saved processed data to {file_path}")

@@ -39,9 +39,9 @@ Integration with other data sources:
     >>> integrated_data = integrate_conflict_data(processed_data, 'conflict_data.geojson')
 """
 
-from data.loader import DataLoader
-from data.preprocessor import DataPreprocessor
-from data.integration import DataIntegrator
+from src.data.loader import DataLoader
+from src.data.preprocessor import DataPreprocessor
+from src.data.integration import DataIntegrator
 
 
 # Create singleton instances for easy access

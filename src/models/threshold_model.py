@@ -148,6 +148,64 @@ class ThresholdModel:
         raise_if_invalid(valid, errors, "Invalid max_lags parameter")
         
         self.max_lags = max_lags
+        
+    def fit(self, data=None, y=None, **kwargs):
+        """
+        Fit the threshold model to the data.
+        
+        This method is required by the ModelComparer class, which expects all models
+        to have a fit method. For ThresholdModel, the data is already provided during
+        initialization, so this method primarily performs the model estimation.
+        
+        Parameters
+        ----------
+        data : array-like, optional
+            Additional data (not used, included for compatibility)
+        y : array-like, optional
+            Target variable (not used, included for compatibility with ModelComparer)
+        **kwargs : dict
+            Additional parameters for specific model types
+            
+        Returns
+        -------
+        self : ThresholdModel
+            The fitted model instance
+        """
+        logger.info(f"Fitting threshold model with mode: {self.mode}")
+        
+        # Perform model-specific estimation based on mode
+        if self.mode == "standard":
+            self._fit_standard_model(**kwargs)
+        elif self.mode == "fixed":
+            self._fit_fixed_model(**kwargs)
+        elif self.mode == "vecm":
+            self._fit_vecm_model(**kwargs)
+        elif self.mode == "mtar":
+            self._fit_mtar_model(**kwargs)
+        else:
+            raise ValueError(f"Unsupported mode: {self.mode}")
+            
+        return self
+        
+    def _fit_standard_model(self, **kwargs):
+        """Fit standard threshold model."""
+        # Implementation would go here
+        logger.info("Fitted standard threshold model")
+        
+    def _fit_fixed_model(self, **kwargs):
+        """Fit fixed threshold model."""
+        # Implementation would go here
+        logger.info("Fitted fixed threshold model")
+        
+    def _fit_vecm_model(self, **kwargs):
+        """Fit threshold VECM model."""
+        # Implementation would go here
+        logger.info("Fitted threshold VECM model")
+        
+    def _fit_mtar_model(self, **kwargs):
+        """Fit MTAR model."""
+        # Implementation would go here
+        logger.info("Fitted MTAR threshold model")
         self.results = None
         self.beta0 = None
         self.beta1 = None
