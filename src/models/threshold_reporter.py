@@ -166,17 +166,21 @@ class ThresholdReporter:
                     'title': 'Threshold VECM Results',
                     'headers': ['Parameter', 'Below Threshold', 'Above Threshold', 'Difference'],
                     'rows': [
-                        ['Alpha (Market 1)', f"{self.model.below_model.alpha[0, 0]:.4f}", 
-                         f"{self.model.above_model.alpha[0, 0]:.4f}", 
-                         f"{self.model.above_model.alpha[0, 0] - self.model.below_model.alpha[0, 0]:.4f}"],
-                        ['Alpha (Market 2)', f"{self.model.below_model.alpha[1, 0]:.4f}", 
-                         f"{self.model.above_model.alpha[1, 0]:.4f}", 
-                         f"{self.model.above_model.alpha[1, 0] - self.model.below_model.alpha[1, 0]:.4f}"],
-                        ['Log-Likelihood', f"{self.model.below_model.llf:.2f}", 
-                         f"{self.model.above_model.llf:.2f}", 
-                         f"{self.model.below_model.llf + self.model.above_model.llf - self.model.linear_model.llf:.2f}"],
-                        ['AIC', f"{self.model.below_model.aic:.2f}", 
-                         f"{self.model.above_model.aic:.2f}", 
+                        ['Alpha (Market 1)',
+                         f"{self.model.below_model.alpha[0, 0]:.4f}" if hasattr(self.model.below_model, 'alpha') else f"{self.model.below_model.params.iloc[1]:.4f}",
+                         f"{self.model.above_model.alpha[0, 0]:.4f}" if hasattr(self.model.above_model, 'alpha') else f"{self.model.above_model.params.iloc[1]:.4f}",
+                         "N/A"],
+                        ['Alpha (Market 2)',
+                         f"{self.model.below_model.alpha[1, 0]:.4f}" if hasattr(self.model.below_model, 'alpha') else f"{self.model.below_model.params.iloc[1]:.4f}",
+                         f"{self.model.above_model.alpha[1, 0]:.4f}" if hasattr(self.model.above_model, 'alpha') else f"{self.model.above_model.params.iloc[1]:.4f}",
+                         "N/A"],
+                        ['Log-Likelihood',
+                         f"{self.model.below_model.llf:.2f}" if hasattr(self.model.below_model, 'llf') else "N/A",
+                         f"{self.model.above_model.llf:.2f}" if hasattr(self.model.above_model, 'llf') else "N/A",
+                         f"{self.model.below_model.llf + self.model.above_model.llf - self.model.linear_model.llf:.2f}" if (hasattr(self.model.below_model, 'llf') and hasattr(self.model.above_model, 'llf') and hasattr(self.model.linear_model, 'llf')) else "N/A"],
+                        ['AIC',
+                         f"{self.model.below_model.aic:.2f}" if hasattr(self.model.below_model, 'aic') else "N/A",
+                         f"{self.model.above_model.aic:.2f}" if hasattr(self.model.above_model, 'aic') else "N/A",
                          "N/A"]
                     ]
                 }
@@ -765,6 +769,10 @@ class ThresholdReporter:
         if not hasattr(self.model, 'below_model') or not hasattr(self.model, 'above_model'):
             return "VECM results not available."
         
+        # Check if models have alpha attribute
+        if not hasattr(self.model.below_model, 'alpha') or not hasattr(self.model.above_model, 'alpha'):
+            return "VECM adjustment parameters not available for this model specification."
+            
         below_alpha = self.model.below_model.alpha
         above_alpha = self.model.above_model.alpha
         
