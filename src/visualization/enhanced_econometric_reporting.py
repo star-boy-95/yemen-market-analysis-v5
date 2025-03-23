@@ -1118,3 +1118,509 @@ def _generate_cross_commodity_visualization(
     plt.savefig(output_path, dpi=300)
     plt.close()
     logger.info(f"Cross-commodity threshold comparison saved to {output_path}")
+
+
+def generate_publication_figure(
+    data: pd.DataFrame,
+    x_col: str,
+    y_cols: List[str],
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    legend_labels: Optional[List[str]] = None,
+    threshold_value: Optional[float] = None,
+    fig_size: Tuple[int, int] = (10, 6),
+    style: str = 'world_bank',
+    dpi: int = 300,
+    highlight_regions: Optional[List[Tuple[int, int, str]]] = None
+) -> plt.Figure:
+    """
+    Generate a publication-quality figure following academic standards.
+    
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        DataFrame containing the data
+    x_col : str
+        Column name for x-axis
+    y_cols : list of str
+        Column names for y-axis (multiple lines)
+    title : str
+        Figure title
+    xlabel : str
+        X-axis label
+    ylabel : str
+        Y-axis label
+    legend_labels : list of str, optional
+        Labels for legend (should match y_cols)
+    threshold_value : float, optional
+        Threshold value to draw as horizontal line
+    fig_size : tuple, optional
+        Figure size (width, height)
+    style : str, optional
+        Visual style ('world_bank', 'academic', 'policy')
+    dpi : int, optional
+        Resolution (dots per inch)
+    highlight_regions : list of tuples, optional
+        Regions to highlight (start_idx, end_idx, color)
+        
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Publication-quality figure
+    """
+    # Set style based on specified style
+    if style == 'world_bank':
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#0071bc', '#d55e00', '#009e73', '#cc79a7', '#f0e442']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'academic':
+        plt.style.use('seaborn-v0_8')
+        colors = ['#377eb8', '#e41a1c', '#4daf4a', '#984ea3', '#ff7f00']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'policy':
+        plt.style.use('seaborn-v0_8-talk')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'sans-serif'
+        title_size = 16
+        axis_label_size = 14
+        tick_label_size = 12
+    else:
+        # Default style
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=fig_size, dpi=dpi)
+    
+    # Highlight regions if specified
+    if highlight_regions:
+        for start_idx, end_idx, color in highlight_regions:
+            if start_idx < len(data) and end_idx <= len(data):
+                ax.axvspan(
+                    data[x_col].iloc[start_idx],
+                    data[x_col].iloc[min(end_idx, len(data)-1)],
+                    facecolor=color,
+                    alpha=0.2
+                )
+    
+    # Plot each series
+    for i, y_col in enumerate(y_cols):
+        color = colors[i % len(colors)]
+        ax.plot(data[x_col], data[y_col], color=color, linewidth=2)
+    
+    # Add threshold line if specified
+    if threshold_value is not None:
+        ax.axhline(y=threshold_value, color='red', linestyle='--', 
+                   linewidth=1.5, label=f'Threshold: {threshold_value:.4f}')
+    
+    # Set labels and title
+    ax.set_xlabel(xlabel, fontsize=axis_label_size, fontfamily=font_family)
+    ax.set_ylabel(ylabel, fontsize=axis_label_size, fontfamily=font_family)
+    ax.set_title(title, fontsize=title_size, fontfamily=font_family)
+    
+    # Set tick parameters
+    ax.tick_params(axis='both', labelsize=tick_label_size)
+    
+    # Add legend if multiple series or threshold
+    if (len(y_cols) > 1 or threshold_value is not None) and legend_labels:
+        if len(legend_labels) >= len(y_cols):
+            labels = legend_labels.copy()
+            if threshold_value is not None:
+                labels.append(f'Threshold: {threshold_value:.4f}')
+            ax.legend(labels, fontsize=tick_label_size)
+    elif len(y_cols) > 1:
+        ax.legend(y_cols, fontsize=tick_label_size)
+    
+    # Add grid
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    # Tight layout
+    plt.tight_layout()
+    
+    return fig
+
+
+def generate_threshold_visualization(
+    data: pd.DataFrame,
+    eq_errors: np.ndarray,
+    threshold: float,
+    date_col: str,
+    title: str,
+    style: str = 'world_bank',
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    Generate publication-quality visualization of threshold regime dynamics.
+    
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        DataFrame containing the data
+    eq_errors : numpy.ndarray
+        Equilibrium errors
+    threshold : float
+        Threshold value
+    date_col : str
+        Column name for dates
+    title : str
+        Figure title
+    style : str, optional
+        Visual style ('world_bank', 'academic', 'policy')
+    dpi : int, optional
+        Resolution (dots per inch)
+        
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Publication-quality visualization
+    """
+    # Import matplotlib date formatter if needed
+    import matplotlib.dates as mdates
+    
+    # Set style based on specified style
+    if style == 'world_bank':
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#0071bc', '#d55e00', '#009e73', '#f0e442']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'academic':
+        plt.style.use('seaborn-v0_8')
+        colors = ['#377eb8', '#e41a1c', '#4daf4a', '#ff7f00']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'policy':
+        plt.style.use('seaborn-v0_8-talk')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'sans-serif'
+        title_size = 16
+        axis_label_size = 14
+        tick_label_size = 12
+    else:
+        # Default style
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+        
+    # Create figure with 2 subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), dpi=dpi)
+    fig.suptitle(title, fontsize=title_size + 2, fontfamily=font_family)
+    
+    # Plot 1: Equilibrium errors over time with threshold line
+    dates = data[date_col]
+    
+    # Create binary mask for above/below threshold
+    below_mask = eq_errors <= threshold
+    above_mask = ~below_mask
+    
+    # Calculate proportion in each regime
+    below_prop = np.mean(below_mask)
+    above_prop = 1 - below_prop
+    
+    # Plot points with different colors based on regime
+    ax1.scatter(dates[below_mask], eq_errors[below_mask], 
+               color=colors[0], label=f'Below Threshold ({below_prop:.1%})', alpha=0.7)
+    ax1.scatter(dates[above_mask], eq_errors[above_mask], 
+               color=colors[1], label=f'Above Threshold ({above_prop:.1%})', alpha=0.7)
+    
+    # Add threshold line
+    ax1.axhline(y=threshold, color='red', linestyle='--', 
+               linewidth=1.5, label=f'Threshold: {threshold:.4f}')
+    
+    # Format axis
+    ax1.set_xlabel('', fontsize=axis_label_size, fontfamily=font_family)  # Empty since we share x-axis
+    ax1.set_ylabel('Equilibrium Error', fontsize=axis_label_size, fontfamily=font_family)
+    ax1.set_title('Threshold Regimes Over Time', fontsize=title_size, fontfamily=font_family)
+    ax1.tick_params(axis='both', labelsize=tick_label_size)
+    ax1.legend(fontsize=tick_label_size)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    
+    # Format date axis if dates are datetime
+    if pd.api.types.is_datetime64_any_dtype(dates):
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax1.xaxis.set_major_locator(mdates.YearLocator())
+        fig.autofmt_xdate()
+    
+    # Plot 2: Distribution of equilibrium errors with threshold line
+    ax2.hist(eq_errors, bins=30, color=colors[2], alpha=0.8)
+    ax2.axvline(x=threshold, color='red', linestyle='--', linewidth=1.5, 
+               label=f'Threshold: {threshold:.4f}')
+    
+    # Add annotations for regimes
+    ax2.annotate(
+        f'Below Threshold: {below_prop:.1%}',
+        xy=(threshold - 0.1, ax2.get_ylim()[1] * 0.8),
+        xytext=(-100, 0),
+        textcoords='offset points',
+        ha='right',
+        va='center',
+        fontsize=10,
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.7)
+    )
+    
+    ax2.annotate(
+        f'Above Threshold: {above_prop:.1%}',
+        xy=(threshold + 0.1, ax2.get_ylim()[1] * 0.8),
+        xytext=(10, 0),
+        textcoords='offset points',
+        ha='left',
+        va='center',
+        fontsize=10,
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.7)
+    )
+    
+    # Format axis
+    ax2.set_xlabel('Equilibrium Error', fontsize=axis_label_size, fontfamily=font_family)
+    ax2.set_ylabel('Frequency', fontsize=axis_label_size, fontfamily=font_family)
+    ax2.set_title('Distribution of Equilibrium Errors', fontsize=title_size, fontfamily=font_family)
+    ax2.tick_params(axis='both', labelsize=tick_label_size)
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    
+    # Tight layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for suptitle
+    
+    return fig
+
+
+def generate_econometric_table(
+    model_results: Dict[str, Any],
+    confidence_level: float = 0.95,
+    significance_indicators: bool = True,
+    style: str = 'world_bank',
+    format: str = 'latex'
+) -> str:
+    """
+    Generate publication-quality econometric table.
+    
+    Parameters
+    ----------
+    model_results : dict
+        Dictionary containing model results
+    confidence_level : float, optional
+        Confidence level for intervals (0.90, 0.95, 0.99)
+    significance_indicators : bool, optional
+        Whether to include significance indicators
+    style : str, optional
+        Visual style ('world_bank', 'academic', 'policy')
+    format : str, optional
+        Output format ('latex', 'markdown', 'html')
+        
+    Returns
+    -------
+    str
+        Formatted table
+    """
+    # Try to import formatter
+    try:
+        from src.result_analysis.academic_formatting import AcademicTableFormatter
+        formatter = AcademicTableFormatter(
+            journal_style=style,
+            include_significance=significance_indicators,
+            confidence_level=confidence_level
+        )
+    except ImportError:
+        raise ImportError("AcademicTableFormatter not available. Please implement the 'result_analysis' module first.")
+    
+    # Process model results into standardized format
+    if 'models' not in model_results:
+        # Convert single model to standardized format
+        standardized_results = {
+            'models': [
+                {
+                    'id': 'model1',
+                    'name': model_results.get('model_name', 'Model 1')
+                }
+            ],
+            'parameters': {},
+            'statistics': {}
+        }
+        
+        # Extract parameters
+        params = model_results.get('parameters', {})
+        for param_name, param_value in params.items():
+            # Extract additional info if available
+            if isinstance(param_value, dict):
+                standardized_results['parameters'][param_name] = {
+                    'model1': param_value
+                }
+            else:
+                # Create basic parameter entry
+                standardized_results['parameters'][param_name] = {
+                    'model1': {
+                        'value': param_value,
+                        'std_err': model_results.get('std_errors', {}).get(param_name, None),
+                        'p_value': model_results.get('p_values', {}).get(param_name, None)
+                    }
+                }
+        
+        # Extract statistics
+        stats = model_results.get('statistics', {})
+        for stat_name, stat_value in stats.items():
+            standardized_results['statistics'][stat_name] = {
+                'model1': {
+                    'value': stat_value
+                }
+            }
+    else:
+        # Already in standardized format
+        standardized_results = model_results
+    
+    # Generate table based on format
+    if format == 'latex':
+        return formatter.format_econometric_table_latex(
+            standardized_results,
+            "Econometric Results",
+            notes="Standard errors in parentheses."
+        )
+    elif format == 'markdown':
+        # For now, return a placeholder
+        # TODO: Implement markdown table formatter
+        return "Markdown formatting not yet implemented"
+    elif format == 'html':
+        # For now, return a placeholder
+        # TODO: Implement HTML table formatter
+        return "HTML formatting not yet implemented"
+    else:
+        raise ValueError(f"Unsupported format: {format}")
+
+
+def generate_model_comparison_visualization(
+    model_comparison: Dict[str, Any],
+    style: str = 'world_bank',
+    dpi: int = 300
+) -> plt.Figure:
+    """
+    Generate a publication-quality visualization of model comparison.
+    
+    Parameters
+    ----------
+    model_comparison : dict
+        Dictionary containing model comparison results
+    style : str, optional
+        Visual style ('world_bank', 'academic', 'policy')
+    dpi : int, optional
+        Resolution (dots per inch)
+        
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Publication-quality visualization
+    """
+    # Set style based on specified style
+    if style == 'world_bank':
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#0071bc', '#d55e00', '#009e73', '#cc79a7', '#f0e442']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'academic':
+        plt.style.use('seaborn-v0_8')
+        colors = ['#377eb8', '#e41a1c', '#4daf4a', '#984ea3', '#ff7f00']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    elif style == 'policy':
+        plt.style.use('seaborn-v0_8-talk')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'sans-serif'
+        title_size = 16
+        axis_label_size = 14
+        tick_label_size = 12
+    else:
+        # Default style
+        plt.style.use('seaborn-v0_8-whitegrid')
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        font_family = 'serif'
+        title_size = 14
+        axis_label_size = 12
+        tick_label_size = 10
+    
+    # Get information criteria
+    ic_comparison = model_comparison.get('information_criteria', {})
+    
+    # Extract data for plotting
+    models = []
+    aic_values = []
+    bic_values = []
+    
+    for model_name, criteria in ic_comparison.items():
+        models.append(model_name)
+        aic_values.append(criteria.get('aic', float('nan')))
+        bic_values.append(criteria.get('bic', float('nan')))
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=dpi)
+    
+    # Set width of bars
+    bar_width = 0.35
+    
+    # Set positions of bars on x-axis
+    r1 = np.arange(len(models))
+    r2 = [x + bar_width for x in r1]
+    
+    # Create bars
+    ax.bar(r1, aic_values, width=bar_width, color=colors[0], label='AIC')
+    ax.bar(r2, bic_values, width=bar_width, color=colors[1], label='BIC')
+    
+    # Highlight best model if available
+    if 'best_model' in model_comparison:
+        best_model = model_comparison['best_model']
+        if best_model in models:
+            idx = models.index(best_model)
+            
+            # Add star to best model
+            ax.text(r1[idx], aic_values[idx] + 2, '*', 
+                   fontsize=20, ha='center', va='bottom', color=colors[0])
+            
+            # Add annotation
+            ax.annotate(
+                f'Best Model: {best_model}',
+                xy=(r1[idx] + bar_width/2, min(aic_values[idx], bic_values[idx]) - 5),
+                xytext=(0, -30),
+                textcoords='offset points',
+                ha='center',
+                va='top',
+                fontsize=12,
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.7),
+                arrowprops=dict(arrowstyle='->', color='black')
+            )
+    
+    # Add labels and title
+    ax.set_xlabel('Model', fontsize=axis_label_size, fontfamily=font_family)
+    ax.set_ylabel('Information Criterion', fontsize=axis_label_size, fontfamily=font_family)
+    ax.set_title('Model Comparison', fontsize=title_size, fontfamily=font_family)
+    
+    # Add xticks at the group centers
+    centers = [r1[i] + bar_width/2 for i in range(len(r1))]
+    ax.set_xticks(centers)
+    ax.set_xticklabels(models, fontsize=tick_label_size, rotation=45, ha='right')
+    
+    # Add legend
+    ax.legend(fontsize=tick_label_size)
+    
+    # Add grid
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Tight layout
+    plt.tight_layout()
+    
+    return fig

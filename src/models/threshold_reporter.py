@@ -1,8 +1,8 @@
 """
-Standardized reporting for threshold models.
+Standardized academic reporting for threshold models.
 
 This module provides a consistent reporting mechanism for all threshold
-model modes, supporting multiple output formats.
+model modes, supporting multiple output formats with academic publication standards.
 """
 import os
 import json
@@ -10,6 +10,7 @@ import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
@@ -980,3 +981,711 @@ class ThresholdReporter:
             return "∞"
         else:
             return f"{half_life:.1f}"
+            
+
+class AcademicThresholdReporter(ThresholdReporter):
+    """
+    Academic threshold reporting with statistical rigor enhancements.
+    
+    This class extends the standard ThresholdReporter to provide enhanced
+    statistical reporting suitable for academic publications, including:
+    - Confidence intervals for all parameters
+    - Formal hypothesis testing with significance indicators
+    - Comprehensive diagnostic tests
+    - Publication-quality tables and visualizations
+    """
+    
+    def __init__(
+        self, 
+        model, 
+        format: str = "markdown", 
+        output_path: Optional[str] = None,
+        confidence_level: float = 0.95,
+        significance_indicators: bool = True,
+        robust_standard_errors: bool = False,
+        style: str = 'world_bank'
+    ):
+        """
+        Initialize the academic reporter.
+        
+        Parameters
+        ----------
+        model : ThresholdModel
+            Threshold model instance
+        format : str, optional
+            Report format ('markdown', 'json', or 'latex')
+        output_path : str, optional
+            Path to save the report
+        confidence_level : float, optional
+            Confidence level for intervals (0.90, 0.95, or 0.99)
+        significance_indicators : bool, optional
+            Whether to add significance indicators (*, **, ***)
+        robust_standard_errors : bool, optional
+            Whether to use robust standard errors (HC3)
+        style : str, optional
+            Visual style ('world_bank', 'academic', 'policy')
+        """
+        super().__init__(model, format, output_path)
+        
+        self.confidence_level = confidence_level
+        self.significance_indicators = significance_indicators
+        self.robust_standard_errors = robust_standard_errors
+        self.style = style
+        
+        # Import necessary components from result_analysis
+        try:
+            from src.result_analysis.statistical_tests import (
+                hypothesis_test, 
+                threshold_significance_test,
+                calculate_significance_indicators
+            )
+            from src.result_analysis.diagnostics import run_comprehensive_diagnostics
+            
+            self.hypothesis_test = hypothesis_test
+            self.threshold_significance_test = threshold_significance_test
+            self.calculate_significance_indicators = calculate_significance_indicators
+            self.run_diagnostics = run_comprehensive_diagnostics
+            self.has_enhanced_stats = True
+        except ImportError:
+            logger.warning("Could not import result_analysis modules. Using basic reporting capabilities.")
+            self.has_enhanced_stats = False
+    
+    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
+    def generate_report(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive academic report.
+        
+        Returns
+        -------
+        dict
+            Report content and metadata
+        """
+        # Ensure model has results
+        if self.model.threshold is None:
+            logger.info("Running full analysis first")
+            self.model.run_full_analysis()
+        
+        # Run statistical enhancements if available
+        if self.has_enhanced_stats:
+            # Calculate confidence intervals and significance
+            self._enhance_parameter_statistics()
+            
+            # Run diagnostic tests
+            self._run_model_diagnostics()
+        
+        # Generate tables, visualizations, and interpretation
+        tables = self.generate_tables()
+        visualizations = self.generate_visualizations()
+        interpretation = self.generate_interpretation()
+        
+        # Add statistical test results
+        if self.has_enhanced_stats:
+            statistical_tests = self.generate_statistical_tests()
+        else:
+            statistical_tests = {}
+        
+        # Combine into report
+        report = {
+            'tables': tables,
+            'visualizations': visualizations,
+            'interpretation': interpretation,
+            'statistical_tests': statistical_tests,
+            'metadata': {
+                'model_type': self.model.__class__.__name__,
+                'model_mode': self.model.mode,
+                'market1': self.model.market1_name,
+                'market2': self.model.market2_name,
+                'timestamp': datetime.now().isoformat(),
+                'format': self.format,
+                'confidence_level': self.confidence_level,
+                'significance_indicators': self.significance_indicators,
+                'robust_standard_errors': self.robust_standard_errors,
+                'style': self.style
+            }
+        }
+        
+        # Export if path provided
+        if self.output_path:
+            self.export_report(report)
+        
+        # Close any open matplotlib figures
+        plt.close('all')
+        
+        return report
+    
+    def _enhance_parameter_statistics(self) -> None:
+        """
+        Calculate enhanced parameter statistics.
+        
+        This method adds confidence intervals, p-values, and
+        significance indicators for all model parameters.
+        """
+        if not hasattr(self.model, 'results'):
+            logger.warning("Model results not available for statistical enhancement")
+            return
+        
+        # Add statistics for threshold parameter
+        if hasattr(self.model, 'threshold'):
+            # For threshold, we need to use a specialized test
+            threshold_test = self.threshold_significance_test(self.model)
+            
+            # Add results to model
+            self.model.threshold_statistics = {
+                'p_value': threshold_test.get('p_value', None),
+                'significance': threshold_test.get('significance', ''),
+                'reject_null': threshold_test.get('reject_null', None),
+                'interpretation': threshold_test.get('interpretation', '')
+            }
+            
+            # Calculate bootstrap confidence interval if available
+            if 'bootstrap_results' in threshold_test and threshold_test['bootstrap_results']:
+                bootstrap_stats = threshold_test['bootstrap_results'].get('bootstrap_stats', [])
+                if len(bootstrap_stats) > 0:
+                    # Calculate confidence interval from bootstrap distribution
+                    alpha = 1 - self.confidence_level
+                    ci_lower = np.percentile(bootstrap_stats, alpha/2 * 100)
+                    ci_upper = np.percentile(bootstrap_stats, (1 - alpha/2) * 100)
+                    
+                    self.model.threshold_statistics['ci_lower'] = ci_lower
+                    self.model.threshold_statistics['ci_upper'] = ci_upper
+        
+        # Add statistics for adjustment parameters
+        if 'adjustment_below_1' in self.model.results and 'adjustment_above_1' in self.model.results:
+            # Extract adjustment parameters
+            adj_below = self.model.results['adjustment_below_1']
+            adj_above = self.model.results['adjustment_above_1']
+            
+            # Get standard errors if available
+            se_below = self.model.results.get('se_below_1', None)
+            se_above = self.model.results.get('se_above_1', None)
+            
+            # Calculate hypothesis tests for adjustment parameters
+            if se_below is not None:
+                below_test = self.hypothesis_test(
+                    theta=adj_below,
+                    se=se_below,
+                    null_value=0,
+                    alternative='less'  # Adjustment should be negative
+                )
+                
+                # Add results to model
+                self.model.results['p_below_1'] = below_test['p_value']
+                self.model.results['sig_below_1'] = below_test['significance']
+                self.model.results['ci_below_1'] = below_test['confidence_interval']
+            
+            if se_above is not None:
+                above_test = self.hypothesis_test(
+                    theta=adj_above,
+                    se=se_above,
+                    null_value=0,
+                    alternative='less'  # Adjustment should be negative
+                )
+                
+                # Add results to model
+                self.model.results['p_above_1'] = above_test['p_value']
+                self.model.results['sig_above_1'] = above_test['significance']
+                self.model.results['ci_above_1'] = above_test['confidence_interval']
+            
+            # Test for asymmetry (adjustment_above_1 ≠ adjustment_below_1)
+            if se_below is not None and se_above is not None:
+                # Calculate standard error of the difference using Delta method
+                diff = adj_above - adj_below
+                se_diff = np.sqrt(se_above**2 + se_below**2)
+                
+                asymmetry_test = self.hypothesis_test(
+                    theta=diff,
+                    se=se_diff,
+                    null_value=0,
+                    alternative='two-sided'
+                )
+                
+                # Add results to model
+                self.model.results['asymmetry_p_1'] = asymmetry_test['p_value']
+                self.model.results['asymmetry_sig_1'] = asymmetry_test['significance']
+                self.model.results['asymmetry_ci_1'] = asymmetry_test['confidence_interval']
+    
+    def _run_model_diagnostics(self) -> None:
+        """
+        Run comprehensive diagnostic tests on the model.
+        """
+        try:
+            # Extract residuals model or create one if needed
+            if hasattr(self.model, 'model'):
+                # Model is already available
+                diagnostics = self.run_diagnostics(self.model.model)
+            elif hasattr(self.model, 'residuals') and hasattr(self.model, 'data1') and hasattr(self.model, 'data2'):
+                # Create a simple model for diagnostics
+                import statsmodels.api as sm
+                
+                # Use data1 as dependent and data2 as independent variable
+                X = sm.add_constant(self.model.data2)
+                model = sm.OLS(self.model.data1, X).fit()
+                
+                # Run diagnostics
+                diagnostics = self.run_diagnostics(model)
+            else:
+                logger.warning("Could not create model for diagnostics")
+                return
+            
+            # Add diagnostics to model
+            self.model.diagnostics = diagnostics
+            
+        except Exception as e:
+            logger.error(f"Error running diagnostics: {str(e)}")
+    
+    def generate_statistical_tests(self) -> Dict[str, Any]:
+        """
+        Generate comprehensive statistical test results.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing statistical test results
+        """
+        tests = {}
+        
+        # Add threshold significance test results
+        if hasattr(self.model, 'threshold_statistics'):
+            tests['threshold_significance'] = {
+                'test_name': "Bootstrap threshold significance test",
+                'p_value': self.model.threshold_statistics.get('p_value'),
+                'significance': self.model.threshold_statistics.get('significance'),
+                'reject_null': self.model.threshold_statistics.get('reject_null'),
+                'confidence_interval': (
+                    self.model.threshold_statistics.get('ci_lower'),
+                    self.model.threshold_statistics.get('ci_upper')
+                ),
+                'interpretation': self.model.threshold_statistics.get('interpretation')
+            }
+        
+        # Add adjustment parameter test results
+        if hasattr(self.model, 'results'):
+            tests['adjustment_parameters'] = {
+                'below_threshold': {
+                    'test_name': "Adjustment below threshold significance test",
+                    'parameter': self.model.results.get('adjustment_below_1'),
+                    'std_error': self.model.results.get('se_below_1'),
+                    'p_value': self.model.results.get('p_below_1'),
+                    'significance': self.model.results.get('sig_below_1'),
+                    'confidence_interval': self.model.results.get('ci_below_1'),
+                    'interpretation': (
+                        "Adjustment below threshold is " + 
+                        ("statistically significant" 
+                         if self.model.results.get('p_below_1', 1) < 0.05 else 
+                         "not statistically significant")
+                    )
+                },
+                'above_threshold': {
+                    'test_name': "Adjustment above threshold significance test",
+                    'parameter': self.model.results.get('adjustment_above_1'),
+                    'std_error': self.model.results.get('se_above_1'),
+                    'p_value': self.model.results.get('p_above_1'),
+                    'significance': self.model.results.get('sig_above_1'),
+                    'confidence_interval': self.model.results.get('ci_above_1'),
+                    'interpretation': (
+                        "Adjustment above threshold is " + 
+                        ("statistically significant" 
+                         if self.model.results.get('p_above_1', 1) < 0.05 else 
+                         "not statistically significant")
+                    )
+                },
+                'asymmetry': {
+                    'test_name': "Asymmetry test (above ≠ below)",
+                    'parameter': (
+                        self.model.results.get('adjustment_above_1', 0) - 
+                        self.model.results.get('adjustment_below_1', 0)
+                    ),
+                    'p_value': self.model.results.get('asymmetry_p_1'),
+                    'significance': self.model.results.get('asymmetry_sig_1'),
+                    'confidence_interval': self.model.results.get('asymmetry_ci_1'),
+                    'interpretation': (
+                        "Asymmetry in adjustment speeds is " + 
+                        ("statistically significant" 
+                         if self.model.results.get('asymmetry_p_1', 1) < 0.05 else 
+                         "not statistically significant")
+                    )
+                }
+            }
+        
+        # Add diagnostic test results if available
+        if hasattr(self.model, 'diagnostics'):
+            tests['diagnostics'] = self.model.diagnostics
+        
+        return tests
+    
+    def _export_latex(self, report: Dict[str, Any]) -> None:
+        """
+        Export report in enhanced LaTeX format with academic standards.
+        """
+        # Try to import LaTeX formatter
+        try:
+            from src.result_analysis.academic_formatting import AcademicTableFormatter
+            formatter = AcademicTableFormatter(
+                journal_style=self.style,
+                include_significance=self.significance_indicators,
+                confidence_level=self.confidence_level
+            )
+            has_formatter = True
+        except ImportError:
+            logger.warning("AcademicTableFormatter not available, using basic LaTeX formatting")
+            has_formatter = False
+        
+        # Start building the LaTeX report
+        latex = []
+        
+        # Document preamble
+        latex.extend([
+            "\\documentclass{article}",
+            "\\usepackage{booktabs}",
+            "\\usepackage{caption}",
+            "\\usepackage{graphicx}",
+            "\\usepackage{amsmath}",
+            "\\usepackage{geometry}",
+            "\\usepackage{float}",
+            "\\usepackage{siunitx}",
+            "\\usepackage{xcolor}",
+            "\\usepackage{hyperref}",
+            "",
+            "\\geometry{margin=1in}",
+            "\\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}",
+            "",
+            f"\\title{{Threshold Model Analysis: {self.model.market1_name} and {self.model.market2_name}}}",
+            f"\\author{{Yemen Market Integration Project}}",
+            "\\date{\\today}",
+            "",
+            "\\begin{document}",
+            "",
+            "\\maketitle",
+            ""
+        ])
+        
+        # Add executive summary
+        latex.extend([
+            "\\section{Executive Summary}",
+            "",
+            "This report presents a threshold cointegration analysis of market integration between " +
+            f"{self.model.market1_name} and {self.model.market2_name} using a {self.model.mode} threshold model.",
+            ""
+        ])
+        
+        # Add interpretation if available
+        if 'interpretation' in report and 'market_integration' in report['interpretation']:
+            latex.append(report['interpretation']['market_integration'])
+            latex.append("")
+        
+        # Add model specifications
+        latex.extend([
+            "\\section{Model Specification}",
+            "",
+            "\\begin{align}",
+            "\\Delta P_{1,t} &= \\begin{cases}",
+            f"\\alpha_1^- \\hat{{\\varepsilon}}_{{{self.model.market1_name}, {self.model.market2_name}, t-1}} + \\sum_{{i=1}}^p \\delta_{{1i}} \\Delta P_{{{self.model.market1_name}, t-i}} + \\sum_{{j=1}}^p \\delta_{{2j}} \\Delta P_{{{self.model.market2_name}, t-j}} + u_{{1t}} & \\text{{if }} \\hat{{\\varepsilon}}_{{{self.model.market1_name}, {self.model.market2_name}, t-1}} \\leq \\tau \\\\",
+            f"\\alpha_1^+ \\hat{{\\varepsilon}}_{{{self.model.market1_name}, {self.model.market2_name}, t-1}} + \\sum_{{i=1}}^p \\delta_{{1i}} \\Delta P_{{{self.model.market1_name}, t-i}} + \\sum_{{j=1}}^p \\delta_{{2j}} \\Delta P_{{{self.model.market2_name}, t-j}} + u_{{1t}} & \\text{{if }} \\hat{{\\varepsilon}}_{{{self.model.market1_name}, {self.model.market2_name}, t-1}} > \\tau \\\\",
+            "\\end{cases}",
+            "\\end{align}",
+            "",
+            "where:",
+            "\\begin{itemize}",
+            f"\\item $P_{{{self.model.market1_name}, t}}$ and $P_{{{self.model.market2_name}, t}}$ are prices in {self.model.market1_name} and {self.model.market2_name} at time $t$",
+            f"\\item $\\hat{{\\varepsilon}}_{{{self.model.market1_name}, {self.model.market2_name}, t-1}}$ is the equilibrium error term",
+            f"\\item $\\tau$ is the threshold parameter",
+            f"\\item $\\alpha_1^-$ and $\\alpha_1^+$ are the adjustment parameters below and above the threshold",
+            "\\end{itemize}",
+            ""
+        ])
+        
+        # Add threshold results table
+        if has_formatter:
+            # Extract threshold and adjustment results
+            threshold = self.model.threshold
+            threshold_p = getattr(self.model, 'threshold_statistics', {}).get('p_value', None)
+            threshold_ci_lower = getattr(self.model, 'threshold_statistics', {}).get('ci_lower', None)
+            threshold_ci_upper = getattr(self.model, 'threshold_statistics', {}).get('ci_upper', None)
+            
+            adjustment_below = self.model.results.get('adjustment_below_1', None)
+            adjustment_above = self.model.results.get('adjustment_above_1', None)
+            
+            se_below = self.model.results.get('se_below_1', None)
+            se_above = self.model.results.get('se_above_1', None)
+            
+            p_below = self.model.results.get('p_below_1', None)
+            p_above = self.model.results.get('p_above_1', None)
+            
+            # Create table data
+            threshold_data = {
+                'threshold': threshold,
+                'threshold_p_value': threshold_p,
+                'threshold_ci_lower': threshold_ci_lower,
+                'threshold_ci_upper': threshold_ci_upper,
+                'adjustment_below': adjustment_below,
+                'adjustment_above': adjustment_above,
+                'se_below': se_below,
+                'se_above': se_above,
+                'p_value_below': p_below,
+                'p_value_above': p_above
+            }
+            
+            # Generate table using formatter
+            threshold_table = formatter.format_threshold_table_latex(
+                threshold_data,
+                f"Threshold Model Results for {self.model.market1_name}-{self.model.market2_name}"
+            )
+            
+            latex.append(threshold_table)
+            latex.append("")
+            
+        else:
+            # Basic threshold results without formatter
+            latex.extend([
+                "\\section{Threshold Results}",
+                "",
+                "\\begin{table}[H]",
+                "\\centering",
+                f"\\caption{{Threshold Model Results for {self.model.market1_name}-{self.model.market2_name}}}",
+                "\\begin{tabular}{lcc}",
+                "\\toprule",
+                "Parameter & Below Threshold & Above Threshold \\\\",
+                "\\midrule",
+                f"Adjustment Speed & {self.model.results.get('adjustment_below_1', 'N/A')} & {self.model.results.get('adjustment_above_1', 'N/A')} \\\\",
+                "\\bottomrule",
+                "\\end{tabular}",
+                "\\end{table}",
+                ""
+            ])
+        
+        # Add statistical test results if available
+        if 'statistical_tests' in report and report['statistical_tests']:
+            latex.extend([
+                "\\section{Hypothesis Tests}",
+                ""
+            ])
+            
+            # Add threshold significance test
+            if 'threshold_significance' in report['statistical_tests']:
+                threshold_test = report['statistical_tests']['threshold_significance']
+                
+                latex.extend([
+                    "\\subsection{Threshold Significance Test}",
+                    "",
+                    "\\begin{table}[H]",
+                    "\\centering",
+                    "\\caption{Threshold Significance Test Results}",
+                    "\\begin{tabular}{lr}",
+                    "\\toprule",
+                    "Parameter & Value \\\\",
+                    "\\midrule",
+                    f"Threshold & {self.model.threshold:.4f} \\\\",
+                    f"p-value & {threshold_test.get('p_value', 'N/A')} \\\\",
+                ])
+                
+                # Add confidence interval if available
+                if 'confidence_interval' in threshold_test and threshold_test['confidence_interval'][0] is not None:
+                    ci_lower, ci_upper = threshold_test['confidence_interval']
+                    latex.append(f"{self.confidence_level*100:.0f}\\% Confidence Interval & [{ci_lower:.4f}, {ci_upper:.4f}] \\\\")
+                
+                latex.extend([
+                    "\\bottomrule",
+                    "\\end{tabular}",
+                    "\\end{table}",
+                    "",
+                    f"Interpretation: {threshold_test.get('interpretation', 'N/A')}",
+                    ""
+                ])
+            
+            # Add adjustment parameter tests
+            if 'adjustment_parameters' in report['statistical_tests']:
+                adjustment_tests = report['statistical_tests']['adjustment_parameters']
+                
+                latex.extend([
+                    "\\subsection{Adjustment Parameter Tests}",
+                    "",
+                    "\\begin{table}[H]",
+                    "\\centering",
+                    "\\caption{Adjustment Parameter Significance Tests}",
+                    "\\begin{tabular}{lrrrr}",
+                    "\\toprule",
+                    "Parameter & Estimate & Std. Error & p-value & Significance \\\\",
+                    "\\midrule"
+                ])
+                
+                # Below threshold
+                below = adjustment_tests['below_threshold']
+                param_below = below.get('parameter', 'N/A')
+                se_below = below.get('std_error', 'N/A')
+                p_below = below.get('p_value', 'N/A')
+                sig_below = below.get('significance', '')
+                
+                latex.append(f"Below Threshold & {param_below:.4f} & {se_below:.4f} & {p_below:.4f} & {sig_below} \\\\")
+                
+                # Above threshold
+                above = adjustment_tests['above_threshold']
+                param_above = above.get('parameter', 'N/A')
+                se_above = above.get('std_error', 'N/A')
+                p_above = above.get('p_value', 'N/A')
+                sig_above = above.get('significance', '')
+                
+                latex.append(f"Above Threshold & {param_above:.4f} & {se_above:.4f} & {p_above:.4f} & {sig_above} \\\\")
+                
+                # Asymmetry
+                asymm = adjustment_tests['asymmetry']
+                param_asymm = asymm.get('parameter', 'N/A')
+                p_asymm = asymm.get('p_value', 'N/A')
+                sig_asymm = asymm.get('significance', '')
+                
+                latex.append(f"Asymmetry (Above - Below) & {param_asymm:.4f} & -- & {p_asymm:.4f} & {sig_asymm} \\\\")
+                
+                latex.extend([
+                    "\\bottomrule",
+                    "\\end{tabular}",
+                    "\\end{table}",
+                    "",
+                    "Interpretation:",
+                    "\\begin{itemize}",
+                    f"\\item Below Threshold: {below.get('interpretation', 'N/A')}",
+                    f"\\item Above Threshold: {above.get('interpretation', 'N/A')}",
+                    f"\\item Asymmetry: {asymm.get('interpretation', 'N/A')}",
+                    "\\end{itemize}",
+                    ""
+                ])
+        
+        # Add diagnostic test results if available
+        if 'statistical_tests' in report and 'diagnostics' in report['statistical_tests']:
+            diagnostics = report['statistical_tests']['diagnostics']
+            
+            latex.extend([
+                "\\section{Diagnostic Tests}",
+                ""
+            ])
+            
+            # Add heteroskedasticity test results
+            if 'heteroskedasticity' in diagnostics:
+                het_tests = diagnostics['heteroskedasticity']
+                
+                latex.extend([
+                    "\\subsection{Heteroskedasticity Tests}",
+                    "",
+                    "\\begin{table}[H]",
+                    "\\centering",
+                    "\\caption{Heteroskedasticity Test Results}",
+                    "\\begin{tabular}{lrrl}",
+                    "\\toprule",
+                    "Test & Statistic & p-value & Result \\\\",
+                    "\\midrule"
+                ])
+                
+                # White test
+                if 'white' in het_tests and isinstance(het_tests['white'], dict):
+                    white = het_tests['white']
+                    
+                    test_stat = white.get('test_statistic', 'N/A')
+                    p_value = white.get('p_value', 'N/A')
+                    reject = white.get('reject_null', False)
+                    
+                    test_stat_str = f"{test_stat:.4f}" if isinstance(test_stat, (int, float)) else "N/A"
+                    p_value_str = f"{p_value:.4f}" if isinstance(p_value, (int, float)) else "N/A"
+                    
+                    result = "Heteroskedasticity present" if reject else "Homoskedasticity"
+                    
+                    latex.append(f"White & {test_stat_str} & {p_value_str} & {result} \\\\")
+                
+                # Close the table
+                latex.extend([
+                    "\\bottomrule",
+                    "\\end{tabular}",
+                    "\\end{table}",
+                    ""
+                ])
+            
+            # Add normality test results
+            if 'normality' in diagnostics:
+                normality = diagnostics['normality']
+                
+                latex.extend([
+                    "\\subsection{Normality Tests}",
+                    "",
+                    "\\begin{table}[H]",
+                    "\\centering",
+                    "\\caption{Normality Test Results}",
+                    "\\begin{tabular}{lrrl}",
+                    "\\toprule",
+                    "Test & Statistic & p-value & Result \\\\",
+                    "\\midrule"
+                ])
+                
+                # Jarque-Bera test
+                if 'jarque_bera' in normality and isinstance(normality['jarque_bera'], dict):
+                    jb = normality['jarque_bera']
+                    
+                    test_stat = jb.get('test_statistic', 'N/A')
+                    p_value = jb.get('p_value', 'N/A')
+                    reject = jb.get('reject_null', False)
+                    
+                    test_stat_str = f"{test_stat:.4f}" if isinstance(test_stat, (int, float)) else "N/A"
+                    p_value_str = f"{p_value:.4f}" if isinstance(p_value, (int, float)) else "N/A"
+                    
+                    result = "Non-normal residuals" if reject else "Normal residuals"
+                    
+                    latex.append(f"Jarque-Bera & {test_stat_str} & {p_value_str} & {result} \\\\")
+                
+                # Close the table
+                latex.extend([
+                    "\\bottomrule",
+                    "\\end{tabular}",
+                    "\\end{table}",
+                    ""
+                ])
+            
+            # Add summary of diagnostic issues
+            if 'summary' in diagnostics:
+                summary = diagnostics['summary']
+                
+                latex.extend([
+                    "\\subsection{Diagnostic Summary}",
+                    ""
+                ])
+                
+                if 'interpretation' in summary:
+                    latex.append(summary['interpretation'])
+                    latex.append("")
+                
+                if 'has_issues' in summary and summary['has_issues']:
+                    if 'issues_detected' in summary:
+                        latex.append("Issues Detected:")
+                        latex.append("\\begin{itemize}")
+                        
+                        for issue in summary['issues_detected']:
+                            latex.append(f"\\item {issue}")
+                        
+                        latex.append("\\end{itemize}")
+                        latex.append("")
+                    
+                    if 'recommendations' in summary:
+                        latex.append("Recommendations:")
+                        latex.append("\\begin{itemize}")
+                        
+                        for rec in summary['recommendations']:
+                            latex.append(f"\\item {rec}")
+                        
+                        latex.append("\\end{itemize}")
+                        latex.append("")
+        
+        # Add significance legend if indicators are used
+        if self.significance_indicators:
+            latex.extend([
+                "\\section*{Notes}",
+                "\\begin{itemize}",
+                "\\item[*] $p<0.1$",
+                "\\item[**] $p<0.05$",
+                "\\item[***] $p<0.01$",
+                "\\end{itemize}",
+                ""
+            ])
+        
+        # Close document
+        latex.append("\\end{document}")
+        
+        # Write to file
+        with open(self.output_path, 'w') as f:
+            f.write('\n'.join(latex))
+        
+        logger.info(f"Exported enhanced LaTeX report to {self.output_path}")

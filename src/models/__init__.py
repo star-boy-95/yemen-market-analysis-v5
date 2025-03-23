@@ -33,6 +33,12 @@ from src.models.threshold_model import (
     process_chunk
 )
 
+# Threshold reporting modules
+from src.models.threshold_reporter import (
+    ThresholdReporter,
+    AcademicThresholdReporter
+)
+
 # Spatial models
 from src.models.spatial import (
     SpatialEconometrics,
@@ -72,6 +78,10 @@ __all__ = [
     'combine_tvecm_results',
     'process_threshold',
     'process_chunk',
+    
+    # Threshold reporting
+    'ThresholdReporter',
+    'AcademicThresholdReporter',
     
     # Spatial models
     'SpatialEconometrics',
