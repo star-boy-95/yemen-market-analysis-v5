@@ -1,5 +1,8 @@
 """
 Performance optimization utilities for the Yemen Market Integration Project.
+
+Enhanced for M3 Pro hardware with asymmetric core optimizations and memory
+management strategies tailored for large-scale market integration analysis.
 """
 import os
 import sys
@@ -17,6 +20,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 
 from .decorators import timer, m1_optimized, disk_cache
+from .m3_utils import m3_optimized, tiered_cache, configure_system_for_m3_performance
 from .error_handler import handle_errors
 
 logger = logging.getLogger(__name__)

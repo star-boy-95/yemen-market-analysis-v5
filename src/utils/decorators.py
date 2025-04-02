@@ -42,6 +42,8 @@ def timer(func: Callable[..., T]) -> Callable[..., T]:
         
         return result
     return wrapper
+from .m3_utils import m3_optimized
+
 def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
     """
     Decorator to optimize functions for M1 Mac with enhanced compatibility.
@@ -49,6 +51,8 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
     This decorator attempts to use Numba JIT compilation for functions running on
     Apple Silicon (M1/M2) hardware. It includes enhanced error handling and
     compatibility checks to avoid common issues with Numba.
+    
+    For M3 Pro systems, consider using the more advanced m3_optimized decorator.
     
     Parameters
     ----------
@@ -67,7 +71,15 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
     - Not all Python constructs are compatible with Numba
     - Complex operations involving pandas or other high-level libraries may not work
     - If Numba compilation fails, the function will fall back to the original implementation
+    - For M3 Pro hardware, this will automatically delegate to m3_optimized
     """
+    # Check if running on M3 hardware - if so, delegate to m3_optimized
+    from .m3_utils import is_m3_processor
+    if is_m3_processor():
+        # Route to m3_optimized with equivalent parameters
+        return m3_optimized(parallel=parallel, use_numba=use_numba)
+    
+    # Original M1 optimization logic for M1/M2 hardware
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         # Try to import numba if requested
         if use_numba:
@@ -103,7 +115,6 @@ def m1_optimized(use_numba: bool = True, parallel: bool = True) -> Callable:
         # If numba is not requested or not available, return the original function
         return func
     
-    return decorator
     return decorator
 
 def disk_cache(

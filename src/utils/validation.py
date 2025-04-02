@@ -12,6 +12,7 @@ import json
 import re
 
 from .error_handler import ValidationError
+from .multiple_testing import apply_multiple_testing_correction, apply_multiple_testing_correction_to_results
 
 logger = logging.getLogger(__name__)
 
@@ -686,3 +687,41 @@ def raise_if_invalid(is_valid: bool, errors: List[str], error_msg: str = "Valida
     if not is_valid:
         detailed_msg = f"{error_msg}: {'; '.join(errors)}"
         raise ValidationError(detailed_msg)
+
+def validate_multiple_test_results(
+    results: Dict[str, Dict[str, Any]],
+    p_value_path: List[str],
+    method: str = 'fdr_bh',
+    alpha: float = 0.05
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Validate and adjust p-values in multiple hypothesis testing scenarios.
+    
+    This function applies multiple testing correction to p-values in a results dictionary,
+    updating significance based on corrected p-values.
+    
+    Parameters
+    ----------
+    results : dict
+        Dictionary of test results, e.g. from market pair analysis
+    p_value_path : list
+        Path to p-values in each result dictionary, e.g. ['cointegration', 'p_value']
+    method : str, default='fdr_bh'
+        Correction method (bonferroni, holm, fdr_bh, fdr_by)
+    alpha : float, default=0.05
+        Significance level
+        
+    Returns
+    -------
+    dict
+        Updated results dictionary with corrected p-values
+        
+    Notes
+    -----
+    This function applies the appropriate multiple testing correction
+    and adds corrected p-values to the results dictionary. It also
+    updates the 'significant' field based on corrected p-values.
+    """
+    return apply_multiple_testing_correction_to_results(
+        results, p_value_path, method=method, alpha=alpha
+    )
