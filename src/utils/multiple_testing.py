@@ -443,3 +443,9 @@ def calibrate_testing_threshold(
     
     else:
         raise ValueError(f"Unknown method: {method}")
+
+
+# Add a compatibility alias for backward compatibility
+# The old function name was apparently 'apply_multiple_testing_correction_to_results'
+# but the new function is 'apply_multiple_testing_to_results'
+apply_multiple_testing_correction_to_results = apply_multiple_testing_to_results

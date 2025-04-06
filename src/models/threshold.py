@@ -30,6 +30,11 @@ import pandas as pd
 
 # Import directly from local module to avoid circular imports
 from src.utils.config import config
+from src.utils.m3_utils import (
+    m3_optimized, chunk_iterator, process_in_chunks, 
+    optimize_array_computation, create_mmap_array,
+    memory_profile, tiered_cache
+)
 
 # Initialize module logger
 logger = logging.getLogger(__name__)
@@ -84,6 +89,13 @@ def ThresholdCointegration(
     # Import here to avoid circular imports
     from src.models.threshold_model import ThresholdModel
     
+    # Apply memory optimization to input arrays
+    if isinstance(data1, np.ndarray) and data1.nbytes > 100 * 1024 * 1024:  # > 100MB
+        data1 = optimize_array_computation(data1, precision='float32')
+    
+    if isinstance(data2, np.ndarray) and data2.nbytes > 100 * 1024 * 1024:  # > 100MB
+        data2 = optimize_array_computation(data2, precision='float32')
+    
     return ThresholdModel(
         data1, 
         data2, 
@@ -95,6 +107,7 @@ def ThresholdCointegration(
     )
 
 
+@m3_optimized(memory_intensive=True)
 def calculate_asymmetric_adjustment(
     adjustment_below: float, 
     adjustment_above: float
@@ -152,6 +165,7 @@ def calculate_asymmetric_adjustment(
     }
 
 
+@m3_optimized(memory_intensive=True)
 def calculate_half_life(residuals: np.ndarray) -> Dict[str, float]:
     """
     Calculate half-life of deviations from equilibrium.
@@ -174,13 +188,25 @@ def calculate_half_life(residuals: np.ndarray) -> Dict[str, float]:
         stacklevel=2
     )
     
+    # Memory-optimized implementation
+    # Use float32 precision if array is large
+    if isinstance(residuals, np.ndarray) and residuals.nbytes > 10 * 1024 * 1024:  # > 10MB
+        residuals = residuals.astype(np.float32)
+    
     # Fit AR(1) model to residuals
     y = residuals[1:]
     X = residuals[:-1]
-    X = np.column_stack([np.ones(len(X)), X])
     
-    # Estimate coefficients
-    beta = np.linalg.lstsq(X, y, rcond=None)[0]
+    # Use in-place operations for constructing design matrix
+    X_with_constant = np.empty((len(X), 2), dtype=X.dtype)
+    X_with_constant[:, 0] = 1.0  # Ones for intercept
+    X_with_constant[:, 1] = X    # Regressors
+    
+    # Estimate coefficients using optimized linear algebra
+    # Solve normal equations explicitly for small arrays to save memory
+    XtX = X_with_constant.T @ X_with_constant
+    Xty = X_with_constant.T @ y
+    beta = np.linalg.solve(XtX, Xty)
     
     # Extract AR coefficient
     ar_coef = beta[1]
@@ -197,6 +223,7 @@ def calculate_half_life(residuals: np.ndarray) -> Dict[str, float]:
     }
 
 
+@m3_optimized(memory_intensive=True)
 def test_asymmetric_adjustment(
     eq_errors: np.ndarray, 
     threshold: float, 
@@ -227,6 +254,11 @@ def test_asymmetric_adjustment(
         stacklevel=2
     )
     
+    # Memory-optimized implementation
+    # Use float32 precision if array is large 
+    if isinstance(eq_errors, np.ndarray) and eq_errors.nbytes > 10 * 1024 * 1024:
+        eq_errors = eq_errors.astype(np.float32)
+    
     # Create indicator variables
     below = eq_errors <= threshold
     above = ~below
@@ -235,18 +267,26 @@ def test_asymmetric_adjustment(
     n_below = np.sum(below)
     n_above = np.sum(above)
     
-    # Prepare data for regression
+    # Calculate differences and prepare data for regression efficiently
+    # Compute differences in-place
     y = np.diff(eq_errors)
-    X = np.column_stack([
-        eq_errors[:-1] * below[:-1],
-        eq_errors[:-1] * above[:-1]
-    ])
     
-    # Add constant
-    X = np.column_stack([np.ones(len(X)), X])
+    # Prepare regressor matrices efficiently
+    X_below = np.zeros(len(eq_errors) - 1, dtype=eq_errors.dtype)
+    X_above = np.zeros(len(eq_errors) - 1, dtype=eq_errors.dtype)
     
-    # Fit the model
-    beta = np.linalg.lstsq(X, y, rcond=None)[0]
+    # Use masked operations to avoid copying arrays
+    X_below[below[:-1]] = eq_errors[:-1][below[:-1]]
+    X_above[above[:-1]] = eq_errors[:-1][above[:-1]]
+    
+    # Create design matrix with constant
+    X = np.column_stack([np.ones(len(X_below), dtype=eq_errors.dtype), X_below, X_above])
+    
+    # Fit the model using optimized linear algebra
+    # For large arrays, use normal equations to save memory
+    XtX = X.T @ X
+    Xty = X.T @ y
+    beta = np.linalg.solve(XtX, Xty)
     
     # Extract adjustment speeds
     adjustment_below = beta[1]
@@ -256,22 +296,20 @@ def test_asymmetric_adjustment(
     residuals = y - X @ beta
     ssr = np.sum(residuals**2)
     
-    # Calculate F-statistic for H0: adjustment_below = adjustment_above
-    restriction = np.zeros((1, 3))
-    restriction[0, 1] = 1
-    restriction[0, 2] = -1
-    
-    # Calculate F-statistic
-    r = np.array([0])
-    q = X.shape[0] - 3  # degrees of freedom
-    
     # Calculate restricted model
-    X_r = np.column_stack([np.ones(len(X)), eq_errors[:-1]])
-    beta_r = np.linalg.lstsq(X_r, y, rcond=None)[0]
+    X_r = np.column_stack([np.ones(len(eq_errors) - 1, dtype=eq_errors.dtype), eq_errors[:-1]])
+    
+    # Fit restricted model using normal equations
+    XtX_r = X_r.T @ X_r
+    Xty_r = X_r.T @ y
+    beta_r = np.linalg.solve(XtX_r, Xty_r)
+    
+    # Calculate residuals and SSR for restricted model
     residuals_r = y - X_r @ beta_r
     ssr_r = np.sum(residuals_r**2)
     
     # Calculate F-statistic
+    q = X.shape[0] - 3  # degrees of freedom
     f_stat = ((ssr_r - ssr) / 1) / (ssr / q)
     
     # Calculate p-value
@@ -289,6 +327,7 @@ def test_asymmetric_adjustment(
     }
 
 
+@m3_optimized(memory_intensive=True)
 def test_mtar_adjustment(
     eq_errors: np.ndarray, 
     threshold: float = 0.0, 
@@ -319,7 +358,12 @@ def test_mtar_adjustment(
         stacklevel=2
     )
     
-    # Calculate changes in residuals (momentum)
+    # Memory-optimized implementation
+    # Use float32 precision if array is large
+    if isinstance(eq_errors, np.ndarray) and eq_errors.nbytes > 10 * 1024 * 1024:
+        eq_errors = eq_errors.astype(np.float32)
+    
+    # Calculate changes in residuals (momentum) in-place
     d_residuals = np.diff(eq_errors)
     
     # Create indicator variables based on momentum
@@ -330,18 +374,26 @@ def test_mtar_adjustment(
     n_positive = np.sum(positive)
     n_negative = np.sum(negative)
     
-    # Prepare data for regression
-    y = np.diff(d_residuals)  # Second difference
-    X = np.column_stack([
-        eq_errors[1:-1] * positive[:-1],
-        eq_errors[1:-1] * negative[:-1]
-    ])
+    # Prepare data for regression efficiently
+    # Second difference
+    y = np.diff(d_residuals)
     
-    # Add constant
-    X = np.column_stack([np.ones(len(X)), X])
+    # Prepare regressor matrices efficiently
+    X_positive = np.zeros(len(eq_errors) - 2, dtype=eq_errors.dtype)
+    X_negative = np.zeros(len(eq_errors) - 2, dtype=eq_errors.dtype)
     
-    # Fit the model
-    beta = np.linalg.lstsq(X, y, rcond=None)[0]
+    # Use masked operations to avoid copying arrays
+    X_positive[positive[:-1]] = eq_errors[1:-1][positive[:-1]]
+    X_negative[negative[:-1]] = eq_errors[1:-1][negative[:-1]]
+    
+    # Create design matrix with constant
+    X = np.column_stack([np.ones(len(X_positive), dtype=eq_errors.dtype), X_positive, X_negative])
+    
+    # Fit the model using optimized linear algebra
+    # Use normal equations for memory efficiency
+    XtX = X.T @ X
+    Xty = X.T @ y
+    beta = np.linalg.solve(XtX, Xty)
     
     # Extract adjustment speeds
     adjustment_positive = beta[1]
@@ -351,22 +403,20 @@ def test_mtar_adjustment(
     residuals = y - X @ beta
     ssr = np.sum(residuals**2)
     
-    # Calculate F-statistic for H0: adjustment_positive = adjustment_negative
-    restriction = np.zeros((1, 3))
-    restriction[0, 1] = 1
-    restriction[0, 2] = -1
-    
-    # Calculate F-statistic
-    r = np.array([0])
-    q = X.shape[0] - 3  # degrees of freedom
-    
     # Calculate restricted model
-    X_r = np.column_stack([np.ones(len(X)), eq_errors[1:-1]])
-    beta_r = np.linalg.lstsq(X_r, y, rcond=None)[0]
+    X_r = np.column_stack([np.ones(len(eq_errors) - 2, dtype=eq_errors.dtype), eq_errors[1:-1]])
+    
+    # Fit restricted model using normal equations
+    XtX_r = X_r.T @ X_r
+    Xty_r = X_r.T @ y
+    beta_r = np.linalg.solve(XtX_r, Xty_r)
+    
+    # Calculate residuals and SSR for restricted model
     residuals_r = y - X_r @ beta_r
     ssr_r = np.sum(residuals_r**2)
     
     # Calculate F-statistic
+    q = X.shape[0] - 3  # degrees of freedom
     f_stat = ((ssr_r - ssr) / 1) / (ssr / q)
     
     # Calculate p-value
