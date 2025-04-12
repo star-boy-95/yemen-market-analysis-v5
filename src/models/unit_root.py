@@ -1,1184 +1,577 @@
 """
-Unit root testing module for time series analysis.
+Unit root testing module for Yemen Market Analysis.
+
+This module provides functions for testing for unit roots in time series data.
+It includes implementations of various unit root tests, including ADF, KPSS,
+Phillips-Perron, and Zivot-Andrews tests.
 """
+import logging
+from typing import Dict, List, Optional, Union, Any, Tuple
+
 import pandas as pd
 import numpy as np
-import logging
-from typing import Dict, Any, Optional, Union, List, Tuple, Callable
-import gc
-import psutil
-import os
-import time
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from statsmodels.tsa.stattools import adfuller, kpss
-import arch.unitroot as unitroot
-import ruptures as rpt
+import statsmodels.api as sm
+from statsmodels.tsa.stattools import adfuller, kpss, coint
+from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS
 
-from yemen_market_integration.utils import (
-    # Error handling
-    handle_errors, ModelError,
-    
-    # Validation
-    validate_time_series, raise_if_invalid,
-    
-    # Performance
-    timer, m1_optimized, memory_usage_decorator, memoize, disk_cache,
-    configure_system_for_performance, optimize_dataframe, parallelize_dataframe,
-    
-    # Configuration
-    config
-)
+from src.config import config
+from src.utils.error_handling import YemenAnalysisError, handle_errors
+from src.utils.validation import validate_data
 
-# Initialize module logger
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-# Get configuration values following recommended pattern
-DEFAULT_ALPHA = config.get('analysis.cointegration.alpha', 0.05)
-MAX_LAGS = config.get('analysis.cointegration.max_lags', 4)
-TREND = config.get('analysis.cointegration.trend', 'c')
-
-# Configure system for optimal performance
-configure_system_for_performance()
-
 class UnitRootTester:
-    """Perform unit root tests on time series data."""
+    """
+    Unit root tester for Yemen Market Analysis.
     
-    @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def __init__(self):
-        """Initialize the unit root tester."""
-        # Get number of available workers based on CPU count
-        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
-        
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        logger.info(f"Initialized UnitRootTester. Memory usage: {memory_usage:.2f} MB")
+    This class provides methods for testing for unit roots in time series data.
+    It includes implementations of various unit root tests, including ADF, KPSS,
+    Phillips-Perron, and Zivot-Andrews tests.
     
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
+    Attributes:
+        alpha (float): Significance level for hypothesis tests.
+        max_lags (int): Maximum number of lags to consider in tests.
+    """
+    
+    def __init__(self, alpha: float = None, max_lags: int = None):
+        """
+        Initialize the unit root tester.
+        
+        Args:
+            alpha: Significance level for hypothesis tests. If None, uses the value
+                  from config.
+            max_lags: Maximum number of lags to consider in tests. If None, uses the
+                     value from config.
+        """
+        self.alpha = alpha if alpha is not None else config.get('analysis.unit_root.alpha', 0.05)
+        self.max_lags = max_lags if max_lags is not None else config.get('analysis.unit_root.max_lags', 4)
+    
+    @handle_errors
     def test_adf(
-        self, 
-        series: Union[pd.Series, np.ndarray], 
-        regression: str = 'c', 
-        lags: Optional[int] = None
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Perform Augmented Dickey-Fuller test.
+        Perform Augmented Dickey-Fuller test for unit root.
         
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        regression : str, optional
-            Constant and trend order to include in regression
-            'c' : constant only (default)
-            'ct' : constant and trend
-            'ctt' : constant, and linear and quadratic trend
-            'nc' : no constant, no trend
-        lags : int, optional
-            Number of lags to use in the ADF regression
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the test. Options are 'c' (constant),
+                  'ct' (constant and trend), 'ctt' (constant, linear and quadratic trend),
+                  and 'n' (no trend).
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results
-        """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=10,
-            max_nulls=0,
-            check_constant=True,
-            custom_validators={}  # Empty dict for now, can be populated with specific validators
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for ADF test")
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            series = series.values
-        
-        # Run ADF test
-        result = adfuller(series, regression=regression, maxlag=lags)
-        
-        # Format result
-        adf_result = {
-            'statistic': result[0],
-            'pvalue': result[1],
-            'usedlag': result[2],
-            'nobs': result[3],
-            'critical_values': result[4],
-            'icbest': result[5],
-            'stationary': result[1] < DEFAULT_ALPHA
-        }
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(f"ADF test: statistic={adf_result['statistic']:.4f}, p-value={adf_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return adf_result
-    
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def test_adf_gls(
-        self, 
-        series: Union[pd.Series, np.ndarray], 
-        lags: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Perform ADF-GLS test (Elliot, Rothenberg, Stock).
-        
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        lags : int, optional
-            Number of lags to use in the ADF regression
+        Returns:
+            Dictionary containing the test results.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Performing ADF test on {column} with trend={trend}")
         
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=10,
-            custom_validators={}
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for ADF-GLS test")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            series = series.values
+        # Get column data
+        col_data = data[column].dropna()
         
-        # Run ADF-GLS test
-        result = unitroot.DFGLS(series, lags=lags)
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
         
-        # Format result
-        adfgls_result = {
-            'statistic': result.stat,
-            'pvalue': result.pvalue,
-            'critical_values': result.critical_values,
-            'lags': result.lags,
-            'stationary': result.pvalue < DEFAULT_ALPHA
-        }
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(f"ADF-GLS test: statistic={adfgls_result['statistic']:.4f}, p-value={adfgls_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return adfgls_result
+        try:
+            # Perform ADF test
+            adf_result = adfuller(col_data, maxlag=max_lags, regression=trend)
+            
+            # Extract results
+            test_statistic = adf_result[0]
+            p_value = adf_result[1]
+            critical_values = adf_result[4]
+            n_lags = adf_result[2]
+            n_obs = adf_result[3]
+            
+            # Determine if the series is stationary
+            is_stationary = p_value < self.alpha
+            
+            # Create results dictionary
+            results = {
+                'test': 'ADF',
+                'column': column,
+                'trend': trend,
+                'test_statistic': test_statistic,
+                'p_value': p_value,
+                'critical_values': critical_values,
+                'n_lags': n_lags,
+                'n_obs': n_obs,
+                'is_stationary': is_stationary,
+                'alpha': self.alpha,
+            }
+            
+            logger.info(f"ADF test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_stationary={is_stationary}")
+            return results
+        except Exception as e:
+            logger.error(f"Error performing ADF test: {e}")
+            raise YemenAnalysisError(f"Error performing ADF test: {e}")
     
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
+    @handle_errors
     def test_kpss(
-        self, 
-        series: Union[pd.Series, np.ndarray], 
-        regression: str = 'c', 
-        lags: Optional[int] = None
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Perform KPSS test for stationarity.
         
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        regression : str, optional
-            'c' : constant only (default)
-            'ct' : constant and trend
-        lags : int, optional
-            Number of lags to use in the KPSS regression
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the test. Options are 'c' (constant) and
+                  'ct' (constant and trend).
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results
+        Returns:
+            Dictionary containing the test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Performing KPSS test on {column} with trend={trend}")
         
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=10,
-            custom_validators={}
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for KPSS test")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            series = series.values
+        # Get column data
+        col_data = data[column].dropna()
         
-        # Run KPSS test
-        result = kpss(series, regression=regression, nlags=lags)
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
         
-        # Format result (note: KPSS has opposite null hypothesis from ADF)
-        kpss_result = {
-            'statistic': result[0],
-            'pvalue': result[1],
-            'lags': result[2],
-            'critical_values': result[3],
-            'stationary': result[1] > DEFAULT_ALPHA  # Note: opposite from ADF
-        }
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(f"KPSS test: statistic={kpss_result['statistic']:.4f}, p-value={kpss_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return kpss_result
+        try:
+            # Perform KPSS test
+            kpss_result = kpss(col_data, regression=trend, nlags=max_lags)
+            
+            # Extract results
+            test_statistic = kpss_result[0]
+            p_value = kpss_result[1]
+            critical_values = kpss_result[3]
+            n_lags = kpss_result[2]
+            
+            # Determine if the series is stationary (note: KPSS null hypothesis is stationarity)
+            is_stationary = p_value > self.alpha
+            
+            # Create results dictionary
+            results = {
+                'test': 'KPSS',
+                'column': column,
+                'trend': trend,
+                'test_statistic': test_statistic,
+                'p_value': p_value,
+                'critical_values': critical_values,
+                'n_lags': n_lags,
+                'is_stationary': is_stationary,
+                'alpha': self.alpha,
+            }
+            
+            logger.info(f"KPSS test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_stationary={is_stationary}")
+            return results
+        except Exception as e:
+            logger.error(f"Error performing KPSS test: {e}")
+            raise YemenAnalysisError(f"Error performing KPSS test: {e}")
     
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def test_phillips_perron(
-        self, 
-        series: Union[pd.Series, np.ndarray],
-        trend: str = 'c',
-        lags: Optional[int] = None
+    @handle_errors
+    def test_pp(
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Perform Phillips-Perron test for unit root.
         
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        trend : str, optional
-            'c' : constant only (default)
-            'ct' : constant and trend
-            'nc' : no constant, no trend
-        lags : int, optional
-            Number of lags to use in the PP regression
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the test. Options are 'c' (constant),
+                  'ct' (constant and trend), and 'n' (no trend).
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results
+        Returns:
+            Dictionary containing the test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Performing Phillips-Perron test on {column} with trend={trend}")
         
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=10,
-            custom_validators={}
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for Phillips-Perron test")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            series = series.values
+        # Get column data
+        col_data = data[column].dropna()
         
-        # Run Phillips-Perron test
-        result = unitroot.PhillipsPerron(series, trend=trend, lags=lags)
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
         
-        # Format result
-        pp_result = {
-            'statistic': result.stat,
-            'pvalue': result.pvalue,
-            'critical_values': result.critical_values,
-            'lags': result.lags,
-            'stationary': result.pvalue < DEFAULT_ALPHA
-        }
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(f"Phillips-Perron test: statistic={pp_result['statistic']:.4f}, p-value={pp_result['pvalue']:.4f}. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return pp_result
+        try:
+            # Perform Phillips-Perron test
+            pp = PhillipsPerron(col_data, trend=trend, lags=max_lags)
+            pp_result = pp.summary()
+            
+            # Extract results
+            test_statistic = pp.stat
+            p_value = pp.pvalue
+            critical_values = {
+                '1%': pp.critical_values['1%'],
+                '5%': pp.critical_values['5%'],
+                '10%': pp.critical_values['10%'],
+            }
+            n_lags = pp.lags
+            
+            # Determine if the series is stationary
+            is_stationary = p_value < self.alpha
+            
+            # Create results dictionary
+            results = {
+                'test': 'Phillips-Perron',
+                'column': column,
+                'trend': trend,
+                'test_statistic': test_statistic,
+                'p_value': p_value,
+                'critical_values': critical_values,
+                'n_lags': n_lags,
+                'is_stationary': is_stationary,
+                'alpha': self.alpha,
+            }
+            
+            logger.info(f"Phillips-Perron test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_stationary={is_stationary}")
+            return results
+        except Exception as e:
+            logger.error(f"Error performing Phillips-Perron test: {e}")
+            raise YemenAnalysisError(f"Error performing Phillips-Perron test: {e}")
     
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def test_zivot_andrews(
-        self,
-        series: Union[pd.Series, np.ndarray],
-        max_lags: Optional[int] = None,
-        trend: str = 'both'
+    @handle_errors
+    def test_za(
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Perform Zivot-Andrews test for unit root with structural break.
-
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        max_lags : int, optional
-            Maximum number of lags
-        trend : str, optional
-            Trend specification ('intercept', 'trend', 'both')
+        Perform Zivot-Andrews test for unit root with a structural break.
+        
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the test. Options are 'c' (constant),
+                  't' (trend), and 'ct' (constant and trend).
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results including:
-            - statistic: test statistic
-            - p_value: p-value
-            - critical_values: critical values
-            - breakpoint: estimated breakpoint
-            - stationary: bool, whether series is stationary
+        Returns:
+            Dictionary containing the test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Performing Zivot-Andrews test on {column} with trend={trend}")
         
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=20,
-            custom_validators={}
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for Zivot-Andrews test")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # Store original index if Series with DatetimeIndex
-        has_datetime_index = isinstance(series, pd.Series) and isinstance(series.index, pd.DatetimeIndex)
-        original_index = series.index if has_datetime_index else None
-
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            series = series.values
+        # Get column data
+        col_data = data[column].dropna()
         
-        # Map trend parameter to valid ZivotAndrews trend values
-        trend_map = {
-            'intercept': 'c',
-            'trend': 't',
-            'both': 'ct'
-        }
-        valid_trend = trend_map.get(trend, 'ct')  # Default to 'ct' if invalid trend
-
-        # Run Zivot-Andrews test with specified parameters
-        result = unitroot.ZivotAndrews(series, lags=max_lags, trend=valid_trend)
-
-        # Format result
-        za_result = {
-            'statistic': result.stat,
-            'pvalue': result.pvalue,
-            'critical_values': result.critical_values,
-            'stationary': result.pvalue < DEFAULT_ALPHA,
-            # ZivotAndrews in arch.unitroot doesn't have a 'breakpoint' attribute
-            # It might have a different attribute for the breakpoint or none at all
-            'breakpoint': None  # Set to None for now
-        }
-
-        # Since we don't have a breakpoint, we can't determine a breakpoint date
-        # We'll leave this code commented out for reference
-        # if has_datetime_index and original_index is not None and za_result['breakpoint'] is not None:
-        #     try:
-        #         breakpoint_idx = za_result['breakpoint']
-        #         if 0 <= breakpoint_idx < len(original_index):
-        #             za_result['breakpoint_date'] = original_index[breakpoint_idx]
-        #     except (IndexError, TypeError) as e:
-        #         logger.warning(f"Could not determine breakpoint date: {e}")
-
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-
-        logger.info(
-            f"Zivot-Andrews test: statistic={za_result['statistic']:.4f}, "
-            f"p-value={za_result['pvalue']:.4f}. "
-            f"Memory usage: {memory_diff:.2f} MB"
-        )
-
-        # Force garbage collection
-        gc.collect()
-
-        return za_result
-
-    @timer
-    @m1_optimized(parallel=True)
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
+        
+        try:
+            # Perform Zivot-Andrews test
+            za = ZivotAndrews(col_data, trend=trend, lags=max_lags)
+            za_result = za.summary()
+            
+            # Extract results
+            test_statistic = za.stat
+            p_value = za.pvalue
+            critical_values = {
+                '1%': za.critical_values['1%'],
+                '5%': za.critical_values['5%'],
+                '10%': za.critical_values['10%'],
+            }
+            n_lags = za.lags
+            break_date = za.zacd
+            
+            # Determine if the series is stationary
+            is_stationary = p_value < self.alpha
+            
+            # Create results dictionary
+            results = {
+                'test': 'Zivot-Andrews',
+                'column': column,
+                'trend': trend,
+                'test_statistic': test_statistic,
+                'p_value': p_value,
+                'critical_values': critical_values,
+                'n_lags': n_lags,
+                'break_date': break_date,
+                'is_stationary': is_stationary,
+                'alpha': self.alpha,
+            }
+            
+            logger.info(f"Zivot-Andrews test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_stationary={is_stationary}, break_date={break_date}")
+            return results
+        except Exception as e:
+            logger.error(f"Error performing Zivot-Andrews test: {e}")
+            raise YemenAnalysisError(f"Error performing Zivot-Andrews test: {e}")
+    
+    @handle_errors
+    def test_dfgls(
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Perform DF-GLS test for unit root.
+        
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the test. Options are 'c' (constant) and
+                  'ct' (constant and trend).
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
+            
+        Returns:
+            Dictionary containing the test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
+        """
+        logger.info(f"Performing DF-GLS test on {column} with trend={trend}")
+        
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Get column data
+        col_data = data[column].dropna()
+        
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
+        
+        try:
+            # Perform DF-GLS test
+            dfgls = DFGLS(col_data, trend=trend, lags=max_lags)
+            dfgls_result = dfgls.summary()
+            
+            # Extract results
+            test_statistic = dfgls.stat
+            p_value = dfgls.pvalue
+            critical_values = {
+                '1%': dfgls.critical_values['1%'],
+                '5%': dfgls.critical_values['5%'],
+                '10%': dfgls.critical_values['10%'],
+            }
+            n_lags = dfgls.lags
+            
+            # Determine if the series is stationary
+            is_stationary = p_value < self.alpha
+            
+            # Create results dictionary
+            results = {
+                'test': 'DF-GLS',
+                'column': column,
+                'trend': trend,
+                'test_statistic': test_statistic,
+                'p_value': p_value,
+                'critical_values': critical_values,
+                'n_lags': n_lags,
+                'is_stationary': is_stationary,
+                'alpha': self.alpha,
+            }
+            
+            logger.info(f"DF-GLS test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_stationary={is_stationary}")
+            return results
+        except Exception as e:
+            logger.error(f"Error performing DF-GLS test: {e}")
+            raise YemenAnalysisError(f"Error performing DF-GLS test: {e}")
+    
+    @handle_errors
     def run_all_tests(
-        self, 
-        series: Union[pd.Series, np.ndarray], 
-        lags: Optional[int] = None
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None, include_dfgls: bool = True,
+        include_za: bool = True
     ) -> Dict[str, Dict[str, Any]]:
         """
         Run all unit root tests.
         
-        Parameters
-        ----------
-        series : array_like
-            The time series to test
-        lags : int, optional
-            Number of lags
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the tests.
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
+            include_dfgls: Whether to include the DF-GLS test.
+            include_za: Whether to include the Zivot-Andrews test.
             
-        Returns
-        -------
-        dict
-            Dictionary with results of all tests
+        Returns:
+            Dictionary mapping test names to test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or any of the tests fail.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Running all unit root tests on {column}")
         
-        # Validate input
-        valid, errors = validate_time_series(
-            series,
-            min_length=20,
-            custom_validators={}
-        )
-        raise_if_invalid(valid, errors, "Invalid time series for unit root tests")
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
         
-        # Run tests in parallel for better performance
+        # Run tests
         results = {}
         
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            # Submit test tasks
-            futures = {}
-            futures['adf'] = executor.submit(self.test_adf, series, lags=lags)
-            futures['adf_gls'] = executor.submit(self.test_adf_gls, series, lags=lags)
-            futures['kpss'] = executor.submit(self.test_kpss, series, lags=lags)
-            futures['phillips_perron'] = executor.submit(self.test_phillips_perron, series, lags=lags)
-            
-            # Zivot-Andrews test is more computationally intensive, so run it separately
-            futures['zivot_andrews'] = executor.submit(self.test_zivot_andrews, series)
-            
-            # Collect results as they complete
-            for test_name, future in futures.items():
-                try:
-                    results[test_name] = future.result()
-                except Exception as e:
-                    logger.warning(f"Error in {test_name} test: {e}")
-                    results[test_name] = {'error': str(e)}
+        # ADF test
+        adf_results = self.test_adf(data, column, trend, max_lags)
+        results['ADF'] = adf_results
         
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
+        # KPSS test
+        kpss_results = self.test_kpss(data, column, trend, max_lags)
+        results['KPSS'] = kpss_results
         
-        logger.info(f"All unit root tests complete. Memory usage: {memory_diff:.2f} MB")
+        # Phillips-Perron test
+        pp_results = self.test_pp(data, column, trend, max_lags)
+        results['PP'] = pp_results
         
-        # Force garbage collection
-        gc.collect()
+        # DF-GLS test
+        if include_dfgls:
+            dfgls_results = self.test_dfgls(data, column, trend, max_lags)
+            results['DFGLS'] = dfgls_results
         
+        # Zivot-Andrews test
+        if include_za:
+            za_results = self.test_za(data, column, trend, max_lags)
+            results['ZA'] = za_results
+        
+        # Determine overall stationarity
+        is_stationary = (
+            results['ADF']['is_stationary'] and
+            results['KPSS']['is_stationary'] and
+            results['PP']['is_stationary']
+        )
+        
+        if include_dfgls:
+            is_stationary = is_stationary and results['DFGLS']['is_stationary']
+        
+        if include_za:
+            is_stationary = is_stationary and results['ZA']['is_stationary']
+        
+        # Add overall result
+        results['overall'] = {
+            'is_stationary': is_stationary,
+            'alpha': self.alpha,
+        }
+        
+        logger.info(f"Overall stationarity result: {is_stationary}")
         return results
     
-    @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def determine_integration_order(
-        self, 
-        series: Union[pd.Series, np.ndarray], 
-        max_order: int = 2, 
-        test: str = 'adf'
-    ) -> int:
-        """
-        Determine order of integration for a time series.
-
-        If the dataset has more than 10,000 observations, the series is processed in chunks
-        of configurable size (default 5000) to be memory-aware.
-
-        Parameters
-        ----------
-        series : Union[pd.Series, np.ndarray]
-            The time series to test.
-        max_order : int, optional
-            Maximum integration order to test (default is 2).
-        test : str, optional
-            Unit root test to use ('adf', 'adf_gls', 'kpss', 'phillips_perron') (default is 'adf').
-
-        Returns
-        -------
-        int
-            Order of integration.
-        """
-        process: psutil.Process = psutil.Process(os.getpid())
-        start_mem: float = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        # Determine number of observations
-        n_obs: int = len(series) if isinstance(series, pd.Series) else series.shape[0]
-        
-        # For large datasets, process in chunks
-        if n_obs > 10000:
-            chunk_size: int = config.get('analysis.chunk_size', 5000)
-            logger.info(f"Large dataset detected with {n_obs} observations. Processing in chunks of {chunk_size}.")
-            orders: List[int] = []
-            for start in range(0, n_obs, chunk_size):
-                end: int = min(start + chunk_size, n_obs)
-                if isinstance(series, pd.Series):
-                    chunk = series.iloc[start:end]
-                else:
-                    chunk = series[start:end]
-                if len(chunk) < 10:
-                    continue
-                d_chunk: int = self._determine_integration_order_for_chunk(chunk, max_order, test)
-                orders.append(d_chunk)
-                gc.collect()
-            overall_order: int = max(orders) if orders else max_order + 1
-            logger.info(f"Determined integration order from chunks: I({overall_order})")
-            end_mem = process.memory_info().rss / (1024 * 1024)
-            logger.debug(f"Integration order determination (chunked) complete. Memory usage: {end_mem - start_mem:.2f} MB")
-            return overall_order
-        
-        # For smaller datasets, use the original approach
-        if isinstance(series, pd.Series):
-            test_series = series.copy()
-        else:
-            test_series = np.copy(series)
-        
-        for d in range(max_order + 1):
-            logger.info(f"Testing integration order {d}")
-            if test == 'adf':
-                result = self.test_adf(test_series)
-            elif test == 'adf_gls':
-                result = self.test_adf_gls(test_series)
-            elif test == 'kpss':
-                result = self.test_kpss(test_series)
-            elif test == 'phillips_perron':
-                result = self.test_phillips_perron(test_series)
-            else:
-                raise ValueError(f"Unknown test: {test}")
-            
-            if result['stationary']:
-                logger.info(f"Series is I({d}) - stationary after {d} differences")
-                end_mem = process.memory_info().rss / (1024 * 1024)
-                logger.debug(f"Integration order determination complete. Memory usage: {end_mem - start_mem:.2f} MB")
-                return d
-            
-            if d < max_order:
-                if isinstance(test_series, pd.Series):
-                    test_series = test_series.diff().dropna()
-                else:
-                    test_series = np.diff(test_series)
-        
-        logger.warning(f"Series has integration order > {max_order}")
-        end_mem = process.memory_info().rss / (1024 * 1024)
-        logger.debug(f"Integration order determination complete. Memory usage: {end_mem - start_mem:.2f} MB")
-        gc.collect()
-        return max_order + 1
-
-class StructuralBreakTester:
-    """Detect structural breaks in time series data."""
-    
-    @timer
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def __init__(self):
-        """Initialize the structural break tester."""
-        # Get number of available workers based on CPU count
-        self.n_workers = config.get('performance.n_workers', max(1, mp.cpu_count() - 1))
-        
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        memory_usage = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        logger.info(f"Initialized StructuralBreakTester. Memory usage: {memory_usage:.2f} MB")
-    
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def test_bai_perron(
-        self,
-        series: Union[pd.Series, np.ndarray],
-        min_size: int = 5,
-        n_breaks: int = 3,
-        method: str = 'dynp',
-        pen: float = 3.0
+    @handle_errors
+    def test_order_of_integration(
+        self, data: pd.DataFrame, column: str = 'price', trend: str = 'c',
+        max_lags: Optional[int] = None, max_diff: int = 2
     ) -> Dict[str, Any]:
         """
-        Detect multiple structural breaks using Bai-Perron method via ruptures.
+        Determine the order of integration of a time series.
         
-        Parameters
-        ----------
-        series : array_like
-            The time series to analyze
-        min_size : int, optional
-            Minimum segment length
-        n_breaks : int, optional
-            Maximum number of breaks to detect
-        method : str, optional
-            Detection method: 'dynp' (dynamic programming) or 'binseg' (binary segmentation)
-        pen : float, optional
-            Penalty for adding a breakpoint
+        Args:
+            data: DataFrame containing the data.
+            column: Column to test.
+            trend: Trend to include in the tests.
+            max_lags: Maximum number of lags to consider. If None, uses the value
+                     from the class.
+            max_diff: Maximum number of differences to consider.
             
-        Returns
-        -------
-        dict
-            Dictionary with test results
+        Returns:
+            Dictionary containing the test results.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the test fails.
         """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
+        logger.info(f"Determining order of integration for {column}")
         
-        # Validate input
-        valid, errors = validate_time_series(series, min_length=2*min_size)
-        raise_if_invalid(valid, errors, "Invalid time series for Bai-Perron test")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # Store original index if Series with DatetimeIndex
-        has_datetime_index = isinstance(series, pd.Series) and isinstance(series.index, pd.DatetimeIndex)
-        original_index = series.index if has_datetime_index else None
+        # Set max_lags
+        if max_lags is None:
+            max_lags = self.max_lags
         
-        # Convert to numpy array if pandas Series
-        if isinstance(series, pd.Series):
-            array = series.values
-        else:
-            array = np.array(series)
+        # Make a copy of the data
+        data_copy = data.copy()
         
-        array = array.reshape(-1, 1)  # Ensure 2D for ruptures
-        
-        # Select algorithm
-        if method == 'dynp':
-            algo = rpt.Dynp(model="l2", min_size=min_size, jump=1).fit(array)
-        elif method == 'binseg':
-            algo = rpt.Binseg(model="l2", min_size=min_size).fit(array)
-        else:
-            raise ValueError(f"Unsupported method: {method}")
-            
-        # Get optimal breakpoints
-        breakpoints = algo.predict(n_bkps=n_breaks, pen=pen)
-        
-        # Remove the last breakpoint if it's just the series length
-        if breakpoints and breakpoints[-1] == len(array):
-            breakpoints = breakpoints[:-1]
-        
-        # Create breakpoint_dates list if datetime index available
-        breakpoint_dates = None
-        if has_datetime_index and original_index is not None:
-            try:
-                breakpoint_dates = [original_index[bp-1] for bp in breakpoints]
-            except (IndexError, TypeError) as e:
-                logger.warning(f"Could not determine breakpoint dates: {e}")
-        
-        # Format result
-        bp_result = {
-            'breakpoints': breakpoints,
-            'n_breakpoints': len(breakpoints),
-            'method': method,
-            'pen': pen
-        }
-        
-        # Add dates if available
-        if breakpoint_dates:
-            bp_result['breakpoint_dates'] = breakpoint_dates
-        
-        # Create segments (for potential plotting)
-        segments = []
-        start = 0
-        for bp in breakpoints:
-            segments.append((start, bp))
-            start = bp
-        
-        bp_result['segments'] = segments
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(f"Bai-Perron test: detected {bp_result['n_breakpoints']} breakpoints. Memory usage: {memory_diff:.2f} MB")
-        
-        # Force garbage collection
-        gc.collect()
-        
-        return bp_result
-    
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def test_gregory_hansen(
-        self,
-        y: Union[pd.Series, np.ndarray],
-        x: Union[pd.Series, pd.DataFrame, np.ndarray],
-        model: str = 'cc'
-    ) -> Dict[str, Any]:
-        """
-        Gregory-Hansen test for cointegration with regime shifts.
-        
-        Parameters
-        ----------
-        y : array_like
-            Dependent variable time series
-        x : array_like
-            Independent variable(s) time series
-        model : str, optional
-            Type of structural change model:
-            'cc' : level shift (default)
-            'ct' : level shift with trend
-            'ctt' : regime shift (intercept and slope)
-            
-        Returns
-        -------
-        dict
-            Dictionary with test results
-        """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        # Validate input
-        valid_y, errors_y = validate_time_series(y, min_length=30)
-        raise_if_invalid(valid_y, errors_y, "Invalid dependent variable for Gregory-Hansen test")
-        
-        # Store original index if Series with DatetimeIndex
-        has_datetime_index = isinstance(y, pd.Series) and isinstance(y.index, pd.DatetimeIndex)
-        original_index = y.index if has_datetime_index else None
-        
-        # Prepare data
-        y_array = y.values if isinstance(y, pd.Series) else np.array(y)
-        
-        # Handle x as DataFrame, Series, or ndarray
-        if isinstance(x, pd.DataFrame):
-            x_array = x.values
-        elif isinstance(x, pd.Series):
-            x_array = x.values.reshape(-1, 1)
-        else:
-            x_array = np.array(x)
-            if x_array.ndim == 1:
-                x_array = x_array.reshape(-1, 1)
-        
-        # Ensure y and x have the same length
-        if len(y_array) != len(x_array):
-            raise ValueError("Dependent and independent variables must have the same length")
-        
-        # For large datasets, process in chunks to reduce memory usage
-        if len(y_array) > 5000:
-            return self._process_gregory_hansen_parallel(y_array, x_array, model, original_index)
-        
-        # Use unitroot_adf test with rolling windows to detect structural breaks
-        n = len(y_array)
-        trim = int(0.15 * n)  # Trim 15% from each end
-        test_range = range(trim, n - trim)
-        
-        min_adf = np.inf
-        breakpoint = None
-        results = []
-        
-        # Setup unit root tester
-        ur_tester = UnitRootTester()
-        
-        # Test each possible breakpoint
-        for i in test_range:
-            # Create dummy variable for break
-            dummy = np.zeros(n)
-            dummy[i:] = 1
-            
-            # Create regressor matrix based on model type
-            if model == 'cc':
-                # Level shift only
-                X = np.column_stack((np.ones(n), dummy, x_array))
-            elif model == 'ct':
-                # Level shift with trend
-                trend = np.arange(n)
-                X = np.column_stack((np.ones(n), dummy, trend, x_array))
-            elif model == 'ctt':
-                # Regime shift (intercept and slope)
-                X_with_dummy = x_array * dummy.reshape(-1, 1)
-                X = np.column_stack((np.ones(n), dummy, x_array, X_with_dummy))
-            else:
-                raise ValueError(f"Unknown model type: {model}")
-            
-            # OLS regression
-            try:
-                from statsmodels.regression.linear_model import OLS
-                model_fit = OLS(y_array, X).fit()
-                residuals = model_fit.resid
-                
-                # Test for cointegration (stationarity of residuals)
-                adf_result = ur_tester.test_adf(residuals, regression='nc')
-                
-                # Store results
-                result = {
-                    'breakpoint': i,
-                    'adf_stat': adf_result['statistic'],
-                    'pvalue': adf_result['pvalue']
-                }
-                results.append(result)
-                
-                # Update minimum ADF statistic
-                if adf_result['statistic'] < min_adf:
-                    min_adf = adf_result['statistic'] 
-                    breakpoint = i
-                
-            except Exception as e:
-                logger.warning(f"Error during Gregory-Hansen testing at breakpoint {i}: {e}")
-                continue
-        
-        # Format final result
-        critical_values = {
-            'cc': {'1%': -5.13, '5%': -4.61, '10%': -4.34},
-            'ct': {'1%': -5.45, '5%': -4.99, '10%': -4.72},
-            'ctt': {'1%': -5.47, '5%': -4.95, '10%': -4.68}
-        }.get(model, {'1%': -5.13, '5%': -4.61, '10%': -4.34})
-        
-        # Determine if cointegrated (stationary residuals)
-        cointegrated = min_adf < critical_values['5%']
-        
-        gh_result = {
-            'adf_stat': min_adf,
-            'breakpoint': breakpoint,
-            'critical_values': critical_values,
-            'cointegrated': cointegrated,
-            'model': model,
-            'all_tests': results
-        }
-        
-        # Add breakpoint_date if datetime index is available
-        if has_datetime_index and original_index is not None and breakpoint is not None:
-            try:
-                gh_result['breakpoint_date'] = original_index[breakpoint]
-            except (IndexError, TypeError) as e:
-                logger.warning(f"Could not determine breakpoint date: {e}")
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(
-            f"Gregory-Hansen test: ADF stat={gh_result['adf_stat']:.4f}, "
-            f"breakpoint={gh_result['breakpoint']}, cointegrated={gh_result['cointegrated']}. "
-            f"Memory usage: {memory_diff:.2f} MB"
+        # Test the original series
+        level_results = self.run_all_tests(
+            data_copy, column, trend, max_lags, include_dfgls=False, include_za=False
         )
         
-        # Force garbage collection
-        gc.collect()
-        
-        return gh_result
-    
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def _process_gregory_hansen_parallel(
-        self,
-        y_array: np.ndarray,
-        x_array: np.ndarray,
-        model: str,
-        original_index: Optional[pd.DatetimeIndex] = None
-    ) -> Dict[str, Any]:
-        """
-        Process Gregory-Hansen test in parallel for large datasets.
-        
-        Parameters
-        ----------
-        y_array : np.ndarray
-            Dependent variable array
-        x_array : np.ndarray
-            Independent variable(s) array
-        model : str
-            Model type
-        original_index : pd.DatetimeIndex, optional
-            Original datetime index
-            
-        Returns
-        -------
-        Dict[str, Any]
-            Test results
-        """
-        # Track memory usage
-        process = psutil.Process(os.getpid())
-        start_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        
-        # Get dimensions
-        n = len(y_array)
-        trim = int(0.15 * n)  # Trim 15% from each end
-        test_range = list(range(trim, n - trim))
-        
-        # Split test range into batches for parallel processing
-        batch_size = max(100, len(test_range) // (self.n_workers * 2))  # Ensure enough tasks
-        batches = [test_range[i:i + batch_size] for i in range(0, len(test_range), batch_size)]
-        
-        logger.info(f"Processing Gregory-Hansen test in {len(batches)} batches")
-        
-        # Initialize UnitRootTester outside loop to avoid repeated initialization
-        ur_tester = UnitRootTester()
-        
-        # Process batches in parallel
-        all_results = []
-        
-        with ProcessPoolExecutor(max_workers=self.n_workers) as executor:
-            # Submit batch tasks
-            futures = []
-            for i, batch in enumerate(batches):
-                futures.append(executor.submit(
-                    self._process_gh_batch,
-                    y_array=y_array,
-                    x_array=x_array,
-                    model=model,
-                    breakpoints=batch,
-                    batch_idx=i,
-                    ur_tester=ur_tester
-                ))
-            
-            # Collect results
-            for future in as_completed(futures):
-                try:
-                    batch_results = future.result()
-                    if batch_results:
-                        all_results.extend(batch_results)
-                except Exception as e:
-                    logger.warning(f"Error in Gregory-Hansen batch: {e}")
-        
-        # Find minimum ADF statistic
-        min_result = min(all_results, key=lambda x: x['adf_stat']) if all_results else None
-        
-        if min_result is None:
-            logger.warning("No valid Gregory-Hansen results found")
+        if level_results['overall']['is_stationary']:
+            logger.info(f"{column} is stationary at level (I(0))")
             return {
-                'adf_stat': None,
-                'breakpoint': None,
-                'cointegrated': False,
-                'model': model,
-                'all_tests': []
+                'order': 0,
+                'level_results': level_results,
+                'diff_results': None,
             }
         
-        min_adf = min_result['adf_stat']
-        breakpoint = min_result['breakpoint']
-        
-        # Format final result
-        critical_values = {
-            'cc': {'1%': -5.13, '5%': -4.61, '10%': -4.34},
-            'ct': {'1%': -5.45, '5%': -4.99, '10%': -4.72},
-            'ctt': {'1%': -5.47, '5%': -4.95, '10%': -4.68}
-        }.get(model, {'1%': -5.13, '5%': -4.61, '10%': -4.34})
-        
-        # Determine if cointegrated (stationary residuals)
-        cointegrated = min_adf < critical_values['5%']
-        
-        gh_result = {
-            'adf_stat': min_adf,
-            'breakpoint': breakpoint,
-            'critical_values': critical_values,
-            'cointegrated': cointegrated,
-            'model': model,
-            'all_tests': all_results
-        }
-        
-        # Add breakpoint_date if datetime index is available
-        if original_index is not None and breakpoint is not None:
-            try:
-                gh_result['breakpoint_date'] = original_index[breakpoint]
-            except (IndexError, TypeError) as e:
-                logger.warning(f"Could not determine breakpoint date: {e}")
-        
-        # Track memory after processing
-        end_mem = process.memory_info().rss / (1024 * 1024)  # MB
-        memory_diff = end_mem - start_mem
-        
-        logger.info(
-            f"Gregory-Hansen test (parallel): ADF stat={gh_result['adf_stat']:.4f}, "
-            f"breakpoint={gh_result['breakpoint']}, cointegrated={gh_result['cointegrated']}. "
-            f"Memory usage: {memory_diff:.2f} MB"
+        # Test first difference
+        data_copy[f'{column}_diff1'] = data_copy[column].diff().dropna()
+        diff1_results = self.run_all_tests(
+            data_copy, f'{column}_diff1', trend, max_lags, include_dfgls=False, include_za=False
         )
         
-        # Force garbage collection
-        gc.collect()
+        if diff1_results['overall']['is_stationary']:
+            logger.info(f"{column} is integrated of order 1 (I(1))")
+            return {
+                'order': 1,
+                'level_results': level_results,
+                'diff_results': diff1_results,
+            }
         
-        return gh_result
-    
-    @memoize
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    @timer
-    def _process_gh_batch(
-        self,
-        y_array: np.ndarray,
-        x_array: np.ndarray,
-        model: str,
-        breakpoints: List[int],
-        batch_idx: int,
-        ur_tester: Optional[UnitRootTester] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Process a batch of Gregory-Hansen tests with caching and early stopping.
-        
-        Parameters
-        ----------
-        y_array : np.ndarray
-            Dependent variable array.
-        x_array : np.ndarray
-            Independent variable(s) array.
-        model : str
-            Model type.
-        breakpoints : List[int]
-            Breakpoints to test in this batch.
-        batch_idx : int
-            Batch index for logging.
-        ur_tester : UnitRootTester, optional
-            Unit root tester instance.
+        # Test second difference if needed
+        if max_diff >= 2:
+            data_copy[f'{column}_diff2'] = data_copy[f'{column}_diff1'].diff().dropna()
+            diff2_results = self.run_all_tests(
+                data_copy, f'{column}_diff2', trend, max_lags, include_dfgls=False, include_za=False
+            )
             
-        Returns
-        -------
-        List[Dict[str, Any]]
-            Batch test results.
-        """
-        # Cache to avoid redundant calculations
-        cache: Dict[int, Dict[str, Any]] = {}
-        batch_results: List[Dict[str, Any]] = []
-        early_stop_threshold: float = config.get('analysis.gh.early_stop_threshold', -10.0)
+            if diff2_results['overall']['is_stationary']:
+                logger.info(f"{column} is integrated of order 2 (I(2))")
+                return {
+                    'order': 2,
+                    'level_results': level_results,
+                    'diff_results': {
+                        'diff1': diff1_results,
+                        'diff2': diff2_results,
+                    },
+                }
         
-        if ur_tester is None:
-            ur_tester = UnitRootTester()
-        
-        n = len(y_array)
-        for idx, bp in enumerate(breakpoints):
-            # Periodic feedback via logger
-            if idx % 100 == 0 and idx > 0:
-                logger.debug(f"Batch {batch_idx}: Processed {idx}/{len(breakpoints)} breakpoints")
-            if bp in cache:
-                res = cache[bp]
-            else:
-                # Create dummy variable for break
-                dummy = np.zeros(n)
-                dummy[bp:] = 1
-                try:
-                    if model == 'cc':
-                        # Level shift only
-                        X = np.column_stack((np.ones(n), dummy, x_array))
-                    elif model == 'ct':
-                        # Level shift with trend
-                        trend = np.arange(n)
-                        X = np.column_stack((np.ones(n), dummy, trend, x_array))
-                    elif model == 'ctt':
-                        # Regime shift (intercept and slope)
-                        X_with_dummy = x_array * dummy.reshape(-1, 1)
-                        X = np.column_stack((np.ones(n), dummy, x_array, X_with_dummy))
-                    else:
-                        raise ValueError(f"Unknown model type: {model}")
-                    
-                    from statsmodels.regression.linear_model import OLS
-                    model_fit = OLS(y_array, X).fit()
-                    residuals = model_fit.resid
-                    adf_result = ur_tester.test_adf(residuals, regression='nc')
-                    res = {
-                        'breakpoint': bp,
-                        'adf_stat': adf_result['statistic'],
-                        'pvalue': adf_result['pvalue']
-                    }
-                    cache[bp] = res
-                except Exception as e:
-                    logger.debug(f"Error testing breakpoint {bp} in batch {batch_idx}: {e}")
-                    continue
-            batch_results.append(res)
-            # Early stopping: if very significant breakpoint found, break out early
-            if res.get('adf_stat', 0) < early_stop_threshold:
-                logger.info(f"Early stopping in batch {batch_idx} at breakpoint {bp} with adf_stat={res['adf_stat']}")
-                break
-        logger.debug(f"Completed batch {batch_idx}: processed {len(batch_results)}/{len(breakpoints)} breakpoints")
-        return batch_results
-
-    def multiple_test_comparison(
-        self, 
-        tests_results: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Consolidate results from run_all_tests using weighted reliability.
-        
-        Parameters
-        ----------
-        tests_results : dict
-            Results from run_all_tests with keys like 'adf', 'adf_gls', 'kpss', 'phillips_perron'.
-            
-        Returns
-        -------
-        dict
-            Consolidated result including a consensus recommendation and confidence level.
-        """
-        weights: Dict[str, float] = {
-            'adf': 0.3,
-            'adf_gls': 0.25,
-            'kpss': 0.2,
-            'phillips_perron': 0.25
-        }
-        score = 0.0
-        total_weight = 0.0
-        details: Dict[str, float] = {}
-        for test, result in tests_results.items():
-            w = weights.get(test, 0)
-            total_weight += w
-            # Assume 'stationary' flag indicates reliability; use pvalue to refine score if available.
-            if result.get('stationary', False):
-                score += w
-                details[test] = w
-            else:
-                details[test] = 0.0
-        confidence = score / total_weight if total_weight else 0
-        consensus = 'stationary' if confidence >= 0.5 else 'non-stationary'
-        logger.info(f"Multiple test comparison: consensus={consensus} with confidence={confidence:.2f}")
+        # If we get here, the series is not stationary after max_diff differences
+        logger.warning(f"{column} is not stationary after {max_diff} differences")
         return {
-            'consensus': consensus,
-            'confidence': confidence,
-            'details': details
-        }
-
-    def detect_multivariate_breaks(
-        self, 
-        data: np.ndarray, 
-        pen: float = 3.0, 
-        model: str = 'l2'
-    ) -> Dict[str, Any]:
-        """
-        Detect structural breaks in multivariate time series using the PELT method.
-        
-        Parameters
-        ----------
-        data : np.ndarray
-            2D array where each column represents a time series.
-        pen : float, optional
-            Penalty value for adding a breakpoint.
-        model : str, optional
-            Model to use in ruptures (default 'l2').
-            
-        Returns
-        -------
-        dict
-            Results including breakpoints and segment information.
-        """
-        # Ensure data is a 2D numpy array using advanced indexing if necessary.
-        if data.ndim != 2:
-            raise ValueError("Input data must be a 2D array for multivariate analysis")
-        # Use PELT algorithm from ruptures for efficient break detection
-        algo = rpt.Pelt(model=model).fit(data)
-        breakpoints: List[int] = algo.predict(pen=pen)
-        if breakpoints and breakpoints[-1] == data.shape[0]:
-            breakpoints = breakpoints[:-1]
-        segments: List[Tuple[int, int]] = []
-        start = 0
-        for bp in breakpoints:
-            segments.append((start, bp))
-            start = bp
-        logger.info(f"Multivariate break detection: found {len(breakpoints)} breakpoints.")
-        return {
-            'breakpoints': breakpoints,
-            'segments': segments,
-            'penalty': pen,
-            'model': model
+            'order': max_diff + 1,  # Indicates higher order than max_diff
+            'level_results': level_results,
+            'diff_results': {
+                'diff1': diff1_results,
+                'diff2': diff2_results if max_diff >= 2 else None,
+            },
         }

@@ -1,58 +1,55 @@
+#!/usr/bin/env python
 """
-Setup script for yemen-market-integration package.
+Setup script for Yemen Market Analysis package.
 
-This package implements econometric methodologies for analyzing market integration
-in conflict-affected Yemen, with a focus on threshold cointegration and 
-spatial econometric techniques.
+This package provides tools for analyzing market integration in Yemen,
+with a focus on econometric methods for time series and spatial analysis.
 """
 from setuptools import setup, find_packages
-from pathlib import Path
-
-# Read the contents of README file
-this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text()
 
 setup(
-    name="yemen-market-integration",
-    version="0.5.0",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
-    python_requires=">=3.8",
-    author="Yemen Market Integration Team",
-    author_email="malakkaoui@worldbank.org",
-    description="Econometric analysis of market integration in Yemen",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    keywords="market integration, conflict economics, threshold cointegration, spatial econometrics",
-    url="https://github.com/star-boy-95/yemen-market-analysis-v5",
+    name="yemen_market_analysis",
+    version="2.0.0",
+    description="Econometric analysis tools for Yemen market integration",
+    author="Mohammad Al-Akkaoui",
+    author_email="mohammad@al-akkaoui.com",
+    packages=find_packages(),
+    include_package_data=True,
+    install_requires=[
+        "numpy>=1.20.0",
+        "pandas>=1.3.0",
+        "matplotlib>=3.4.0",
+        "statsmodels>=0.13.0",
+        "scipy>=1.7.0",
+        "geopandas>=0.10.0",
+        "plotly>=5.3.0",
+        "dash>=2.0.0",
+        "arch>=5.0.0",
+        "ruptures>=1.1.5",
+    ],
+    extras_require={
+        "dev": [
+            "pytest>=6.0.0",
+            "pytest-cov>=2.12.0",
+            "black>=21.5b2",
+            "flake8>=3.9.0",
+            "mypy>=0.812",
+            "sphinx>=4.0.0",
+            "sphinx-rtd-theme>=0.5.0",
+        ],
+        "spatial": [
+            "pysal>=2.3.0",
+            "libpysal>=4.5.0",
+            "esda>=2.4.0",
+            "splot>=1.1.0",
+        ],
+    },
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
+        "Topic :: Scientific/Engineering :: Information Analysis",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
-        "Topic :: Scientific/Engineering :: Information Analysis",
     ],
-    entry_points={
-        "console_scripts": [
-            "yemen-analysis=src.main:main",
-        ],
-    },
-    # Load requirements from requirements.txt
-    install_requires=open("requirements.txt").read().strip().split("\n"),
-    include_package_data=True,
-    package_data={
-        "yemen_market_integration": [
-            "config/*.yaml",
-            "data/processed/*.csv",
-            "data/processed/*.geojson",
-        ],
-    },
-    # Load development requirements from requirements-dev.txt
-    extras_require={
-        "dev": [line.strip() for line in open("requirements-dev.txt").readlines() 
-               if not line.startswith("-r") and not line.startswith("#") and line.strip()]
-    },
+    python_requires=">=3.9",
 )

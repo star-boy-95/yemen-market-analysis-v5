@@ -1,276 +1,599 @@
 """
-Data preprocessing utilities for Yemen market integration analysis.
+Data preprocessor module for Yemen Market Analysis.
+
+This module provides functions for preprocessing data for the Yemen Market Analysis
+package. It includes functions for handling missing values, outlier detection,
+and feature engineering.
 """
-import pandas as pd
-import geopandas as gpd
-import numpy as np
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any, Tuple
 
-from yemen_market_integration.utils import handle_errors, validate_geodataframe, raise_if_invalid
-from yemen_market_integration.utils import clean_column_names, convert_dates, fill_missing_values
-from yemen_market_integration.utils import normalize_columns, create_date_features, create_lag_features
-from yemen_market_integration.utils import validate_dataframe
+import pandas as pd
+import numpy as np
+from scipy import stats
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
+from src.config import config
+from src.utils.error_handling import YemenAnalysisError, handle_errors
+from src.utils.validation import validate_data
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-
 class DataPreprocessor:
-    """Preprocess raw GeoJSON market data."""
+    """
+    Data preprocessor for Yemen Market Analysis.
+    
+    This class provides methods for preprocessing data for the Yemen Market Analysis
+    package.
+    
+    Attributes:
+        scalers (Dict[str, Any]): Dictionary of fitted scalers.
+    """
     
     def __init__(self):
-        """Initialize the preprocessor."""
-        pass
+        """Initialize the data preprocessor."""
+        self.scalers: Dict[str, Any] = {}
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
-    def preprocess_geojson(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    @handle_errors
+    def detect_outliers(
+        self, data: pd.DataFrame, column: str, method: str = 'zscore', threshold: float = 3.0
+    ) -> pd.Series:
         """
-        Preprocess the raw GeoJSON data.
+        Detect outliers in a column.
         
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Raw GeoJSON data
+        Args:
+            data: DataFrame containing the data.
+            column: Column to detect outliers in.
+            method: Method to use for outlier detection. Options are 'zscore', 'iqr',
+                   and 'modified_zscore'.
+            threshold: Threshold for outlier detection.
             
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            Preprocessed data
-        """
-        # Validate input data
-        valid, errors = validate_geodataframe(
-            gdf,
-            required_columns=["admin1", "commodity", "date", "price"],
-            check_nulls=False  # Don't check for null values
-        )
-        
-        # Log warnings about null values but don't fail
-        for error in errors:
-            if "null values" in error:
-                logger.warning(error)
-            else:
-                # Only raise for critical errors
-                raise_if_invalid(False, [error], "Invalid input data for preprocessing")
-        
-        # Make a copy to avoid modifying the original
-        processed = gdf.copy()
-        
-        # Clean column names using utility
-        processed = clean_column_names(processed)
-        
-        # Convert date strings to datetime objects using utility
-        processed = convert_dates(processed, date_columns=['date'])
-        
-        # Handle missing values using utility
-        processed = self._handle_missing_values(processed)
-        
-        # Create additional features
-        processed = self._create_features(processed)
-        
-        logger.info(f"Preprocessed {len(processed)} records")
-        return processed
-    
-    def _handle_missing_values(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        """
-        Handle missing values in the data.
-        
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
+        Returns:
+            Boolean Series indicating outliers.
             
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            DataFrame with handled missing values
+        Raises:
+            YemenAnalysisError: If the column is not found or the method is invalid.
         """
-        # Use the fill_missing_values utility (without specifying columns)
-        filled_gdf = fill_missing_values(
-            gdf,
-            numeric_strategy='median',
-            group_columns=['admin1', 'commodity'],
-            date_strategy='forward'
-        )
+        logger.info(f"Detecting outliers in {column} using {method} method")
         
-        # Fill missing values in 'population' column separately
-        if 'population' in filled_gdf.columns:
-            filled_gdf['population'] = filled_gdf.groupby(['admin1', 'commodity'])['population'].transform(
-                lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
-            )
-            logger.info("Filled missing values in 'population' column with group medians")
+        # Check if column exists
+        if column not in data.columns:
+            logger.error(f"Column {column} not found in data")
+            raise YemenAnalysisError(f"Column {column} not found in data")
         
-        # For conflict data, fill remaining NAs with zeros
-        conflict_cols = [col for col in filled_gdf.columns if 'conflict' in col]
-        for col in conflict_cols:
-            if filled_gdf[col].isna().any():
-                filled_gdf[col] = filled_gdf[col].fillna(0)
-                logger.info(f"Filled missing values in {col} with zeros")
+        # Get column data
+        col_data = data[column]
         
-        # Log missing values that couldn't be filled
-        remaining_missing = filled_gdf.isnull().sum()
-        if remaining_missing.sum() > 0:
-            for col in remaining_missing[remaining_missing > 0].index:
-                logger.warning(f"Column {col} still has {remaining_missing[col]} missing values")
-        
-        return filled_gdf
-    
-    def _create_features(self, gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        """
-        Create additional features for analysis.
-        
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
-            
-        Returns
-        -------
-        geopandas.GeoDataFrame
-            DataFrame with additional features
-        """
-        # Create date features using utility
-        gdf = create_date_features(
-            gdf,
-            date_column='date',
-            features=['year', 'month', 'weekofyear']
-        )
-        
-        # Add yearmonth manually as it's specific to this application
-        gdf['yearmonth'] = gdf['date'].dt.strftime('%Y-%m')
-        
-        # Create price log for returns calculation
-        gdf['price_log'] = np.log(gdf['price'])
-        
-        # Create lagged features using utility
-        gdf = create_lag_features(
-            gdf,
-            columns=['price', 'price_log'],
-            lags=[1],
-            group_columns=['admin1', 'commodity']
-        )
-        
-        # Fill missing values in lagged price columns
-        for col in ['price_lag1', 'price_log_lag1']:
-            if col in gdf.columns:
-                gdf[col] = gdf.groupby(['admin1', 'commodity'])[col].transform(
-                    lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
-                )
-                logger.info(f"Filled missing values in '{col}' with group medians")
-        
-        # Calculate price returns manually
-        gdf = gdf.sort_values(['admin1', 'commodity', 'date'])
-        gdf['price_return'] = gdf.groupby(['admin1', 'commodity'])['price_log'].diff()
-        
-        # Fill missing price returns with 0 (no change) for first observations in each group
-        missing_returns = gdf['price_return'].isna().sum()
-        if missing_returns > 0:
-            logger.info(f"Filling {missing_returns} missing price returns with 0")
-            gdf['price_return'] = gdf['price_return'].fillna(0)
-        
-        # Create rolling features for volatility with more lenient min_periods
-        gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_return'].transform(
-            lambda x: x.rolling(window=3, min_periods=1).std() if len(x) > 0 else np.nan
-        )
-        
-        # Fill any remaining missing volatility values with the group median
-        missing_volatility = gdf['price_volatility'].isna().sum()
-        if missing_volatility > 0:
-            logger.info(f"Filling {missing_volatility} missing volatility values with group medians")
-            gdf['price_volatility'] = gdf.groupby(['admin1', 'commodity'])['price_volatility'].transform(
-                lambda x: x.fillna(x.median() if not pd.isna(x.median()) else 0)
-            )
-        
-        # Normalize conflict intensity if present
-        if 'conflict_intensity' in gdf.columns and 'conflict_intensity_normalized' not in gdf.columns:
-            gdf = normalize_columns(
-                gdf, 
-                columns=['conflict_intensity'],
-                method='minmax'
-            )
-        
-        logger.info("Created additional features for analysis")
-        return gdf
-    
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
-    def calculate_price_differentials(self, gdf: gpd.GeoDataFrame, commodity: str = None) -> pd.DataFrame:
-        """
-        Calculate price differentials between north and south exchange rate regimes.
-        
-        Parameters
-        ----------
-        gdf : geopandas.GeoDataFrame
-            Input GeoDataFrame
-        commodity : str, optional
-            Commodity to filter by
-            
-        Returns
-        -------
-        pandas.DataFrame
-            DataFrame with price differentials
-        """
-        # Validate input data
-        valid, errors = validate_dataframe(
-            gdf,
-            required_columns=['commodity', 'date', 'price', 'exchange_rate_regime'],
-            check_nulls=False  # Don't fail on null values
-        )
-        
-        # Log null values but don't fail
-        null_counts = gdf.isnull().sum()
-        columns_with_nulls = null_counts[null_counts > 0]
-        if not columns_with_nulls.empty:
-            for col, count in columns_with_nulls.items():
-                logger.warning(f"Column '{col}' has {count} null values")
-        
-        # Only validate required columns exist, not null values
-        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
-                        "Invalid data for price differential calculation")
-        
-        # Filter by commodity if provided
-        if commodity:
-            filtered_gdf = gdf[gdf['commodity'] == commodity]
+        # Detect outliers using the specified method
+        if method == 'zscore':
+            # Z-score method
+            z_scores = np.abs(stats.zscore(col_data))
+            outliers = z_scores > threshold
+        elif method == 'iqr':
+            # IQR method
+            q1 = col_data.quantile(0.25)
+            q3 = col_data.quantile(0.75)
+            iqr = q3 - q1
+            lower_bound = q1 - threshold * iqr
+            upper_bound = q3 + threshold * iqr
+            outliers = (col_data < lower_bound) | (col_data > upper_bound)
+        elif method == 'modified_zscore':
+            # Modified Z-score method
+            median = col_data.median()
+            mad = np.median(np.abs(col_data - median))
+            modified_z_scores = 0.6745 * np.abs(col_data - median) / mad
+            outliers = modified_z_scores > threshold
         else:
-            filtered_gdf = gdf
+            logger.error(f"Invalid outlier detection method: {method}")
+            raise YemenAnalysisError(f"Invalid outlier detection method: {method}")
+        
+        logger.info(f"Detected {outliers.sum()} outliers in {column}")
+        return outliers
+    
+    @handle_errors
+    def handle_outliers(
+        self, data: pd.DataFrame, column: str, method: str = 'zscore',
+        threshold: float = 3.0, handling: str = 'winsorize'
+    ) -> pd.DataFrame:
+        """
+        Handle outliers in a column.
+        
+        Args:
+            data: DataFrame containing the data.
+            column: Column to handle outliers in.
+            method: Method to use for outlier detection. Options are 'zscore', 'iqr',
+                   and 'modified_zscore'.
+            threshold: Threshold for outlier detection.
+            handling: Method to use for handling outliers. Options are 'winsorize',
+                     'trim', and 'mean'.
             
-        # Get unique commodities and dates
-        commodities = filtered_gdf['commodity'].unique()
-        dates = filtered_gdf['date'].unique()
+        Returns:
+            DataFrame with outliers handled.
+            
+        Raises:
+            YemenAnalysisError: If the column is not found or the method is invalid.
+        """
+        logger.info(f"Handling outliers in {column} using {handling} method")
         
-        # Create empty list to store differentials
-        differentials = []
+        # Make a copy of the data
+        data_copy = data.copy()
         
-        # For each commodity and date, calculate north-south differential
-        for commodity_name in commodities:
-            for date in dates:
-                # Filter data for this commodity and date
-                mask = (filtered_gdf['commodity'] == commodity_name) & (filtered_gdf['date'] == date)
-                data = filtered_gdf[mask]
-                
-                # Skip if no data for this combination
-                if len(data) == 0:
-                    continue
-                
-                # Get average prices by regime
-                north_price = data[data['exchange_rate_regime'] == 'north']['price'].mean()
-                south_price = data[data['exchange_rate_regime'] == 'south']['price'].mean()
-                
-                # Skip if one regime is missing
-                if pd.isna(north_price) or pd.isna(south_price):
-                    continue
-                
-                # Calculate differential
-                differential = {
-                    'commodity': commodity_name,
-                    'date': date,
-                    'north_price': north_price,
-                    'south_price': south_price,
-                    'price_diff': north_price - south_price,
-                    'price_diff_pct': (north_price - south_price) / south_price * 100,
-                    'log_price_ratio': np.log(north_price / south_price)
-                }
-                differentials.append(differential)
+        # Detect outliers
+        outliers = self.detect_outliers(data_copy, column, method, threshold)
         
-        result = pd.DataFrame(differentials)
-        logger.info(f"Calculated price differentials: {len(result)} records")
-        return result
+        # Handle outliers using the specified method
+        if handling == 'winsorize':
+            # Winsorize outliers
+            if method == 'iqr':
+                q1 = data_copy[column].quantile(0.25)
+                q3 = data_copy[column].quantile(0.75)
+                iqr = q3 - q1
+                lower_bound = q1 - threshold * iqr
+                upper_bound = q3 + threshold * iqr
+                data_copy.loc[data_copy[column] < lower_bound, column] = lower_bound
+                data_copy.loc[data_copy[column] > upper_bound, column] = upper_bound
+            else:
+                # For z-score and modified z-score, use percentiles
+                lower_bound = data_copy[column].quantile(0.01)
+                upper_bound = data_copy[column].quantile(0.99)
+                data_copy.loc[outliers, column] = data_copy.loc[outliers, column].clip(
+                    lower=lower_bound, upper=upper_bound
+                )
+        elif handling == 'trim':
+            # Trim outliers (set to NaN)
+            data_copy.loc[outliers, column] = np.nan
+        elif handling == 'mean':
+            # Replace outliers with mean
+            mean_value = data_copy.loc[~outliers, column].mean()
+            data_copy.loc[outliers, column] = mean_value
+        else:
+            logger.error(f"Invalid outlier handling method: {handling}")
+            raise YemenAnalysisError(f"Invalid outlier handling method: {handling}")
+        
+        logger.info(f"Handled {outliers.sum()} outliers in {column}")
+        return data_copy
+    
+    @handle_errors
+    def normalize_data(
+        self, data: pd.DataFrame, columns: List[str], method: str = 'standard',
+        fit: bool = True
+    ) -> pd.DataFrame:
+        """
+        Normalize data in specified columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to normalize.
+            method: Method to use for normalization. Options are 'standard' and 'minmax'.
+            fit: Whether to fit a new scaler or use a previously fitted one.
+            
+        Returns:
+            DataFrame with normalized data.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found or the method is invalid.
+        """
+        logger.info(f"Normalizing columns {columns} using {method} method")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Normalize data using the specified method
+        if method == 'standard':
+            # Standardization (z-score normalization)
+            if fit:
+                scaler = StandardScaler()
+                data_copy[columns] = scaler.fit_transform(data_copy[columns])
+                self.scalers['standard'] = scaler
+            else:
+                if 'standard' not in self.scalers:
+                    logger.error("No fitted standard scaler found")
+                    raise YemenAnalysisError("No fitted standard scaler found")
+                data_copy[columns] = self.scalers['standard'].transform(data_copy[columns])
+        elif method == 'minmax':
+            # Min-max normalization
+            if fit:
+                scaler = MinMaxScaler()
+                data_copy[columns] = scaler.fit_transform(data_copy[columns])
+                self.scalers['minmax'] = scaler
+            else:
+                if 'minmax' not in self.scalers:
+                    logger.error("No fitted min-max scaler found")
+                    raise YemenAnalysisError("No fitted min-max scaler found")
+                data_copy[columns] = self.scalers['minmax'].transform(data_copy[columns])
+        else:
+            logger.error(f"Invalid normalization method: {method}")
+            raise YemenAnalysisError(f"Invalid normalization method: {method}")
+        
+        logger.info(f"Normalized {len(columns)} columns")
+        return data_copy
+    
+    @handle_errors
+    def create_time_features(self, data: pd.DataFrame, date_column: str) -> pd.DataFrame:
+        """
+        Create time-based features from a date column.
+        
+        Args:
+            data: DataFrame containing the data.
+            date_column: Column containing dates.
+            
+        Returns:
+            DataFrame with time-based features added.
+            
+        Raises:
+            YemenAnalysisError: If the date column is not found or is not a datetime column.
+        """
+        logger.info(f"Creating time features from {date_column}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if date column exists
+        if date_column not in data_copy.columns:
+            logger.error(f"Column {date_column} not found in data")
+            raise YemenAnalysisError(f"Column {date_column} not found in data")
+        
+        # Check if date column is datetime
+        if not pd.api.types.is_datetime64_any_dtype(data_copy[date_column]):
+            try:
+                data_copy[date_column] = pd.to_datetime(data_copy[date_column])
+            except Exception as e:
+                logger.error(f"Error converting {date_column} to datetime: {e}")
+                raise YemenAnalysisError(f"Error converting {date_column} to datetime: {e}")
+        
+        # Create time-based features
+        data_copy['year'] = data_copy[date_column].dt.year
+        data_copy['month'] = data_copy[date_column].dt.month
+        data_copy['day'] = data_copy[date_column].dt.day
+        data_copy['day_of_week'] = data_copy[date_column].dt.dayofweek
+        data_copy['quarter'] = data_copy[date_column].dt.quarter
+        data_copy['is_month_start'] = data_copy[date_column].dt.is_month_start.astype(int)
+        data_copy['is_month_end'] = data_copy[date_column].dt.is_month_end.astype(int)
+        data_copy['is_quarter_start'] = data_copy[date_column].dt.is_quarter_start.astype(int)
+        data_copy['is_quarter_end'] = data_copy[date_column].dt.is_quarter_end.astype(int)
+        data_copy['is_year_start'] = data_copy[date_column].dt.is_year_start.astype(int)
+        data_copy['is_year_end'] = data_copy[date_column].dt.is_year_end.astype(int)
+        
+        logger.info("Created time features")
+        return data_copy
+    
+    @handle_errors
+    def create_lag_features(
+        self, data: pd.DataFrame, columns: List[str], lags: List[int],
+        group_column: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Create lag features for specified columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to create lag features for.
+            lags: List of lag values.
+            group_column: Column to group by when creating lags. If None, no grouping is used.
+            
+        Returns:
+            DataFrame with lag features added.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found.
+        """
+        logger.info(f"Creating lag features for columns {columns} with lags {lags}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Check if group column exists
+        if group_column is not None and group_column not in data_copy.columns:
+            logger.error(f"Group column {group_column} not found in data")
+            raise YemenAnalysisError(f"Group column {group_column} not found in data")
+        
+        # Create lag features
+        for column in columns:
+            for lag in lags:
+                lag_name = f"{column}_lag_{lag}"
+                if group_column is not None:
+                    data_copy[lag_name] = data_copy.groupby(group_column)[column].shift(lag)
+                else:
+                    data_copy[lag_name] = data_copy[column].shift(lag)
+        
+        logger.info(f"Created {len(columns) * len(lags)} lag features")
+        return data_copy
+    
+    @handle_errors
+    def create_rolling_features(
+        self, data: pd.DataFrame, columns: List[str], windows: List[int],
+        functions: List[str] = ['mean', 'std', 'min', 'max'],
+        group_column: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Create rolling window features for specified columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to create rolling features for.
+            windows: List of window sizes.
+            functions: List of functions to apply to rolling windows.
+            group_column: Column to group by when creating rolling features.
+                         If None, no grouping is used.
+            
+        Returns:
+            DataFrame with rolling features added.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found or the functions are invalid.
+        """
+        logger.info(f"Creating rolling features for columns {columns} with windows {windows}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Check if group column exists
+        if group_column is not None and group_column not in data_copy.columns:
+            logger.error(f"Group column {group_column} not found in data")
+            raise YemenAnalysisError(f"Group column {group_column} not found in data")
+        
+        # Create rolling features
+        for column in columns:
+            for window in windows:
+                for function in functions:
+                    feature_name = f"{column}_roll_{window}_{function}"
+                    if group_column is not None:
+                        if function == 'mean':
+                            data_copy[feature_name] = data_copy.groupby(group_column)[column].transform(
+                                lambda x: x.rolling(window=window, min_periods=1).mean()
+                            )
+                        elif function == 'std':
+                            data_copy[feature_name] = data_copy.groupby(group_column)[column].transform(
+                                lambda x: x.rolling(window=window, min_periods=1).std()
+                            )
+                        elif function == 'min':
+                            data_copy[feature_name] = data_copy.groupby(group_column)[column].transform(
+                                lambda x: x.rolling(window=window, min_periods=1).min()
+                            )
+                        elif function == 'max':
+                            data_copy[feature_name] = data_copy.groupby(group_column)[column].transform(
+                                lambda x: x.rolling(window=window, min_periods=1).max()
+                            )
+                        else:
+                            logger.error(f"Invalid rolling function: {function}")
+                            raise YemenAnalysisError(f"Invalid rolling function: {function}")
+                    else:
+                        if function == 'mean':
+                            data_copy[feature_name] = data_copy[column].rolling(window=window, min_periods=1).mean()
+                        elif function == 'std':
+                            data_copy[feature_name] = data_copy[column].rolling(window=window, min_periods=1).std()
+                        elif function == 'min':
+                            data_copy[feature_name] = data_copy[column].rolling(window=window, min_periods=1).min()
+                        elif function == 'max':
+                            data_copy[feature_name] = data_copy[column].rolling(window=window, min_periods=1).max()
+                        else:
+                            logger.error(f"Invalid rolling function: {function}")
+                            raise YemenAnalysisError(f"Invalid rolling function: {function}")
+        
+        logger.info(f"Created {len(columns) * len(windows) * len(functions)} rolling features")
+        return data_copy
+    
+    @handle_errors
+    def create_difference_features(
+        self, data: pd.DataFrame, columns: List[str], periods: List[int] = [1],
+        group_column: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Create difference features for specified columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to create difference features for.
+            periods: List of periods for differencing.
+            group_column: Column to group by when creating differences.
+                         If None, no grouping is used.
+            
+        Returns:
+            DataFrame with difference features added.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found.
+        """
+        logger.info(f"Creating difference features for columns {columns} with periods {periods}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Check if group column exists
+        if group_column is not None and group_column not in data_copy.columns:
+            logger.error(f"Group column {group_column} not found in data")
+            raise YemenAnalysisError(f"Group column {group_column} not found in data")
+        
+        # Create difference features
+        for column in columns:
+            for period in periods:
+                diff_name = f"{column}_diff_{period}"
+                if group_column is not None:
+                    data_copy[diff_name] = data_copy.groupby(group_column)[column].diff(period)
+                else:
+                    data_copy[diff_name] = data_copy[column].diff(period)
+        
+        logger.info(f"Created {len(columns) * len(periods)} difference features")
+        return data_copy
+    
+    @handle_errors
+    def create_pct_change_features(
+        self, data: pd.DataFrame, columns: List[str], periods: List[int] = [1],
+        group_column: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Create percentage change features for specified columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to create percentage change features for.
+            periods: List of periods for percentage change.
+            group_column: Column to group by when creating percentage changes.
+                         If None, no grouping is used.
+            
+        Returns:
+            DataFrame with percentage change features added.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found.
+        """
+        logger.info(f"Creating percentage change features for columns {columns} with periods {periods}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Check if group column exists
+        if group_column is not None and group_column not in data_copy.columns:
+            logger.error(f"Group column {group_column} not found in data")
+            raise YemenAnalysisError(f"Group column {group_column} not found in data")
+        
+        # Create percentage change features
+        for column in columns:
+            for period in periods:
+                pct_name = f"{column}_pct_{period}"
+                if group_column is not None:
+                    data_copy[pct_name] = data_copy.groupby(group_column)[column].pct_change(period)
+                else:
+                    data_copy[pct_name] = data_copy[column].pct_change(period)
+        
+        logger.info(f"Created {len(columns) * len(periods)} percentage change features")
+        return data_copy
+    
+    @handle_errors
+    def create_interaction_features(
+        self, data: pd.DataFrame, columns: List[List[str]], operations: List[str] = ['multiply']
+    ) -> pd.DataFrame:
+        """
+        Create interaction features between pairs of columns.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: List of column pairs to create interaction features for.
+            operations: List of operations to apply. Options are 'multiply', 'divide',
+                       'add', and 'subtract'.
+            
+        Returns:
+            DataFrame with interaction features added.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found or the operations are invalid.
+        """
+        logger.info(f"Creating interaction features for column pairs {columns}")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for col_pair in columns:
+            if len(col_pair) != 2:
+                logger.error(f"Column pair must have exactly 2 columns: {col_pair}")
+                raise YemenAnalysisError(f"Column pair must have exactly 2 columns: {col_pair}")
+            
+            for column in col_pair:
+                if column not in data_copy.columns:
+                    logger.error(f"Column {column} not found in data")
+                    raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Create interaction features
+        for col_pair in columns:
+            col1, col2 = col_pair
+            for operation in operations:
+                if operation == 'multiply':
+                    feature_name = f"{col1}_mul_{col2}"
+                    data_copy[feature_name] = data_copy[col1] * data_copy[col2]
+                elif operation == 'divide':
+                    feature_name = f"{col1}_div_{col2}"
+                    # Avoid division by zero
+                    data_copy[feature_name] = data_copy[col1] / data_copy[col2].replace(0, np.nan)
+                elif operation == 'add':
+                    feature_name = f"{col1}_add_{col2}"
+                    data_copy[feature_name] = data_copy[col1] + data_copy[col2]
+                elif operation == 'subtract':
+                    feature_name = f"{col1}_sub_{col2}"
+                    data_copy[feature_name] = data_copy[col1] - data_copy[col2]
+                else:
+                    logger.error(f"Invalid interaction operation: {operation}")
+                    raise YemenAnalysisError(f"Invalid interaction operation: {operation}")
+        
+        logger.info(f"Created {len(columns) * len(operations)} interaction features")
+        return data_copy
+    
+    @handle_errors
+    def encode_categorical_features(
+        self, data: pd.DataFrame, columns: List[str], method: str = 'one_hot',
+        drop_first: bool = True
+    ) -> pd.DataFrame:
+        """
+        Encode categorical features.
+        
+        Args:
+            data: DataFrame containing the data.
+            columns: Columns to encode.
+            method: Method to use for encoding. Options are 'one_hot' and 'label'.
+            drop_first: Whether to drop the first category in one-hot encoding.
+            
+        Returns:
+            DataFrame with encoded features.
+            
+        Raises:
+            YemenAnalysisError: If any of the columns are not found or the method is invalid.
+        """
+        logger.info(f"Encoding categorical features {columns} using {method} method")
+        
+        # Make a copy of the data
+        data_copy = data.copy()
+        
+        # Check if columns exist
+        for column in columns:
+            if column not in data_copy.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+        
+        # Encode categorical features
+        if method == 'one_hot':
+            # One-hot encoding
+            for column in columns:
+                dummies = pd.get_dummies(data_copy[column], prefix=column, drop_first=drop_first)
+                data_copy = pd.concat([data_copy, dummies], axis=1)
+                data_copy = data_copy.drop(column, axis=1)
+        elif method == 'label':
+            # Label encoding
+            for column in columns:
+                data_copy[column] = data_copy[column].astype('category').cat.codes
+        else:
+            logger.error(f"Invalid encoding method: {method}")
+            raise YemenAnalysisError(f"Invalid encoding method: {method}")
+        
+        logger.info(f"Encoded {len(columns)} categorical features")
+        return data_copy

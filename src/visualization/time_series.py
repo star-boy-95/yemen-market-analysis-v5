@@ -1,704 +1,623 @@
-# src/visualization/time_series.py
+"""
+Time series visualization module for Yemen Market Analysis.
 
+This module provides the TimeSeriesPlotter class for creating time series plots.
+"""
 import logging
-import numpy as np
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable
+
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import plotly.graph_objects as go
-from typing import Optional, List, Dict, Union, Tuple, Any
+import seaborn as sns
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 
-# Use absolute imports for better module resolution
-from yemen_market_integration.utils.error_handler import handle_errors, VisualizationError
-from yemen_market_integration.utils.config import config
-from yemen_market_integration.utils.validation import validate_dataframe, raise_if_invalid
-from yemen_market_integration.utils.plotting_utils import (
-    set_plotting_style,
-    format_date_axis,
-    format_currency_axis,
-    save_plot,
-    create_figure,
-    plot_time_series,
-    plot_multiple_time_series,
-    plot_time_series_by_group,
-    plot_dual_axis,
-    add_annotations,
-    configure_axes_for_print
-)
-from yemen_market_integration.utils.performance_utils import memory_usage_decorator, optimize_dataframe
+from src.config import config
+from src.utils.error_handling import YemenAnalysisError, handle_errors
 
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-class TimeSeriesVisualizer:
-    """Enhanced time series visualizations for market data."""
-    
-    def __init__(self):
-        """Initialize the visualizer with default styling."""
-        set_plotting_style()
-        
-        # Get styling parameters from config
-        self.fig_width = config.get('visualization.default_fig_width', 12)
-        self.fig_height = config.get('visualization.default_fig_height', 8)
-        self.dpi = config.get('visualization.figure_dpi', 300)
-        self.date_format = config.get('visualization.date_format', '%Y-%m')
-        self.north_color = config.get('visualization.north_color', '#1f77b4')
-        self.south_color = config.get('visualization.south_color', '#ff7f0e')
-        self.save_dir = config.get('visualization.save_dir', 'results/plots')
-    
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, VisualizationError), reraise=True)
-    def plot_price_series(
-        self, 
-        df: pd.DataFrame, 
-        price_col: str = 'price', 
-        date_col: str = 'date', 
-        group_col: Optional[str] = None,
-        title: Optional[str] = None,
-        ylabel: str = 'Price',
-        save_path: Optional[str] = None
-    ) -> Tuple[plt.Figure, plt.Axes]:
-        """
-        Plot price time series data, optionally grouped by a category.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame containing the price data
-        price_col : str, optional
-            Name of the price column, default 'price'
-        date_col : str, optional
-            Name of the date column, default 'date'
-        group_col : str, optional
-            Column to group by (e.g., 'exchange_rate_regime'), default None
-        title : str, optional
-            Plot title, default None
-        ylabel : str, optional
-            Y-axis label, default 'Price'
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure
-        ax : plt.Axes
-            The matplotlib axes
-        """
-        # Validate inputs
-        required_cols = [date_col, price_col]
-        if group_col is not None:
-            required_cols.append(group_col)
-            
-        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
-        # Only validate required columns exist, not null values
-        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
-                        "Invalid data for price series plot")
-        
-        if group_col is not None:
-            # Create figure first
-            fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
-            
-            # Use the utility function for grouped time series
-            fig, ax = plot_time_series_by_group(
-                df=df,
-                x=date_col,
-                y=price_col,
-                group=group_col,
-                title=title,
-                ylabel=ylabel,
-                ax=ax  # Pass the existing axes instead of figsize
-            )
-        else:
-            # Create figure first
-            fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
-            
-            # Use the utility function for single time series
-            fig, ax = plot_time_series(
-                df=df,
-                x=date_col,
-                y=price_col,
-                title=title,
-                ylabel=ylabel,
-                ax=ax  # Pass the existing axes instead of figsize
-            )
-        
-        # Configure axes for print if needed
-        configure_axes_for_print(ax)
-            
-        # Save if requested
-        if save_path:
-            save_plot(fig, save_path, dpi=self.dpi)
-            
-        return fig, ax
+# Set default style
+sns.set_style('whitegrid')
 
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def plot_price_differentials(
-        self, 
-        df: pd.DataFrame, 
-        date_col: str = 'date', 
-        north_col: str = 'north_price', 
-        south_col: str = 'south_price', 
-        diff_col: Optional[str] = None,
-        title: Optional[str] = None,
-        save_path: Optional[str] = None
-    ) -> Tuple[plt.Figure, plt.Axes]:
+class TimeSeriesPlotter:
+    """
+    Time series plotter for Yemen Market Analysis.
+
+    This class provides methods for creating time series plots.
+
+    Attributes:
+        data (pd.DataFrame): DataFrame containing time series data.
+        date_column (str): Column containing dates.
+        figsize (Tuple[int, int]): Figure size.
+        dpi (int): Figure DPI.
+        style (str): Plot style.
+    """
+
+    def __init__(
+        self, data: Optional[pd.DataFrame] = None,
+        date_column: str = 'date',
+        figsize: Tuple[int, int] = (12, 6),
+        dpi: int = 100,
+        style: str = 'whitegrid'
+    ):
         """
-        Plot price differentials between north and south markets.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame containing the price data
-        date_col : str, optional
-            Name of the date column, default 'date'
-        north_col : str, optional
-            Name of the northern prices column, default 'north_price'
-        south_col : str, optional
-            Name of the southern prices column, default 'south_price'
-        diff_col : str, optional
-            Name of the price differential column, default None
-            If None, calculates the differential as north_col - south_col
-        title : str, optional
-            Plot title, default None
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure
-        ax : plt.Axes
-            The matplotlib axes
+        Initialize the time series plotter.
+
+        Args:
+            data: DataFrame containing time series data.
+            date_column: Column containing dates.
+            figsize: Figure size.
+            dpi: Figure DPI.
+            style: Plot style.
         """
-        # Validate inputs
-        required_cols = [date_col]
-        if diff_col is None:
-            required_cols.extend([north_col, south_col])
-        else:
-            required_cols.append(diff_col)
-            
-        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
-        # Only validate required columns exist, not null values
-        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
-                        "Invalid data for price differentials plot")
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
-        
-        # Calculate differential if not provided
-        if diff_col is None:
-            differential = df[north_col] - df[south_col]
-            diff_col = 'Price Differential'
-        else:
-            differential = df[diff_col]
-            
-        # Plot differential
-        ax.plot(
-            df[date_col], 
-            differential, 
-            color='k',
-            linewidth=config.get('visualization.linewidth', 1.5)
-        )
-        
-        # Add zero line
-        ax.axhline(
-            y=0, 
-            color='r', 
-            linestyle='--', 
-            alpha=0.5,
-            linewidth=config.get('visualization.linewidth', 1.5) * 0.8
-        )
-        
-        # Set labels and title
-        ax.set_ylabel('Price Differential')
-        if title:
-            ax.set_title(title)
-        else:
-            ax.set_title('Price Differential (North - South)')
-        
-        # Format date axis
-        format_date_axis(
-            ax, 
-            date_format=self.date_format,
-            interval=config.get('visualization.date_interval', 'month')
-        )
-        
-        # Add grid if configured
-        if config.get('visualization.grid', True):
-            ax.grid(True, alpha=0.3)
-            
-        # Save if requested
-        if save_path:
-            save_plot(fig, save_path, dpi=self.dpi)
-            
-        return fig, ax
-    
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def plot_price_volatility(
-        self,
-        df: pd.DataFrame,
-        price_col: str = 'price_return',
-        date_col: str = 'date',
-        group_col: Optional[str] = None,
-        window: int = 3,
-        title: Optional[str] = None,
-        ylabel: str = 'Price Volatility',
-        save_path: Optional[str] = None
-    ) -> Tuple[plt.Figure, plt.Axes]:
+        self.data = data
+        self.date_column = date_column
+        self.figsize = figsize
+        self.dpi = dpi
+        self.style = style
+
+        # Set style
+        sns.set_style(style)
+
+    @handle_errors
+    def set_data(
+        self, data: pd.DataFrame, date_column: Optional[str] = None
+    ) -> None:
         """
-        Plot price volatility over time, optionally grouped by a category.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame containing the price data
-        price_col : str, optional
-            Name of the price column to calculate volatility from, default 'price_return'
-        date_col : str, optional
-            Name of the date column, default 'date'
-        group_col : str, optional
-            Column to group by (e.g., 'exchange_rate_regime'), default None
-        window : int, optional
-            Rolling window size for volatility calculation, default 3
-        title : str, optional
-            Plot title, default None
-        ylabel : str, optional
-            Y-axis label, default 'Price Volatility'
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure
-        ax : plt.Axes
-            The matplotlib axes
+        Set the data for the plotter.
+
+        Args:
+            data: DataFrame containing time series data.
+            date_column: Column containing dates.
+
+        Raises:
+            YemenAnalysisError: If the data is invalid.
         """
-        # Validate inputs
-        required_cols = [date_col]
-        if group_col is not None:
-            required_cols.append(group_col)
-            
-        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
-        # Only validate required columns exist, not null values
-        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
-                        "Invalid data for price volatility plot")
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(self.fig_width, self.fig_height))
-        
-        # If price_col is price_return, use it directly
-        # Otherwise, calculate volatility from the specified column
-        if price_col != 'price_return' and price_col != 'price_volatility':
-            # Check if the column exists
-            if price_col not in df.columns:
-                raise ValueError(f"Column {price_col} not found in DataFrame")
-            
-            # Group by if needed
-            if group_col is not None:
-                groups = df[group_col].unique()
-                for group_val in groups:
-                    group_data = df[df[group_col] == group_val].copy()
-                    group_data = group_data.sort_values(date_col)
-                    
-                    # Calculate returns
-                    group_data['returns'] = group_data[price_col].pct_change()
-                    
-                    # Calculate volatility
-                    group_data['volatility'] = group_data['returns'].rolling(window=window, min_periods=1).std()
-                    
-                    # Plot
-                    ax.plot(
-                        group_data[date_col],
-                        group_data['volatility'],
-                        label=str(group_val)
-                    )
+        logger.info("Setting data for time series plotter")
+
+        # Check if data is a DataFrame
+        if not isinstance(data, pd.DataFrame):
+            logger.error("Data is not a pandas DataFrame")
+            raise YemenAnalysisError("Data is not a pandas DataFrame")
+
+        # Set date column
+        if date_column is not None:
+            self.date_column = date_column
+
+        # Check if date column exists
+        if self.date_column not in data.columns:
+            logger.error(f"Date column {self.date_column} not found in data")
+            raise YemenAnalysisError(f"Date column {self.date_column} not found in data")
+
+        # Convert date column to datetime if not already
+        if not pd.api.types.is_datetime64_any_dtype(data[self.date_column]):
+            logger.info(f"Converting {self.date_column} to datetime")
+            data[self.date_column] = pd.to_datetime(data[self.date_column])
+
+        # Set data
+        self.data = data
+
+        logger.info(f"Set data with {len(self.data)} observations")
+
+    @handle_errors
+    def plot_time_series(
+        self, y_column: str, group_column: Optional[str] = None,
+        title: Optional[str] = None, ylabel: Optional[str] = None,
+        xlabel: Optional[str] = None, color: Optional[str] = None,
+        palette: Optional[str] = None, legend_title: Optional[str] = None,
+        ax: Optional[Axes] = None, **kwargs
+    ) -> Tuple[Figure, Axes]:
+        """
+        Create a time series plot.
+
+        Args:
+            y_column: Column to plot on the y-axis.
+            group_column: Column to group by. If provided, creates a separate line
+                         for each group.
+            title: Plot title.
+            ylabel: Y-axis label.
+            xlabel: X-axis label.
+            color: Line color. Only used if group_column is None.
+            palette: Color palette. Only used if group_column is not None.
+            legend_title: Legend title. Only used if group_column is not None.
+            ax: Matplotlib axes to plot on. If None, creates a new figure.
+            **kwargs: Additional arguments to pass to the plot function.
+
+        Returns:
+            Tuple containing the figure and axes.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the columns are invalid.
+        """
+        logger.info(f"Creating time series plot for {y_column}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if y_column exists
+        if y_column not in self.data.columns:
+            logger.error(f"Column {y_column} not found in data")
+            raise YemenAnalysisError(f"Column {y_column} not found in data")
+
+        # Check if group_column exists
+        if group_column is not None and group_column not in self.data.columns:
+            logger.error(f"Column {group_column} not found in data")
+            raise YemenAnalysisError(f"Column {group_column} not found in data")
+
+        try:
+            # Create figure if ax is None
+            if ax is None:
+                fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
             else:
-                # Sort by date
-                temp_df = df.sort_values(date_col).copy()
-                
-                # Calculate returns
-                temp_df['returns'] = temp_df[price_col].pct_change()
-                
-                # Calculate volatility
-                temp_df['volatility'] = temp_df['returns'].rolling(window=window, min_periods=1).std()
-                
-                # Plot
+                fig = ax.figure
+
+            # Set default title and labels
+            if title is None:
+                title = f"Time Series of {y_column}"
+
+            if ylabel is None:
+                ylabel = y_column
+
+            if xlabel is None:
+                xlabel = self.date_column
+
+            # Plot data
+            if group_column is None:
+                # Plot a single line
                 ax.plot(
-                    temp_df[date_col],
-                    temp_df['volatility']
+                    self.data[self.date_column], self.data[y_column],
+                    color=color, **kwargs
                 )
-        else:
-            # Use existing volatility column or price_return directly
-            vol_col = 'price_volatility' if 'price_volatility' in df.columns else price_col
-            
-            if group_col is not None:
-                # Group and plot
-                groups = df[group_col].unique()
-                for group_val in groups:
-                    group_data = df[df[group_col] == group_val]
-                    ax.plot(
-                        group_data[date_col],
-                        group_data[vol_col],
-                        label=str(group_val)
-                    )
             else:
-                # Plot without grouping
-                ax.plot(
-                    df[date_col],
-                    df[vol_col]
-                )
-        
-        # Set labels and title
-        ax.set_ylabel(ylabel)
-        if title:
-            ax.set_title(title)
-        else:
-            ax.set_title('Price Volatility Over Time')
-        
-        # Format date axis
-        format_date_axis(
-            ax,
-            date_format=self.date_format,
-            interval=config.get('visualization.date_interval', 'month')
-        )
-        
-        # Add legend if grouped
-        if group_col is not None:
-            ax.legend()
-        
-        # Add grid if configured
-        if config.get('visualization.grid', True):
-            ax.grid(True, alpha=0.3)
-            
-        # Save if requested
-        if save_path:
-            save_plot(fig, save_path, dpi=self.dpi)
-            
-        return fig, ax
-    
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, ImportError), reraise=True)
-    def plot_interactive_time_series(
-        self,
-        df: pd.DataFrame,
-        price_col: str = 'price',
-        date_col: str = 'date',
-        group_col: Optional[str] = None,
-        title: Optional[str] = None,
-        ylabel: str = 'Price',
-        save_path: Optional[str] = None
-    ) -> go.Figure:
-        """
-        Create interactive time series plot using Plotly.
-        
-        Parameters
-        ----------
-        df : pd.DataFrame
-            DataFrame containing the price data
-        price_col : str, optional
-            Name of the price column, default 'price'
-        date_col : str, optional
-            Name of the date column, default 'date'
-        group_col : str, optional
-            Column to group by (e.g., 'exchange_rate_regime'), default None
-        title : str, optional
-            Plot title, default None
-        ylabel : str, optional
-            Y-axis label, default 'Price'
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : go.Figure
-            The plotly figure
-        """
-        # Validate inputs
-        required_cols = [date_col, price_col]
-        if group_col is not None:
-            required_cols.append(group_col)
-            
-        valid, errors = validate_dataframe(df, required_columns=required_cols, check_nulls=False)
-        # Only validate required columns exist, not null values
-        raise_if_invalid(valid, [e for e in errors if "null values" not in e],
-                        "Invalid data for interactive time series plot")
-        
-        # Optimize dataframe for memory efficiency
-        df = optimize_dataframe(df)
-        
-        # Get figure dimensions
-        width = config.get('visualization.interactive_width', 800)
-        height = config.get('visualization.interactive_height', 600)
-        
-        # Create plotly figure
-        fig = go.Figure()
-        
-        # Add traces
-        if group_col is not None:
-            # Group data and plot each group with a different color
-            groups = df[group_col].unique()
-            for group in groups:
-                group_data = df[df[group_col] == group]
-                fig.add_trace(
-                    go.Scatter(
-                        x=group_data[date_col],
-                        y=group_data[price_col],
-                        mode='lines',
-                        name=str(group)
+                # Plot a line for each group
+                for group, group_data in self.data.groupby(group_column):
+                    ax.plot(
+                        group_data[self.date_column], group_data[y_column],
+                        label=group, **kwargs
                     )
-                )
-        else:
-            # Plot a single line
-            fig.add_trace(
-                go.Scatter(
-                    x=df[date_col],
-                    y=df[price_col],
-                    mode='lines'
-                )
-            )
-        
-        # Set layout
-        fig.update_layout(
-            title=title,
-            xaxis_title='Date',
-            yaxis_title=ylabel,
-            width=width,
-            height=height,
-            hovermode='x unified'
-        )
-        
-        # Save if requested
-        if save_path:
-            fig.write_html(save_path)
-            
-        return fig
-    
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError, AttributeError), reraise=True)
-    def plot_threshold_analysis(
-        self, 
-        threshold_model: Any, 
-        title: Optional[str] = None,
-        save_path: Optional[str] = None
-    ) -> Tuple[plt.Figure, plt.Axes]:
+
+                # Add legend
+                ax.legend(title=legend_title)
+
+            # Set title and labels
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+
+            # Format x-axis
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m'))
+            plt.xticks(rotation=45)
+
+            # Adjust layout
+            plt.tight_layout()
+
+            logger.info(f"Created time series plot for {y_column}")
+            return fig, ax
+        except Exception as e:
+            logger.error(f"Error creating time series plot: {e}")
+            raise YemenAnalysisError(f"Error creating time series plot: {e}")
+
+    @handle_errors
+    def plot_multiple_time_series(
+        self, y_columns: List[str], title: Optional[str] = None,
+        ylabel: Optional[str] = None, xlabel: Optional[str] = None,
+        colors: Optional[List[str]] = None, ax: Optional[Axes] = None,
+        **kwargs
+    ) -> Tuple[Figure, Axes]:
         """
-        Visualize threshold model results.
-        
-        Parameters
-        ----------
-        threshold_model : object
-            Threshold model object with results
-        title : str, optional
-            Plot title, default None
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure
-        axs : list of plt.Axes
-            The matplotlib axes
+        Create a plot with multiple time series.
+
+        Args:
+            y_columns: Columns to plot on the y-axis.
+            title: Plot title.
+            ylabel: Y-axis label.
+            xlabel: X-axis label.
+            colors: Line colors. If None, uses default colors.
+            ax: Matplotlib axes to plot on. If None, creates a new figure.
+            **kwargs: Additional arguments to pass to the plot function.
+
+        Returns:
+            Tuple containing the figure and axes.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the columns are invalid.
         """
-        # Create figure with subplots
-        fig, axs = plt.subplots(
-            2, 1, 
-            figsize=(self.fig_width, self.fig_height),
-            gridspec_kw={'height_ratios': [2, 1]}
-        )
-        
-        # Top plot: Price series and threshold
-        axs[0].plot(
-            threshold_model.dates, 
-            threshold_model.price_diff, 
-            color='k',
-            label='Price Differential'
-        )
-        
-        # Add threshold lines
-        threshold = threshold_model.threshold
-        axs[0].axhline(
-            y=threshold, 
-            color='r', 
-            linestyle='--', 
-            label=f'Threshold: {threshold:.2f}'
-        )
-        axs[0].axhline(
-            y=-threshold, 
-            color='r', 
-            linestyle='--'
-        )
-        
-        # Shade regime areas
-        above_threshold = threshold_model.price_diff > threshold
-        below_neg_threshold = threshold_model.price_diff < -threshold
-        
-        # Shade regions by regime
-        for i in range(len(threshold_model.dates) - 1):
-            if above_threshold[i]:
-                axs[0].axvspan(
-                    threshold_model.dates[i],
-                    threshold_model.dates[i+1],
-                    alpha=0.2,
-                    color='red'
+        logger.info(f"Creating multiple time series plot for {y_columns}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if y_columns exist
+        for column in y_columns:
+            if column not in self.data.columns:
+                logger.error(f"Column {column} not found in data")
+                raise YemenAnalysisError(f"Column {column} not found in data")
+
+        try:
+            # Create figure if ax is None
+            if ax is None:
+                fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
+            else:
+                fig = ax.figure
+
+            # Set default title and labels
+            if title is None:
+                title = "Multiple Time Series"
+
+            if ylabel is None:
+                ylabel = "Value"
+
+            if xlabel is None:
+                xlabel = self.date_column
+
+            # Plot data
+            for i, column in enumerate(y_columns):
+                color = colors[i] if colors is not None and i < len(colors) else None
+                ax.plot(
+                    self.data[self.date_column], self.data[column],
+                    label=column, color=color, **kwargs
                 )
-            elif below_neg_threshold[i]:
-                axs[0].axvspan(
-                    threshold_model.dates[i],
-                    threshold_model.dates[i+1],
-                    alpha=0.2,
-                    color='blue'
-                )
-                
-        axs[0].set_ylabel('Price Differential')
-        axs[0].legend()
-        
-        # Bottom plot: Adjustment speeds by regime
-        regimes = ['Below Threshold', 'Middle Regime', 'Above Threshold']
-        adjustments = [
-            abs(threshold_model.adjustment_below), 
-            abs(threshold_model.adjustment_middle), 
-            abs(threshold_model.adjustment_above)
-        ]
-        
-        axs[1].bar(
-            regimes,
-            adjustments,
-            color=['blue', 'gray', 'red']
-        )
-        axs[1].set_ylabel('Speed of Adjustment')
-        
-        # Format axes
-        format_date_axis(
-            axs[0], 
-            date_format=self.date_format,
-            interval=config.get('visualization.date_interval', 'month')
-        )
-        
-        # Set title if provided
-        if title:
-            fig.suptitle(title)
-        else:
-            fig.suptitle('Threshold Cointegration Analysis')
-            
-        # Adjust layout
-        fig.tight_layout()
-        
-        # Save if requested
-        if save_path:
-            save_plot(fig, save_path, dpi=self.dpi)
-            
-        return fig, axs
-    
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(ValueError, TypeError), reraise=True)
-    def plot_simulation_comparison(
-        self,
-        original_data: pd.DataFrame,
-        simulated_data: pd.DataFrame,
-        date_col: str = 'date',
-        price_cols: List[str] = None,
-        title: Optional[str] = None,
-        save_path: Optional[str] = None
-    ) -> Tuple[plt.Figure, plt.Axes]:
-        """
-        Compare original and simulated price series.
-        
-        Parameters
-        ----------
-        original_data : pd.DataFrame
-            DataFrame containing the original price data
-        simulated_data : pd.DataFrame
-            DataFrame containing the simulated price data
-        date_col : str, optional
-            Name of the date column, default 'date'
-        price_cols : list of str, optional
-            Names of price columns to compare, default None
-            If None, uses all numeric columns except date_col
-        title : str, optional
-            Plot title, default None
-        save_path : str, optional
-            Path to save the figure, default None
-            
-        Returns
-        -------
-        fig : plt.Figure
-            The matplotlib figure
-        axs : list of plt.Axes
-            The matplotlib axes
-        """
-        # Validate inputs
-        for df in [original_data, simulated_data]:
-            valid, errors = validate_dataframe(df, required_columns=[date_col])
-            raise_if_invalid(valid, errors, "Invalid data for simulation comparison plot")
-        
-        # Optimize dataframes for memory efficiency
-        original_data = optimize_dataframe(original_data)
-        simulated_data = optimize_dataframe(simulated_data)
-        
-        # Determine price columns if not specified
-        if price_cols is None:
-            price_cols = [col for col in original_data.columns
-                         if col != date_col and
-                         np.issubdtype(original_data[col].dtype, np.number)]
-        
-        # Create figure with subplots
-        n_cols = len(price_cols)
-        fig, axs = plt.subplots(
-            n_cols, 1, 
-            figsize=(self.fig_width, self.fig_height * n_cols / 2),
-            sharex=True
-        )
-        
-        # If only one price column, wrap the axes in a list
-        if n_cols == 1:
-            axs = [axs]
-        
-        # Plot each series
-        for i, col in enumerate(price_cols):
-            ax = axs[i]
-            
-            # Plot original data
-            ax.plot(
-                original_data[date_col], 
-                original_data[col],
-                color='k',
-                label='Actual'
-            )
-            
-            # Plot simulated data
-            ax.plot(
-                simulated_data[date_col], 
-                simulated_data[col],
-                color='r',
-                linestyle='--',
-                label='Simulated'
-            )
-            
-            ax.set_ylabel(col)
+
+            # Add legend
             ax.legend()
-            
-            # Add grid if configured
-            if config.get('visualization.grid', True):
-                ax.grid(True, alpha=0.3)
-        
-        # Format date axis on bottom subplot
-        format_date_axis(
-            axs[-1], 
-            date_format=self.date_format,
-            interval=config.get('visualization.date_interval', 'month')
-        )
-        
-        # Set title if provided
-        if title:
-            fig.suptitle(title)
-        else:
-            fig.suptitle('Actual vs. Simulated Prices')
-            
-        # Adjust layout
-        fig.tight_layout()
-        
-        # Save if requested
-        if save_path:
-            save_plot(fig, save_path, dpi=self.dpi)
-            
-        return fig, axs
+
+            # Set title and labels
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+
+            # Format x-axis
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m'))
+            plt.xticks(rotation=45)
+
+            # Adjust layout
+            plt.tight_layout()
+
+            logger.info(f"Created multiple time series plot for {y_columns}")
+            return fig, ax
+        except Exception as e:
+            logger.error(f"Error creating multiple time series plot: {e}")
+            raise YemenAnalysisError(f"Error creating multiple time series plot: {e}")
+
+    @handle_errors
+    def plot_seasonal_decomposition(
+        self, y_column: str, period: int = 12, model: str = 'additive',
+        title: Optional[str] = None, figsize: Optional[Tuple[int, int]] = None,
+        **kwargs
+    ) -> Figure:
+        """
+        Create a seasonal decomposition plot.
+
+        Args:
+            y_column: Column to decompose.
+            period: Seasonal period.
+            model: Decomposition model. Options are 'additive' and 'multiplicative'.
+            title: Plot title.
+            figsize: Figure size. If None, uses a larger version of the default figsize.
+            **kwargs: Additional arguments to pass to the seasonal_decompose function.
+
+        Returns:
+            Matplotlib figure.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the column is invalid.
+        """
+        logger.info(f"Creating seasonal decomposition plot for {y_column}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if y_column exists
+        if y_column not in self.data.columns:
+            logger.error(f"Column {y_column} not found in data")
+            raise YemenAnalysisError(f"Column {y_column} not found in data")
+
+        try:
+            # Import seasonal_decompose
+            from statsmodels.tsa.seasonal import seasonal_decompose
+
+            # Set default figsize
+            if figsize is None:
+                figsize = (self.figsize[0], self.figsize[1] * 2)
+
+            # Set default title
+            if title is None:
+                title = f"Seasonal Decomposition of {y_column}"
+
+            # Set index to date column
+            data = self.data.set_index(self.date_column)
+
+            # Perform seasonal decomposition
+            result = seasonal_decompose(
+                data[y_column], model=model, period=period, **kwargs
+            )
+
+            # Create plot
+            fig = result.plot()
+            fig.set_size_inches(figsize)
+            fig.set_dpi(self.dpi)
+            fig.suptitle(title, fontsize=14)
+
+            # Adjust layout
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.9)
+
+            logger.info(f"Created seasonal decomposition plot for {y_column}")
+            return fig
+        except Exception as e:
+            logger.error(f"Error creating seasonal decomposition plot: {e}")
+            raise YemenAnalysisError(f"Error creating seasonal decomposition plot: {e}")
+
+    @handle_errors
+    def plot_acf_pacf(
+        self, y_column: str, lags: int = 40, alpha: float = 0.05,
+        title: Optional[str] = None, figsize: Optional[Tuple[int, int]] = None,
+        **kwargs
+    ) -> Figure:
+        """
+        Create ACF and PACF plots.
+
+        Args:
+            y_column: Column to analyze.
+            lags: Number of lags to include.
+            alpha: Significance level for confidence intervals.
+            title: Plot title.
+            figsize: Figure size. If None, uses the default figsize.
+            **kwargs: Additional arguments to pass to the plot_acf and plot_pacf functions.
+
+        Returns:
+            Matplotlib figure.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the column is invalid.
+        """
+        logger.info(f"Creating ACF and PACF plots for {y_column}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if y_column exists
+        if y_column not in self.data.columns:
+            logger.error(f"Column {y_column} not found in data")
+            raise YemenAnalysisError(f"Column {y_column} not found in data")
+
+        try:
+            # Import plot_acf and plot_pacf
+            from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+            # Set default figsize
+            if figsize is None:
+                figsize = self.figsize
+
+            # Set default title
+            if title is None:
+                title = f"ACF and PACF of {y_column}"
+
+            # Create figure
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, dpi=self.dpi)
+
+            # Plot ACF
+            plot_acf(self.data[y_column], lags=lags, alpha=alpha, ax=ax1, **kwargs)
+            ax1.set_title(f"Autocorrelation Function (ACF) of {y_column}")
+
+            # Plot PACF
+            plot_pacf(self.data[y_column], lags=lags, alpha=alpha, ax=ax2, **kwargs)
+            ax2.set_title(f"Partial Autocorrelation Function (PACF) of {y_column}")
+
+            # Set overall title
+            fig.suptitle(title, fontsize=14)
+
+            # Adjust layout
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.9)
+
+            logger.info(f"Created ACF and PACF plots for {y_column}")
+            return fig
+        except Exception as e:
+            logger.error(f"Error creating ACF and PACF plots: {e}")
+            raise YemenAnalysisError(f"Error creating ACF and PACF plots: {e}")
+
+    @handle_errors
+    def plot_price_dispersion(
+        self, price_column: str, group_column: str,
+        title: Optional[str] = None, ylabel: Optional[str] = None,
+        xlabel: Optional[str] = None, ax: Optional[Axes] = None,
+        **kwargs
+    ) -> Tuple[Figure, Axes]:
+        """
+        Create a price dispersion plot.
+
+        Args:
+            price_column: Column containing prices.
+            group_column: Column to group by (e.g., market, region).
+            title: Plot title.
+            ylabel: Y-axis label.
+            xlabel: X-axis label.
+            ax: Matplotlib axes to plot on. If None, creates a new figure.
+            **kwargs: Additional arguments to pass to the plot function.
+
+        Returns:
+            Tuple containing the figure and axes.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the columns are invalid.
+        """
+        logger.info(f"Creating price dispersion plot for {price_column} by {group_column}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if columns exist
+        if price_column not in self.data.columns:
+            logger.error(f"Column {price_column} not found in data")
+            raise YemenAnalysisError(f"Column {price_column} not found in data")
+
+        if group_column not in self.data.columns:
+            logger.error(f"Column {group_column} not found in data")
+            raise YemenAnalysisError(f"Column {group_column} not found in data")
+
+        try:
+            # Create figure if ax is None
+            if ax is None:
+                fig, ax = plt.subplots(figsize=self.figsize, dpi=self.dpi)
+            else:
+                fig = ax.figure
+
+            # Set default title and labels
+            if title is None:
+                title = f"Price Dispersion of {price_column} by {group_column}"
+
+            if ylabel is None:
+                ylabel = "Coefficient of Variation"
+
+            if xlabel is None:
+                xlabel = self.date_column
+
+            # Calculate price dispersion
+            # Group by date and calculate coefficient of variation
+            dispersion = self.data.groupby(self.date_column)[price_column].agg(['mean', 'std'])
+            dispersion['cv'] = dispersion['std'] / dispersion['mean']
+
+            # Plot data
+            ax.plot(dispersion.index, dispersion['cv'], **kwargs)
+
+            # Set title and labels
+            ax.set_title(title)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+
+            # Format x-axis
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m'))
+            plt.xticks(rotation=45)
+
+            # Adjust layout
+            plt.tight_layout()
+
+            logger.info(f"Created price dispersion plot for {price_column} by {group_column}")
+            return fig, ax
+        except Exception as e:
+            logger.error(f"Error creating price dispersion plot: {e}")
+            raise YemenAnalysisError(f"Error creating price dispersion plot: {e}")
+
+    @handle_errors
+    def plot_price_correlation(
+        self, price_column: str, group_column: str,
+        title: Optional[str] = None, figsize: Optional[Tuple[int, int]] = None,
+        cmap: str = 'coolwarm', **kwargs
+    ) -> Figure:
+        """
+        Create a price correlation heatmap.
+
+        Args:
+            price_column: Column containing prices.
+            group_column: Column to group by (e.g., market, region).
+            title: Plot title.
+            figsize: Figure size. If None, uses a square version of the default figsize.
+            cmap: Colormap for the heatmap.
+            **kwargs: Additional arguments to pass to the heatmap function.
+
+        Returns:
+            Matplotlib figure.
+
+        Raises:
+            YemenAnalysisError: If the data has not been set or the columns are invalid.
+        """
+        logger.info(f"Creating price correlation heatmap for {price_column} by {group_column}")
+
+        # Check if data has been set
+        if self.data is None:
+            logger.error("Data has not been set")
+            raise YemenAnalysisError("Data has not been set")
+
+        # Check if columns exist
+        if price_column not in self.data.columns:
+            logger.error(f"Column {price_column} not found in data")
+            raise YemenAnalysisError(f"Column {price_column} not found in data")
+
+        if group_column not in self.data.columns:
+            logger.error(f"Column {group_column} not found in data")
+            raise YemenAnalysisError(f"Column {group_column} not found in data")
+
+        try:
+            # Set default figsize
+            if figsize is None:
+                size = max(self.figsize)
+                figsize = (size, size)
+
+            # Set default title
+            if title is None:
+                title = f"Price Correlation of {price_column} by {group_column}"
+
+            # Pivot data to wide format
+            pivot_data = self.data.pivot_table(
+                index=self.date_column, columns=group_column, values=price_column
+            )
+
+            # Calculate correlation matrix
+            corr_matrix = pivot_data.corr()
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=figsize, dpi=self.dpi)
+
+            # Create heatmap
+            sns.heatmap(
+                corr_matrix, annot=True, cmap=cmap, ax=ax,
+                vmin=-1, vmax=1, center=0, **kwargs
+            )
+
+            # Set title
+            ax.set_title(title)
+
+            # Adjust layout
+            plt.tight_layout()
+
+            logger.info(f"Created price correlation heatmap for {price_column} by {group_column}")
+            return fig
+        except Exception as e:
+            logger.error(f"Error creating price correlation heatmap: {e}")
+            raise YemenAnalysisError(f"Error creating price correlation heatmap: {e}")
+
+    @handle_errors
+    def save_plot(
+        self, fig: Figure, file_path: str, dpi: Optional[int] = None,
+        **kwargs
+    ) -> None:
+        """
+        Save a plot to a file.
+
+        Args:
+            fig: Matplotlib figure to save.
+            file_path: Path to save the figure to.
+            dpi: DPI for the saved figure. If None, uses the figure's DPI.
+            **kwargs: Additional arguments to pass to the savefig function.
+
+        Raises:
+            YemenAnalysisError: If the figure cannot be saved.
+        """
+        logger.info(f"Saving plot to {file_path}")
+
+        try:
+            # Set default DPI
+            if dpi is None:
+                dpi = self.dpi
+
+            # Save figure
+            fig.savefig(file_path, dpi=dpi, **kwargs)
+
+            logger.info(f"Saved plot to {file_path}")
+        except Exception as e:
+            logger.error(f"Error saving plot: {e}")
+            raise YemenAnalysisError(f"Error saving plot: {e}")

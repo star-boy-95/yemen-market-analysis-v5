@@ -1,727 +1,479 @@
 """
-Data validation utilities for the Yemen Market Integration Project.
-Provides functions to validate input data and model parameters.
+Data validation module for Yemen Market Analysis.
+
+This module provides functions for validating data used in the Yemen Market Analysis
+package. It includes functions for validating GeoJSON data, time series data, and
+model parameters.
 """
-import numpy as np
-import pandas as pd
-import geopandas as gpd
-from typing import Any, Dict, List, Optional, Callable, Union, Tuple, Set
 import logging
-from pathlib import Path
-import json
-import re
+from typing import Dict, List, Optional, Union, Any, Tuple
 
-from .error_handler import ValidationError
-from .multiple_testing import apply_multiple_testing_correction, apply_multiple_testing_correction_to_results
+import pandas as pd
+import numpy as np
+import geopandas as gpd
 
+from src.utils.error_handling import YemenAnalysisError, handle_errors
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-def validate_dataframe(
-    df: pd.DataFrame,
-    required_columns: Optional[List[str]] = None,
-    column_types: Optional[Dict[str, type]] = None,
-    min_rows: int = 1,
-    check_nulls: bool = True,
-    custom_validators: Optional[Dict[str, Callable[[pd.Series], bool]]] = None
-) -> Tuple[bool, List[str]]:
+@handle_errors
+def validate_data(
+    data: Union[pd.DataFrame, gpd.GeoDataFrame], data_type: str = 'dataframe'
+) -> bool:
     """
-    Validate a pandas DataFrame against specified requirements.
-    
-    This function performs comprehensive validation of a DataFrame, checking for
-    required columns, column types, minimum row count, null values, and applying
-    custom validation functions.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame to validate
-    required_columns : list of str, optional
-        Column names that must be present in the DataFrame
-    column_types : dict, optional
-        Mapping of column names to expected types (e.g., {'price': float})
-    min_rows : int, default=1
-        Minimum number of rows required in the DataFrame
-    check_nulls : bool, default=True
-        Whether to check for null values in required columns
-    custom_validators : dict, optional
-        Custom validation functions for specific columns. Each function should
-        take a pandas Series as input and return a boolean.
-        
-    Returns
-    -------
-    valid : bool
-        Whether the DataFrame passes all validations
-    errors : list of str
-        List of error messages if validation fails
-        
-    Examples
-    --------
-    >>> df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, None]})
-    >>> valid, errors = validate_dataframe(df, required_columns=['A', 'B'], check_nulls=True)
-    >>> valid
-    False
-    >>> errors
-    ['Column B contains null values']
-    
-    >>> # With custom validators
-    >>> valid, errors = validate_dataframe(
-    ...     df,
-    ...     required_columns=['A'],
-    ...     custom_validators={'A': lambda x: x.min() > 0}
-    ... )
-    >>> valid
-    True
-    
-    >>> # With column type validation
-    >>> valid, errors = validate_dataframe(
-    ...     df,
-    ...     column_types={'A': int, 'B': float}
-    ... )
-    >>> valid
-    True
-    """
-    errors = []
-    
-    # Check if object is a DataFrame
-    if not isinstance(df, pd.DataFrame):
-        errors.append(f"Expected pandas DataFrame, got {type(df)}")
-        return False, errors
-    
-    # Check minimum number of rows
-    if len(df) < min_rows:
-        errors.append(f"DataFrame has {len(df)} rows, expected at least {min_rows}")
-    
-    # Check required columns
-    if required_columns:
-        missing_columns = set(required_columns) - set(df.columns)
-        if missing_columns:
-            errors.append(f"Missing required columns: {', '.join(missing_columns)}")
-    
-    # Check column types
-    if column_types:
-        for col, expected_type in column_types.items():
-            if col in df.columns:
-                # Handle special case for datetime
-                if expected_type == pd.Timestamp:
-                    if not pd.api.types.is_datetime64_any_dtype(df[col]):
-                        errors.append(f"Column '{col}' is not datetime type")
-                else:
-                    # For other types, check using isinstance and handle special cases
-                    if expected_type == int:
-                        if not pd.api.types.is_integer_dtype(df[col]):
-                            errors.append(f"Column '{col}' is not integer type")
-                    elif expected_type == float:
-                        if not pd.api.types.is_float_dtype(df[col]):
-                            errors.append(f"Column '{col}' is not float type")
-                    elif expected_type == str:
-                        if not pd.api.types.is_string_dtype(df[col]):
-                            errors.append(f"Column '{col}' is not string type")
-                    else:
-                        # For other types, check each value
-                        invalid_values = df[~df[col].apply(lambda x: isinstance(x, expected_type))][col]
-                        if len(invalid_values) > 0:
-                            errors.append(f"Column '{col}' has {len(invalid_values)} values not of type {expected_type.__name__}")
-            else:
-                errors.append(f"Column '{col}' not found in DataFrame")
-    
-    # Check for null values
-    if check_nulls:
-        null_counts = df.isnull().sum()
-        columns_with_nulls = null_counts[null_counts > 0]
-        if not columns_with_nulls.empty:
-            for col, count in columns_with_nulls.items():
-                errors.append(f"Column '{col}' has {count} null values")
-    
-    # Apply custom validators
-    if custom_validators:
-        for col, validator in custom_validators.items():
-            if col in df.columns:
-                try:
-                    if not validator(df[col]):
-                        errors.append(f"Custom validation failed for column '{col}'")
-                except Exception as e:
-                    errors.append(f"Error during custom validation for column '{col}': {str(e)}")
-            else:
-                errors.append(f"Column '{col}' not found for custom validation")
-    
-    return len(errors) == 0, errors
+    Validate data for use in Yemen Market Analysis.
 
-def validate_exchange_rate_regime(value: str) -> bool:
-    """
-    Validate exchange rate regime value
-    
-    Parameters
-    ----------
-    value : str
-        Exchange rate regime to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return value in ['north', 'south']
+    Args:
+        data: Data to validate.
+        data_type: Type of data to validate. Options are 'dataframe', 'geojson',
+                  'time_series', and 'spatial'.
 
-def validate_admin_region(region: str, valid_regions: Optional[List[str]] = None) -> bool:
-    """
-    Validate an administrative region in Yemen
-    
-    Parameters
-    ----------
-    region : str
-        Region to validate
-    valid_regions : list, optional
-        List of valid regions
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    # Get regions from configuration if not provided
-    if not valid_regions:
-        from yemen_market_integration.utils import config
-        north = config.get('regions.north', [])
-        south = config.get('regions.south', [])
-        valid_regions = north + south
-    
-    # Normalize input
-    region = region.lower().strip()
-    valid_regions = [r.lower().strip() for r in valid_regions]
-    
-    return region in valid_regions
+    Returns:
+        True if the data is valid.
 
-def validate_geodataframe(
-    gdf: gpd.GeoDataFrame,
-    crs: Optional[str] = None,
-    geometry_type: Optional[str] = None,
-    check_crs: bool = True,
-    **kwargs
-) -> Tuple[bool, List[str]]:
+    Raises:
+        YemenAnalysisError: If the data is invalid.
     """
-    Validate a GeoDataFrame
-    
-    Parameters
-    ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame to validate
-    crs : str, optional
-        Expected coordinate reference system
-    geometry_type : str, optional
-        Expected geometry type (Point, LineString, Polygon, etc.)
-    check_crs : bool, optional
-        Whether to check if the GeoDataFrame has a CRS defined
-    **kwargs : dict
-        Additional arguments to pass to validate_dataframe
-        
-    Returns
-    -------
-    tuple
-        (is_valid, error_messages)
-    """
-    # First validate as a DataFrame
-    is_valid, errors = validate_dataframe(gdf, **{k: v for k, v in kwargs.items() if k != 'check_crs'})
-    
-    # Check if object is a GeoDataFrame
-    if not isinstance(gdf, gpd.GeoDataFrame):
-        errors.append(f"Expected GeoDataFrame, got {type(gdf)}")
-        return False, errors
-    
-    # Check if geometry column exists
-    if 'geometry' not in gdf.columns:
-        errors.append("Missing 'geometry' column")
-    
-    # Check CRS
-    if crs and gdf.crs:
-        if str(gdf.crs) != str(crs):
-            errors.append(f"CRS mismatch: expected {crs}, got {gdf.crs}")
-    
-    # Check if CRS is defined
-    if check_crs and not gdf.crs:
-        errors.append("GeoDataFrame missing coordinate reference system (CRS)")
-    
-    # Check geometry type
-    if geometry_type and len(gdf) > 0:
-        geom_types = gdf.geometry.type.unique()
-        if geometry_type not in geom_types:
-            errors.append(f"Expected geometry type {geometry_type}, got {', '.join(geom_types)}")
-    
-    return len(errors) == 0, errors
+    logger.info(f"Validating {data_type} data")
 
-def validate_time_series(
-    series: Union[pd.Series, np.ndarray],
-    min_length: int = 30,
-    max_nulls: int = 0,
-    check_stationarity: bool = False,
-    check_constant: bool = True,
-    custom_validators: Optional[Union[List[Callable[[Union[pd.Series, np.ndarray]], bool]], Dict[str, Callable[[Union[pd.Series, np.ndarray]], bool]]]] = None,
-) -> Tuple[bool, List[str]]:
-    """
-    Validate a time series for econometric analysis
-    
-    Parameters
-    ----------
-    series : pandas.Series or numpy.ndarray
-        Time series to validate
-    min_length : int, optional
-        Minimum length of the series
-    max_nulls : int, optional
-        Maximum allowed null values
-    check_stationarity : bool, optional
-        Whether to check for stationarity
-    check_constant : bool, optional
-        Whether to check for constant values
-    custom_validators : list or dict of callable, optional
-        Custom validation functions that take a series and return a boolean.
-        Can be a list of functions or a dict mapping names to functions.
-        
-    Returns
-    -------
-    tuple
-        (is_valid, error_messages)
-    """
-    errors = []
-    
-    # Convert to numpy array if needed
-    if isinstance(series, pd.Series):
-        values = series.values
+    # Check if data is empty
+    if data is None or len(data) == 0:
+        logger.error("Data is empty")
+        raise YemenAnalysisError("Data is empty")
+
+    # Validate based on data type
+    if data_type == 'dataframe':
+        return _validate_dataframe(data)
+    elif data_type == 'geojson':
+        return _validate_geojson(data)
+    elif data_type == 'time_series':
+        return _validate_time_series(data)
+    elif data_type == 'spatial':
+        return _validate_spatial(data)
     else:
-        values = series
-    
-    # Check length
-    if len(values) < min_length:
-        errors.append(f"Time series length is {len(values)}, expected at least {min_length}")
-    
-    # Check nulls
-    null_count = np.isnan(values).sum()
-    if null_count > max_nulls:
-        errors.append(f"Time series has {null_count} null values, maximum allowed is {max_nulls}")
-    
-    # Check for constant values
-    if check_constant and len(values) > 1:
-        non_nan_values = values[~np.isnan(values)]
-        if len(non_nan_values) > 0 and np.all(non_nan_values == non_nan_values[0]):
-            errors.append("Time series has constant values")
-    
-    # Check stationarity
-    if check_stationarity and len(values) >= 10:
-        try:
-            from statsmodels.tsa.stattools import adfuller
-            result = adfuller(values, regression='c')
-            pvalue = result[1]
-            if pvalue > 0.05:
-                errors.append(f"Time series may not be stationary (ADF test p-value: {pvalue:.4f})")
-        except Exception as e:
-            errors.append(f"Error checking stationarity: {str(e)}")
-    
-    # Apply custom validators
-    if custom_validators:
-        if isinstance(custom_validators, dict):
-            # Dictionary of named validators
-            for name, validator in custom_validators.items():
-                try:
-                    if not validator(series):
-                        errors.append(f"Custom validation '{name}' failed")
-                except Exception as e:
-                    errors.append(f"Error in custom validation '{name}': {str(e)}")
-        else:
-            # List of validators
-            for i, validator in enumerate(custom_validators):
-                try:
-                    if not validator(series):
-                        errors.append(f"Custom validation {i+1} failed")
-                except Exception as e:
-                    errors.append(f"Error in custom validation {i+1}: {str(e)}")
-    
-    return len(errors) == 0, errors
+        logger.error(f"Invalid data type: {data_type}")
+        raise YemenAnalysisError(f"Invalid data type: {data_type}")
 
-def validate_model_inputs(
-    model_name: str,
-    params: Dict[str, Any],
-    required_params: Set[str],
-    param_validators: Dict[str, Callable[[Any], bool]] = None
-) -> Tuple[bool, List[str]]:
-    """
-    Validate inputs for a model
-    
-    Parameters
-    ----------
-    model_name : str
-        Name of the model for error reporting
-    params : dict
-        Model parameters
-    required_params : set
-        Required parameter names
-    param_validators : dict, optional
-        Validators for specific parameters
-        
-    Returns
-    -------
-    tuple
-        (is_valid, error_messages)
-    """
-    errors = []
-    
-    # Check required parameters
-    missing_params = required_params - set(params.keys())
-    if missing_params:
-        errors.append(f"Missing required parameters for {model_name}: {', '.join(missing_params)}")
-    
-    # Validate parameter values
-    if param_validators:
-        for param, validator in param_validators.items():
-            if param in params:
-                try:
-                    if not validator(params[param]):
-                        errors.append(f"Invalid value for parameter '{param}': {params[param]}")
-                except Exception as e:
-                    errors.append(f"Error validating parameter '{param}': {str(e)}")
-    
-    return len(errors) == 0, errors
 
-def validate_file_exists(file_path: Union[str, Path]) -> bool:
+def _validate_dataframe(data: pd.DataFrame) -> bool:
     """
-    Check if a file exists
-    
-    Parameters
-    ----------
-    file_path : str or Path
-        Path to the file
-        
-    Returns
-    -------
-    bool
-        True if the file exists
-    """
-    return Path(file_path).is_file()
+    Validate a pandas DataFrame.
 
-def validate_dir_exists(dir_path: Union[str, Path]) -> bool:
-    """
-    Check if a directory exists
-    
-    Parameters
-    ----------
-    dir_path : str or Path
-        Path to the directory
-        
-    Returns
-    -------
-    bool
-        True if the directory exists
-    """
-    return Path(dir_path).is_dir()
+    Args:
+        data: DataFrame to validate.
 
-def validate_is_json(text: str) -> bool:
-    """
-    Check if a string is valid JSON
-    
-    Parameters
-    ----------
-    text : str
-        Text to validate
-        
-    Returns
-    -------
-    bool
-        True if the text is valid JSON
-    """
-    try:
-        json.loads(text)
-        return True
-    except ValueError:
-        return False
+    Returns:
+        True if the DataFrame is valid.
 
-def validate_geojson(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    Raises:
+        YemenAnalysisError: If the DataFrame is invalid.
     """
-    Validate GeoJSON data
-    
-    Parameters
-    ----------
-    data : dict
-        GeoJSON data
-        
-    Returns
-    -------
-    tuple
-        (is_valid, error_messages)
-    """
-    errors = []
-    
-    # Check if data is a dictionary
-    if not isinstance(data, dict):
-        errors.append(f"Expected dictionary, got {type(data)}")
-        return False, errors
-    
-    # Check if type is specified
-    if 'type' not in data:
-        errors.append("Missing 'type' field")
-        return False, errors
-    
-    # Check type value
-    if data['type'] not in ['FeatureCollection', 'Feature', 'Point', 'LineString', 
-                           'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 
-                           'GeometryCollection']:
-        errors.append(f"Invalid type: {data['type']}")
-    
-    # Check for FeatureCollection
-    if data['type'] == 'FeatureCollection':
-        if 'features' not in data:
-            errors.append("FeatureCollection missing 'features' array")
-        elif not isinstance(data['features'], list):
-            errors.append("'features' field is not an array")
-    
-    # Check for Feature
-    if data['type'] == 'Feature':
-        if 'geometry' not in data:
-            errors.append("Feature missing 'geometry' field")
-        if 'properties' not in data:
-            errors.append("Feature missing 'properties' field")
-    
-    # Check for geometry types
-    if data['type'] in ['Point', 'LineString', 'Polygon', 'MultiPoint', 
-                       'MultiLineString', 'MultiPolygon']:
-        if 'coordinates' not in data:
-            errors.append(f"{data['type']} missing 'coordinates' field")
-    
-    return len(errors) == 0, errors
+    # Check if data is a DataFrame
+    if not isinstance(data, pd.DataFrame):
+        logger.error("Data is not a pandas DataFrame")
+        raise YemenAnalysisError("Data is not a pandas DataFrame")
 
-def validate_date_string(date_str: str, format: str = "%Y-%m-%d") -> bool:
-    """
-    Validate a date string
-    
-    Parameters
-    ----------
-    date_str : str
-        Date string to validate
-    format : str, optional
-        Expected date format
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    try:
-        pd.to_datetime(date_str, format=format)
-        return True
-    except ValueError:
-        return False
+    # Check if data has any rows
+    if len(data) == 0:
+        logger.error("DataFrame has no rows")
+        raise YemenAnalysisError("DataFrame has no rows")
 
-# This function is already defined above with more functionality
+    # Check if data has any columns
+    if len(data.columns) == 0:
+        logger.error("DataFrame has no columns")
+        raise YemenAnalysisError("DataFrame has no columns")
 
-def validate_commodity(commodity: str, valid_commodities: List[str]) -> bool:
-    """
-    Validate a commodity
-    
-    Parameters
-    ----------
-    commodity : str
-        Commodity to validate
-    valid_commodities : list
-        List of valid commodities
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return commodity in valid_commodities
+    # Check for duplicate indices
+    if data.index.duplicated().any():
+        logger.warning("DataFrame has duplicate indices")
 
-def validate_phone_number(phone: str) -> bool:
-    """
-    Validate a phone number format
-    
-    Parameters
-    ----------
-    phone : str
-        Phone number to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    pattern = r'^\+?[0-9]{8,15}$'
-    return bool(re.match(pattern, phone))
+    # Check for missing values
+    missing_values = data.isnull().sum()
+    if missing_values.sum() > 0:
+        logger.warning(f"DataFrame has missing values: {missing_values}")
 
-def validate_email(email: str) -> bool:
-    """
-    Validate an email address
-    
-    Parameters
-    ----------
-    email : str
-        Email to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
-
-def validate_latitude(lat: float) -> bool:
-    """
-    Validate a latitude value
-    
-    Parameters
-    ----------
-    lat : float
-        Latitude to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return -90 <= lat <= 90
-
-def validate_longitude(lon: float) -> bool:
-    """
-    Validate a longitude value
-    
-    Parameters
-    ----------
-    lon : float
-        Longitude to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return -180 <= lon <= 180
-
-def validate_percentage(value: float) -> bool:
-    """
-    Validate a percentage value
-    
-    Parameters
-    ----------
-    value : float
-        Percentage to validate
-        
-    Returns
-    -------
-    bool
-        True if valid
-    """
-    return 0 <= value <= 100
-
-def validate_data(gdf: gpd.GeoDataFrame, logger: logging.Logger) -> bool:
-    """
-    Validate the input data for the Yemen Market Integration analysis.
-    
-    Parameters
-    ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing the market data
-    logger : logging.Logger
-        Logger instance
-        
-    Returns
-    -------
-    bool
-        True if data is valid, False otherwise
-    """
-    logger.info("Validating input data")
-    
-    # Check if it's a GeoDataFrame
-    if not isinstance(gdf, gpd.GeoDataFrame):
-        logger.error("Input data is not a GeoDataFrame")
-        return False
-    
-    # Check required columns
-    required_columns = ['date', 'commodity', 'price', 'admin1', 'geometry']
-    missing_columns = set(required_columns) - set(gdf.columns)
-    if missing_columns:
-        logger.error(f"Missing required columns: {', '.join(missing_columns)}")
-        return False
-    
-    # Check data types
-    if not pd.api.types.is_datetime64_any_dtype(gdf['date']):
-        logger.error("'date' column is not datetime type")
-        return False
-    
-    if not pd.api.types.is_numeric_dtype(gdf['price']):
-        logger.error("'price' column is not numeric type")
-        return False
-    
-    # Check for null values in critical columns
-    for col in ['date', 'commodity', 'price', 'admin1']:
-        if col in gdf.columns:
-            null_count = gdf[col].isnull().sum()
-            if null_count > 0:
-                logger.warning(f"Column '{col}' has {null_count} null values")
-    
-    # Check for valid geometry
-    if gdf.geometry.isna().any():
-        logger.warning(f"Found {gdf.geometry.isna().sum()} rows with missing geometry")
-    
-    # Check for sufficient data
-    if len(gdf) < 10:
-        logger.warning(f"Limited data available: only {len(gdf)} observations")
-    
-    logger.info("Data validation completed")
+    logger.info("DataFrame validation successful")
     return True
 
-def raise_if_invalid(is_valid: bool, errors: List[str], error_msg: str = "Validation failed") -> None:
-    """
-    Raise ValidationError if validation failed
-    
-    Parameters
-    ----------
-    is_valid : bool
-        Validation result
-    errors : list
-        List of error messages
-    error_msg : str, optional
-        Main error message
-        
-    Raises
-    ------
-    ValidationError
-        If validation failed
-    """
-    if not is_valid:
-        detailed_msg = f"{error_msg}: {'; '.join(errors)}"
-        raise ValidationError(detailed_msg)
 
-def validate_multiple_test_results(
-    results: Dict[str, Dict[str, Any]],
-    p_value_path: List[str],
-    method: str = 'fdr_bh',
-    alpha: float = 0.05
-) -> Dict[str, Dict[str, Any]]:
+def _validate_geojson(data: gpd.GeoDataFrame) -> bool:
     """
-    Validate and adjust p-values in multiple hypothesis testing scenarios.
-    
-    This function applies multiple testing correction to p-values in a results dictionary,
-    updating significance based on corrected p-values.
-    
-    Parameters
-    ----------
-    results : dict
-        Dictionary of test results, e.g. from market pair analysis
-    p_value_path : list
-        Path to p-values in each result dictionary, e.g. ['cointegration', 'p_value']
-    method : str, default='fdr_bh'
-        Correction method (bonferroni, holm, fdr_bh, fdr_by)
-    alpha : float, default=0.05
-        Significance level
-        
-    Returns
-    -------
-    dict
-        Updated results dictionary with corrected p-values
-        
-    Notes
-    -----
-    This function applies the appropriate multiple testing correction
-    and adds corrected p-values to the results dictionary. It also
-    updates the 'significant' field based on corrected p-values.
+    Validate a GeoJSON GeoDataFrame.
+
+    Args:
+        data: GeoDataFrame to validate.
+
+    Returns:
+        True if the GeoDataFrame is valid.
+
+    Raises:
+        YemenAnalysisError: If the GeoDataFrame is invalid.
     """
-    return apply_multiple_testing_correction_to_results(
-        results, p_value_path, method=method, alpha=alpha
-    )
+    # Check if data is a GeoDataFrame
+    if not isinstance(data, gpd.GeoDataFrame):
+        logger.error("Data is not a GeoDataFrame")
+        raise YemenAnalysisError("Data is not a GeoDataFrame")
+
+    # Check if data has any rows
+    if len(data) == 0:
+        logger.error("GeoDataFrame has no rows")
+        raise YemenAnalysisError("GeoDataFrame has no rows")
+
+    # Check if data has any columns
+    if len(data.columns) == 0:
+        logger.error("GeoDataFrame has no columns")
+        raise YemenAnalysisError("GeoDataFrame has no columns")
+
+    # Check if data has a geometry column
+    if 'geometry' not in data.columns:
+        logger.error("GeoDataFrame has no geometry column")
+        raise YemenAnalysisError("GeoDataFrame has no geometry column")
+
+    # Check if geometry column has valid geometries
+    if data.geometry.isna().any():
+        logger.warning("GeoDataFrame has missing geometries")
+
+    # Check for required columns for Yemen Market Analysis
+    required_columns = ['market', 'date', 'price', 'commodity']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+
+    if missing_columns:
+        logger.warning(f"GeoDataFrame is missing required columns: {missing_columns}")
+
+    logger.info("GeoDataFrame validation successful")
+    return True
+
+
+def _validate_time_series(data: pd.DataFrame) -> bool:
+    """
+    Validate a time series DataFrame.
+
+    Args:
+        data: DataFrame to validate.
+
+    Returns:
+        True if the DataFrame is valid.
+
+    Raises:
+        YemenAnalysisError: If the DataFrame is invalid.
+    """
+    # First, validate as a DataFrame
+    _validate_dataframe(data)
+
+    # Check if data has a date column
+    if 'date' not in data.columns:
+        logger.error("Time series data has no date column")
+        raise YemenAnalysisError("Time series data has no date column")
+
+    # Check if date column is a datetime
+    if not pd.api.types.is_datetime64_any_dtype(data['date']):
+        logger.warning("Date column is not a datetime, attempting to convert")
+        try:
+            data['date'] = pd.to_datetime(data['date'])
+        except Exception as e:
+            logger.error(f"Error converting date column to datetime: {e}")
+            raise YemenAnalysisError(f"Error converting date column to datetime: {e}")
+
+    # Check if data has a price column
+    if 'price' not in data.columns:
+        logger.error("Time series data has no price column")
+        raise YemenAnalysisError("Time series data has no price column")
+
+    # Check if price column is numeric
+    if not pd.api.types.is_numeric_dtype(data['price']):
+        logger.error("Price column is not numeric")
+        raise YemenAnalysisError("Price column is not numeric")
+
+    # Check for negative prices
+    if (data['price'] < 0).any():
+        logger.warning("Time series data has negative prices")
+
+    # Check for duplicate dates
+    if data.duplicated(subset=['date']).any():
+        logger.warning("Time series data has duplicate dates")
+
+    # Check for gaps in time series
+    date_diff = data['date'].diff().dropna()
+    if len(date_diff.unique()) > 1:
+        logger.warning("Time series data has irregular time intervals")
+
+    logger.info("Time series validation successful")
+    return True
+
+
+def _validate_spatial(data: gpd.GeoDataFrame) -> bool:
+    """
+    Validate spatial data.
+
+    Args:
+        data: GeoDataFrame to validate.
+
+    Returns:
+        True if the GeoDataFrame is valid.
+
+    Raises:
+        YemenAnalysisError: If the GeoDataFrame is invalid.
+    """
+    # First, validate as a GeoDataFrame
+    _validate_geojson(data)
+
+    # Check if data has a coordinate reference system (CRS)
+    if data.crs is None:
+        logger.warning("Spatial data has no coordinate reference system (CRS)")
+
+    # Check for required columns for spatial analysis
+    required_columns = ['market', 'date', 'price', 'commodity', 'geometry']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+
+    if missing_columns:
+        logger.warning(f"Spatial data is missing required columns: {missing_columns}")
+
+    # Check for conflict data if available
+    if 'conflict_intensity' in data.columns:
+        if not pd.api.types.is_numeric_dtype(data['conflict_intensity']):
+            logger.warning("Conflict intensity column is not numeric")
+
+    logger.info("Spatial data validation successful")
+    return True
+
+
+@handle_errors
+def validate_model_parameters(
+    model_type: str, params: Dict[str, Any]
+) -> bool:
+    """
+    Validate model parameters.
+
+    Args:
+        model_type: Type of model. Options are 'unit_root', 'cointegration',
+                   'threshold', 'spatial', and 'vecm'.
+        params: Dictionary of model parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    logger.info(f"Validating {model_type} model parameters")
+
+    # Validate based on model type
+    if model_type == 'unit_root':
+        return _validate_unit_root_params(params)
+    elif model_type == 'cointegration':
+        return _validate_cointegration_params(params)
+    elif model_type == 'threshold':
+        return _validate_threshold_params(params)
+    elif model_type == 'spatial':
+        return _validate_spatial_params(params)
+    elif model_type == 'vecm':
+        return _validate_vecm_params(params)
+    else:
+        logger.error(f"Invalid model type: {model_type}")
+        raise YemenAnalysisError(f"Invalid model type: {model_type}")
+
+
+def _validate_unit_root_params(params: Dict[str, Any]) -> bool:
+    """
+    Validate unit root test parameters.
+
+    Args:
+        params: Dictionary of unit root test parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    # Check for required parameters
+    required_params = ['trend', 'max_lags']
+    missing_params = [param for param in required_params if param not in params]
+
+    if missing_params:
+        logger.error(f"Unit root test is missing required parameters: {missing_params}")
+        raise YemenAnalysisError(f"Unit root test is missing required parameters: {missing_params}")
+
+    # Validate trend parameter
+    valid_trends = ['c', 'ct', 'ctt', 'n']
+    if params['trend'] not in valid_trends:
+        logger.error(f"Invalid trend parameter: {params['trend']}")
+        raise YemenAnalysisError(f"Invalid trend parameter: {params['trend']}")
+
+    # Validate max_lags parameter
+    if not isinstance(params['max_lags'], int) or params['max_lags'] < 0:
+        logger.error(f"Invalid max_lags parameter: {params['max_lags']}")
+        raise YemenAnalysisError(f"Invalid max_lags parameter: {params['max_lags']}")
+
+    logger.info("Unit root test parameters validation successful")
+    return True
+
+
+def _validate_cointegration_params(params: Dict[str, Any]) -> bool:
+    """
+    Validate cointegration test parameters.
+
+    Args:
+        params: Dictionary of cointegration test parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    # Check for required parameters
+    required_params = ['trend', 'max_lags']
+    missing_params = [param for param in required_params if param not in params]
+
+    if missing_params:
+        logger.error(f"Cointegration test is missing required parameters: {missing_params}")
+        raise YemenAnalysisError(f"Cointegration test is missing required parameters: {missing_params}")
+
+    # Validate trend parameter
+    valid_trends = ['c', 'ct', 'ctt', 'n']
+    if params['trend'] not in valid_trends:
+        logger.error(f"Invalid trend parameter: {params['trend']}")
+        raise YemenAnalysisError(f"Invalid trend parameter: {params['trend']}")
+
+    # Validate max_lags parameter
+    if not isinstance(params['max_lags'], int) or params['max_lags'] < 0:
+        logger.error(f"Invalid max_lags parameter: {params['max_lags']}")
+        raise YemenAnalysisError(f"Invalid max_lags parameter: {params['max_lags']}")
+
+    # Validate test parameter if present
+    if 'test' in params:
+        valid_tests = ['eg', 'johansen', 'gh']
+        if params['test'] not in valid_tests:
+            logger.error(f"Invalid test parameter: {params['test']}")
+            raise YemenAnalysisError(f"Invalid test parameter: {params['test']}")
+
+    logger.info("Cointegration test parameters validation successful")
+    return True
+
+
+def _validate_threshold_params(params: Dict[str, Any]) -> bool:
+    """
+    Validate threshold model parameters.
+
+    Args:
+        params: Dictionary of threshold model parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    # Check for required parameters
+    required_params = ['max_lags', 'trim']
+    missing_params = [param for param in required_params if param not in params]
+
+    if missing_params:
+        logger.error(f"Threshold model is missing required parameters: {missing_params}")
+        raise YemenAnalysisError(f"Threshold model is missing required parameters: {missing_params}")
+
+    # Validate max_lags parameter
+    if not isinstance(params['max_lags'], int) or params['max_lags'] < 0:
+        logger.error(f"Invalid max_lags parameter: {params['max_lags']}")
+        raise YemenAnalysisError(f"Invalid max_lags parameter: {params['max_lags']}")
+
+    # Validate trim parameter
+    if not isinstance(params['trim'], (int, float)) or params['trim'] <= 0 or params['trim'] >= 0.5:
+        logger.error(f"Invalid trim parameter: {params['trim']}")
+        raise YemenAnalysisError(f"Invalid trim parameter: {params['trim']}")
+
+    # Validate model parameter if present
+    if 'model' in params:
+        valid_models = ['tar', 'mtar', 'tvecm']
+        if params['model'] not in valid_models:
+            logger.error(f"Invalid model parameter: {params['model']}")
+            raise YemenAnalysisError(f"Invalid model parameter: {params['model']}")
+
+    # Validate threshold parameter if present
+    if 'threshold' in params and params['threshold'] is not None:
+        if not isinstance(params['threshold'], (int, float)):
+            logger.error(f"Invalid threshold parameter: {params['threshold']}")
+            raise YemenAnalysisError(f"Invalid threshold parameter: {params['threshold']}")
+
+    logger.info("Threshold model parameters validation successful")
+    return True
+
+
+def _validate_spatial_params(params: Dict[str, Any]) -> bool:
+    """
+    Validate spatial model parameters.
+
+    Args:
+        params: Dictionary of spatial model parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    # Check for required parameters
+    required_params = ['conflict_column', 'price_column']
+    missing_params = [param for param in required_params if param not in params]
+
+    if missing_params:
+        logger.error(f"Spatial model is missing required parameters: {missing_params}")
+        raise YemenAnalysisError(f"Spatial model is missing required parameters: {missing_params}")
+
+    # Validate conflict_weight parameter if present
+    if 'conflict_weight' in params:
+        if not isinstance(params['conflict_weight'], (int, float)) or params['conflict_weight'] < 0 or params['conflict_weight'] > 1:
+            logger.error(f"Invalid conflict_weight parameter: {params['conflict_weight']}")
+            raise YemenAnalysisError(f"Invalid conflict_weight parameter: {params['conflict_weight']}")
+
+    # Validate conflict_reduction parameter if present
+    if 'conflict_reduction' in params:
+        if not isinstance(params['conflict_reduction'], (int, float)) or params['conflict_reduction'] < 0 or params['conflict_reduction'] > 1:
+            logger.error(f"Invalid conflict_reduction parameter: {params['conflict_reduction']}")
+            raise YemenAnalysisError(f"Invalid conflict_reduction parameter: {params['conflict_reduction']}")
+
+    logger.info("Spatial model parameters validation successful")
+    return True
+
+
+def _validate_vecm_params(params: Dict[str, Any]) -> bool:
+    """
+    Validate VECM parameters.
+
+    Args:
+        params: Dictionary of VECM parameters.
+
+    Returns:
+        True if the parameters are valid.
+
+    Raises:
+        YemenAnalysisError: If the parameters are invalid.
+    """
+    # Check for required parameters
+    required_params = ['k_ar_diff', 'deterministic', 'coint_rank']
+    missing_params = [param for param in required_params if param not in params]
+
+    if missing_params:
+        logger.error(f"VECM is missing required parameters: {missing_params}")
+        raise YemenAnalysisError(f"VECM is missing required parameters: {missing_params}")
+
+    # Validate k_ar_diff parameter
+    if not isinstance(params['k_ar_diff'], int) or params['k_ar_diff'] < 1:
+        logger.error(f"Invalid k_ar_diff parameter: {params['k_ar_diff']}")
+        raise YemenAnalysisError(f"Invalid k_ar_diff parameter: {params['k_ar_diff']}")
+
+    # Validate deterministic parameter
+    valid_deterministics = ['nc', 'co', 'ci', 'lo', 'li', 'cili']
+    if params['deterministic'] not in valid_deterministics:
+        logger.error(f"Invalid deterministic parameter: {params['deterministic']}")
+        raise YemenAnalysisError(f"Invalid deterministic parameter: {params['deterministic']}")
+
+    # Validate coint_rank parameter
+    if not isinstance(params['coint_rank'], int) or params['coint_rank'] < 0:
+        logger.error(f"Invalid coint_rank parameter: {params['coint_rank']}")
+        raise YemenAnalysisError(f"Invalid coint_rank parameter: {params['coint_rank']}")
+
+    logger.info("VECM parameters validation successful")
+    return True

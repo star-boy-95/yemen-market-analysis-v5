@@ -1,123 +1,370 @@
 """
-Data loading utilities for Yemen market integration analysis.
+Data loader module for Yemen Market Analysis.
+
+This module provides functions for loading and preprocessing data for the Yemen
+Market Analysis package. It includes functions for loading GeoJSON data, filtering
+by commodity and market, and preprocessing data for analysis.
 """
-import geopandas as gpd
-import pandas as pd
+import json
 import logging
 from pathlib import Path
-from typing import Optional, List, Union, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple
 
-# Use absolute imports for better module resolution
-from yemen_market_integration.utils.error_handler import handle_errors, DataError
-from yemen_market_integration.utils.validation import validate_geodataframe, raise_if_invalid
-from yemen_market_integration.utils.file_utils import read_geojson, write_geojson
-from yemen_market_integration.utils.performance_utils import memory_usage_decorator, optimize_dataframe
+import pandas as pd
+import numpy as np
+import geopandas as gpd
+from shapely.geometry import Point
 
+from src.config import config
+from src.utils.error_handling import YemenAnalysisError, handle_errors
+from src.utils.validation import validate_data
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
 class DataLoader:
-    """Data loader for GeoJSON market data."""
+    """
+    Data loader for Yemen Market Analysis.
     
-    def __init__(self, data_path: Union[str, Path] = "./data"):
+    This class provides methods for loading and preprocessing data for the Yemen
+    Market Analysis package.
+    
+    Attributes:
+        cache (Dict[str, Any]): Cache for loaded data.
+    """
+    
+    def __init__(self):
         """Initialize the data loader."""
-        self.data_path = Path(data_path)
-        self.raw_path = self.data_path / "raw"
-        self.processed_path = self.data_path / "processed"
+        self.cache: Dict[str, Any] = {}
     
-    @memory_usage_decorator
-    @handle_errors(logger=logger, error_type=(FileNotFoundError, PermissionError, OSError), reraise=True)
-    def load_geojson(self, filename: str) -> gpd.GeoDataFrame:
-        """Load GeoJSON data file into a GeoDataFrame."""
-        file_path = self.raw_path / filename
+    @handle_errors
+    def load_geojson(self, file_path: Union[str, Path]) -> gpd.GeoDataFrame:
+        """
+        Load GeoJSON data from a file.
         
-        if not file_path.exists():
-            raise DataError(f"GeoJSON file not found: {file_path}. Please ensure the file exists and you have read permissions.")
+        Args:
+            file_path: Path to the GeoJSON file.
+            
+        Returns:
+            GeoDataFrame containing the loaded data.
+            
+        Raises:
+            YemenAnalysisError: If the file cannot be loaded or is not valid GeoJSON.
+        """
+        file_path = Path(file_path)
         
-        gdf = read_geojson(file_path)
+        # Check if data is already cached
+        cache_key = f"geojson_{file_path}"
+        if cache_key in self.cache:
+            logger.info(f"Using cached data for {file_path}")
+            return self.cache[cache_key]
         
-        # Optimize GeoDataFrame for memory efficiency
-        gdf = optimize_dataframe(gdf)
+        logger.info(f"Loading GeoJSON data from {file_path}")
         
-        valid, errors = validate_geodataframe(
-            gdf,
-            required_columns=["admin1", "commodity", "date", "price"],
-            check_nulls=False  # Don't check for null values
-        )
-        
-        # Log warnings about null values but don't fail
-        for error in errors:
-            if "null values" in error:
-                logger.warning(error)
-            else:
-                logger.error(error)
-        
-        raise_if_invalid(valid, errors)
-        
-        return gdf
+        try:
+            # Load GeoJSON data
+            gdf = gpd.read_file(file_path)
+            
+            # Validate data
+            validate_data(gdf, data_type="geojson")
+            
+            # Cache data
+            self.cache[cache_key] = gdf
+            
+            logger.info(f"Loaded GeoJSON data with {len(gdf)} rows")
+            return gdf
+        except Exception as e:
+            logger.error(f"Error loading GeoJSON data: {e}")
+            raise YemenAnalysisError(f"Error loading GeoJSON data: {e}")
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
-    def filter_by_date(self, gdf: gpd.GeoDataFrame, start_date: Optional[str] = None, end_date: Optional[str] = None) -> gpd.GeoDataFrame:
-        """Filter GeoDataFrame by date range."""
-        if not isinstance(gdf, gpd.GeoDataFrame):
-            raise ValueError("Input must be a GeoDataFrame")
+    @handle_errors
+    def filter_by_commodity(
+        self, data: gpd.GeoDataFrame, commodity: str
+    ) -> gpd.GeoDataFrame:
+        """
+        Filter data by commodity.
         
-        # Convert date column to datetime if it's not already
-        if 'date' in gdf.columns and not pd.api.types.is_datetime64_any_dtype(gdf['date']):
-            gdf['date'] = pd.to_datetime(gdf['date'])
+        Args:
+            data: GeoDataFrame containing the data.
+            commodity: Commodity to filter by.
+            
+        Returns:
+            GeoDataFrame containing the filtered data.
+            
+        Raises:
+            YemenAnalysisError: If the commodity is not found in the data.
+        """
+        logger.info(f"Filtering data by commodity: {commodity}")
         
-        # Apply date filters
-        if start_date:
-            start_date = pd.to_datetime(start_date)
-            gdf = gdf[gdf['date'] >= start_date]
+        # Check if commodity exists in data
+        if 'commodity' not in data.columns:
+            logger.error("Commodity column not found in data")
+            raise YemenAnalysisError("Commodity column not found in data")
         
-        if end_date:
-            end_date = pd.to_datetime(end_date)
-            gdf = gdf[gdf['date'] <= end_date]
+        # Filter data
+        filtered_data = data[data['commodity'] == commodity]
         
-        return gdf
+        if len(filtered_data) == 0:
+            logger.error(f"No data found for commodity: {commodity}")
+            raise YemenAnalysisError(f"No data found for commodity: {commodity}")
+        
+        logger.info(f"Filtered data has {len(filtered_data)} rows")
+        return filtered_data
     
-    @handle_errors(logger=logger, error_type=(ValueError, KeyError), reraise=True)
-    def preprocess_commodity_data(self, gdf: gpd.GeoDataFrame, commodity: str) -> pd.DataFrame:
-        """Preprocess commodity data for analysis."""
-        if not isinstance(gdf, gpd.GeoDataFrame):
-            raise ValueError("Input must be a GeoDataFrame")
+    @handle_errors
+    def filter_by_markets(
+        self, data: gpd.GeoDataFrame, markets: List[str]
+    ) -> gpd.GeoDataFrame:
+        """
+        Filter data by markets.
         
-        # Filter by commodity if specified
-        if commodity and 'commodity' in gdf.columns:
-            gdf = gdf[gdf['commodity'] == commodity]
+        Args:
+            data: GeoDataFrame containing the data.
+            markets: List of markets to filter by.
+            
+        Returns:
+            GeoDataFrame containing the filtered data.
+            
+        Raises:
+            YemenAnalysisError: If any of the markets are not found in the data.
+        """
+        logger.info(f"Filtering data by markets: {markets}")
         
-        # Check if we have data
-        if len(gdf) == 0:
-            raise DataError(f"No data found for commodity: {commodity}")
+        # Check if market column exists in data
+        if 'market' not in data.columns:
+            logger.error("Market column not found in data")
+            raise YemenAnalysisError("Market column not found in data")
         
-        # Convert to time series format
-        df = gdf.pivot_table(
-            index='date',
-            columns='admin1',
-            values='price',
-            aggfunc='mean'
-        )
+        # Filter data
+        filtered_data = data[data['market'].isin(markets)]
         
-        # Sort by date
-        df = df.sort_index()
+        # Check if all markets were found
+        found_markets = filtered_data['market'].unique()
+        missing_markets = [m for m in markets if m not in found_markets]
         
-        # Handle missing values
-        df = df.interpolate(method='linear')
+        if missing_markets:
+            logger.warning(f"Markets not found: {missing_markets}")
         
-        return df
+        if len(filtered_data) == 0:
+            logger.error(f"No data found for markets: {markets}")
+            raise YemenAnalysisError(f"No data found for markets: {markets}")
+        
+        logger.info(f"Filtered data has {len(filtered_data)} rows")
+        return filtered_data
     
-    @handle_errors(logger=logger, error_type=(PermissionError, OSError), reraise=True)
-    def save_processed_data(self, gdf: gpd.GeoDataFrame, filename: str) -> None:
-        """Save processed data to the processed directory."""
-        if not isinstance(gdf, gpd.GeoDataFrame):
-            raise DataError(f"Expected GeoDataFrame, got {type(gdf)}")
+    @handle_errors
+    def preprocess_data(self, data: gpd.GeoDataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Preprocess data for analysis.
         
-        file_path = self.processed_path / filename
+        This method preprocesses the data for analysis by:
+        1. Converting dates to datetime
+        2. Sorting data by date
+        3. Handling missing values
+        4. Splitting data by market
         
-        # Ensure the directory exists
-        self.processed_path.mkdir(exist_ok=True, parents=True)
+        Args:
+            data: GeoDataFrame containing the data.
+            
+        Returns:
+            Dictionary mapping market names to DataFrames.
+            
+        Raises:
+            YemenAnalysisError: If the data cannot be preprocessed.
+        """
+        logger.info("Preprocessing data")
         
-        # Save the data
-        write_geojson(gdf, file_path)
+        try:
+            # Convert dates to datetime
+            if 'date' in data.columns:
+                data['date'] = pd.to_datetime(data['date'])
+            
+            # Sort data by date
+            data = data.sort_values('date')
+            
+            # Handle missing values
+            data = self._handle_missing_values(data)
+            
+            # Split data by market
+            market_data = self._split_by_market(data)
+            
+            logger.info(f"Preprocessed data for {len(market_data)} markets")
+            return market_data
+        except Exception as e:
+            logger.error(f"Error preprocessing data: {e}")
+            raise YemenAnalysisError(f"Error preprocessing data: {e}")
+    
+    def _handle_missing_values(self, data: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """
+        Handle missing values in the data.
         
-        logger.info(f"Saved processed data to {file_path}")
+        Args:
+            data: GeoDataFrame containing the data.
+            
+        Returns:
+            GeoDataFrame with missing values handled.
+        """
+        logger.info("Handling missing values")
+        
+        # Check for missing values
+        missing_values = data.isnull().sum()
+        logger.info(f"Missing values before handling: {missing_values}")
+        
+        # Handle missing values in price column
+        if 'price' in data.columns and data['price'].isnull().any():
+            # Interpolate missing prices
+            data = data.sort_values(['market', 'date'])
+            data['price'] = data.groupby('market')['price'].transform(
+                lambda x: x.interpolate(method='linear')
+            )
+        
+        # Handle missing values in other columns
+        for col in data.columns:
+            if col != 'price' and data[col].isnull().any():
+                if data[col].dtype == 'object':
+                    # Fill missing categorical values with mode
+                    mode = data[col].mode()[0]
+                    data[col] = data[col].fillna(mode)
+                else:
+                    # Fill missing numerical values with median
+                    median = data[col].median()
+                    data[col] = data[col].fillna(median)
+        
+        # Check for remaining missing values
+        missing_values = data.isnull().sum()
+        logger.info(f"Missing values after handling: {missing_values}")
+        
+        return data
+    
+    def _split_by_market(self, data: gpd.GeoDataFrame) -> Dict[str, pd.DataFrame]:
+        """
+        Split data by market.
+        
+        Args:
+            data: GeoDataFrame containing the data.
+            
+        Returns:
+            Dictionary mapping market names to DataFrames.
+        """
+        logger.info("Splitting data by market")
+        
+        # Check if market column exists
+        if 'market' not in data.columns:
+            logger.error("Market column not found in data")
+            raise YemenAnalysisError("Market column not found in data")
+        
+        # Get unique markets
+        markets = data['market'].unique()
+        logger.info(f"Found {len(markets)} unique markets")
+        
+        # Split data by market
+        market_data = {}
+        for market in markets:
+            market_df = data[data['market'] == market].copy()
+            market_df = market_df.sort_values('date')
+            market_df = market_df.reset_index(drop=True)
+            market_data[market] = market_df
+        
+        return market_data
+    
+    @handle_errors
+    def combine_market_data(self, market_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Combine data from multiple markets.
+        
+        Args:
+            market_data: Dictionary mapping market names to DataFrames.
+            
+        Returns:
+            DataFrame containing the combined data.
+        """
+        logger.info("Combining market data")
+        
+        # Combine data
+        combined_data = pd.concat(market_data.values(), ignore_index=True)
+        
+        logger.info(f"Combined data has {len(combined_data)} rows")
+        return combined_data
+    
+    @handle_errors
+    def preprocess_commodity_data(
+        self, data: gpd.GeoDataFrame, commodity: str
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Preprocess data for a specific commodity.
+        
+        This is a convenience method that filters data by commodity and then
+        preprocesses it.
+        
+        Args:
+            data: GeoDataFrame containing the data.
+            commodity: Commodity to filter by.
+            
+        Returns:
+            Dictionary mapping market names to DataFrames.
+        """
+        # Filter data by commodity
+        filtered_data = self.filter_by_commodity(data, commodity)
+        
+        # Preprocess data
+        return self.preprocess_data(filtered_data)
+    
+    @handle_errors
+    def save_processed_data(
+        self, data: Dict[str, pd.DataFrame], output_dir: Union[str, Path]
+    ) -> None:
+        """
+        Save processed data to files.
+        
+        Args:
+            data: Dictionary mapping market names to DataFrames.
+            output_dir: Directory to save the data.
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Saving processed data to {output_dir}")
+        
+        for market, df in data.items():
+            file_path = output_dir / f"{market}.csv"
+            df.to_csv(file_path, index=False)
+            logger.info(f"Saved data for {market} to {file_path}")
+    
+    @handle_errors
+    def load_processed_data(
+        self, input_dir: Union[str, Path]
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Load processed data from files.
+        
+        Args:
+            input_dir: Directory containing the data files.
+            
+        Returns:
+            Dictionary mapping market names to DataFrames.
+        """
+        input_dir = Path(input_dir)
+        
+        logger.info(f"Loading processed data from {input_dir}")
+        
+        # Find all CSV files in the directory
+        csv_files = list(input_dir.glob("*.csv"))
+        
+        if not csv_files:
+            logger.error(f"No CSV files found in {input_dir}")
+            raise YemenAnalysisError(f"No CSV files found in {input_dir}")
+        
+        # Load data from each file
+        market_data = {}
+        for file_path in csv_files:
+            market = file_path.stem
+            df = pd.read_csv(file_path)
+            
+            # Convert dates to datetime
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+            
+            market_data[market] = df
+            logger.info(f"Loaded data for {market} from {file_path}")
+        
+        return market_data
