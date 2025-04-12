@@ -120,6 +120,21 @@ class ThresholdModel:
             raise YemenAnalysisError(f"Error running threshold model analysis: {e}")
     
     @handle_errors
+    def run(self) -> Dict[str, Any]:
+        """
+        Run the threshold model analysis.
+        
+        This is an alias for run_full_analysis() to maintain a consistent interface.
+        
+        Returns:
+            Dictionary containing the analysis results.
+            
+        Raises:
+            YemenAnalysisError: If the analysis fails.
+        """
+        return self.run_full_analysis()
+    
+    @handle_errors
     def compare_models(self) -> Dict[str, Any]:
         """
         Compare different threshold model specifications.

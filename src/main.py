@@ -18,15 +18,36 @@ from src.data.loader import DataLoader
 from src.models.unit_root import UnitRootTester
 from src.models.cointegration import CointegrationTester
 from src.models.threshold import ThresholdModel
-from src.models.spatial import SpatialAnalyzer
+from src.models.spatial import SpatialTester
 from src.models.reporting import ResultsReporter
-from src.visualization.time_series import TimeSeriesVisualizer
-from src.visualization.maps import SpatialVisualizer
+from src.visualization.time_series import TimeSeriesPlotter as TimeSeriesVisualizer
+from src.visualization.maps import MapPlotter as SpatialVisualizer
 from src.utils.error_handling import YemenAnalysisError, handle_errors
 from src.utils.performance import MemoryManager, ParallelProcessor
 
 # Initialize logger
 logger = logging.getLogger(__name__)
+
+# Helper functions for parallel processing - needs to be at module level for pickling
+def _process_market_unit_root(args):
+    market_name, market_data, unit_root_tester = args
+    logger.info(f"Running unit root tests for {market_name}")
+    return market_name, unit_root_tester.run_all_tests(market_data)
+
+def _process_cointegration_pair(args):
+    market1_name, market2_name, market1_data, market2_data, cointegration_tester = args
+    pair_name = f"{market1_name}_{market2_name}"
+    logger.info(f"Running cointegration tests for {pair_name}")
+    return pair_name, cointegration_tester.run_all_tests(market1_data, market2_data)
+
+def _process_threshold_pair_mode(args):
+    market1, market2, mode, data1, data2 = args
+    pair_name = f"{market1}_{market2}_{mode}"
+    logger.info(f"Running threshold model ({mode}) for {market1} and {market2}")
+    
+    # Initialize threshold model for this pair
+    model = ThresholdModel(data1, data2, mode=mode)
+    return pair_name, model.run()
 
 class YemenMarketAnalysis:
     """
@@ -54,7 +75,7 @@ class YemenMarketAnalysis:
         self.unit_root_tester = UnitRootTester()
         self.cointegration_tester = CointegrationTester()
         self.threshold_model = None  # Will be initialized with data
-        self.spatial_analyzer = SpatialAnalyzer()
+        self.spatial_analyzer = SpatialTester()
         self.results_reporter = ResultsReporter()
         self.time_series_visualizer = TimeSeriesVisualizer()
         self.spatial_visualizer = SpatialVisualizer()
@@ -192,6 +213,7 @@ class YemenMarketAnalysis:
         
         return results
     
+    @handle_errors
     def _run_unit_root_tests(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
         """
         Run unit root tests on the data.
@@ -204,16 +226,11 @@ class YemenMarketAnalysis:
         """
         results = {}
         
-        # Use parallel processing for unit root tests
-        def process_market(market_name, market_data):
-            logger.info(f"Running unit root tests for {market_name}")
-            return market_name, self.unit_root_tester.run_all_tests(market_data)
-        
         # Run tests in parallel
         market_items = list(data.items())
         processed_results = self.parallel_processor.process(
-            process_market,
-            [(name, df) for name, df in market_items]
+            _process_market_unit_root,
+            [(name, df, self.unit_root_tester) for name, df in market_items]
         )
         
         # Collect results
@@ -242,18 +259,10 @@ class YemenMarketAnalysis:
             for j in range(i + 1, len(market_names)):
                 market_pairs.append((market_names[i], market_names[j]))
         
-        # Use parallel processing for cointegration tests
-        def process_pair(market1, market2):
-            pair_name = f"{market1}_{market2}"
-            logger.info(f"Running cointegration tests for {pair_name}")
-            return pair_name, self.cointegration_tester.run_all_tests(
-                data[market1], data[market2]
-            )
-        
-        # Run tests in parallel
+        # Run tests in parallel using the module-level helper function
         processed_results = self.parallel_processor.process(
-            process_pair,
-            [(m1, m2) for m1, m2 in market_pairs]
+            _process_cointegration_pair,
+            [(m1, m2, data[m1], data[m2], self.cointegration_tester) for m1, m2 in market_pairs]
         )
         
         # Collect results
@@ -262,6 +271,7 @@ class YemenMarketAnalysis:
         
         return results
     
+    @handle_errors
     def _run_threshold_models(
         self,
         data: Dict[str, pd.DataFrame],
@@ -287,37 +297,22 @@ class YemenMarketAnalysis:
             for j in range(i + 1, len(market_names)):
                 market_pairs.append((market_names[i], market_names[j]))
         
-        # Use parallel processing for threshold models
-        def process_pair_mode(market1, market2, mode):
-            pair_name = f"{market1}_{market2}_{mode}"
-            logger.info(f"Running threshold model ({mode}) for {market1} and {market2}")
-            
-            # Initialize threshold model for this pair
-            model = ThresholdModel(
-                data[market1],
-                data[market2],
-                mode=mode
-            )
-            
-            # Run the model
-            return pair_name, model.run_full_analysis()
-        
         # Generate all combinations of pairs and modes
-        pair_mode_combinations = []
+        tasks = []
         for m1, m2 in market_pairs:
             for mode in threshold_modes:
-                pair_mode_combinations.append((m1, m2, mode))
+                tasks.append((m1, m2, mode, data[m1], data[m2]))
         
-        # Run models in parallel
+        # Run models in parallel using the module-level helper function
         processed_results = self.parallel_processor.process(
-            process_pair_mode,
-            [(m1, m2, mode) for m1, m2, mode in pair_mode_combinations]
+            _process_threshold_pair_mode,
+            tasks
         )
         
         # Collect results
         for pair_name, pair_results in processed_results:
             results[pair_name] = pair_results
-        
+            
         return results
     
     def _run_spatial_analysis(self, data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:

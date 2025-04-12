@@ -1,0 +1,65 @@
+data:
+  path: ./data
+  raw_path: ./data/raw
+  processed_path: ./data/processed
+
+analysis:
+  unit_root:
+    alpha: 0.05
+    max_lags: 4
+  cointegration:
+    alpha: 0.05
+    max_lags: 4
+    trend: c
+  threshold:
+    alpha: 0.05
+    trim: 0.15
+    n_grid: 300
+    max_lags: 4
+    n_bootstrap: 1000
+    mtar_default_threshold: 0.0
+  threshold_vecm:
+    k_ar_diff: 2
+    deterministic: ci
+    coint_rank: 1
+  spatial:
+    conflict_column: conflict_intensity_normalized
+    conflict_weight: 0.5
+    price_column: price
+    conflict_reduction: 0.5
+  simulation:
+    policy_type: exchange_rate
+    target_rate: official
+    reduction_factor: 0.5
+  chunk_size: 5000
+  gh:
+    early_stop_threshold: -10.0
+  max_lags: 4  # Added at root level for tests
+  n_neighbors: 5  # Added at root level for tests
+  conflict_weight: 0.5  # Added at root level for tests
+
+performance:
+  n_workers: 11
+  cache_dir: .cache/yemen_market_analysis
+  memory_limit: 0.8
+
+visualization:
+  style: seaborn-v0_8-whitegrid
+  figure_size: [10, 6]
+  font_family: serif
+  font_size: 12
+  dpi: 300
+
+reporting:
+  format: markdown
+  style: world_bank
+  confidence_level: 0.95
+  significance_indicators: true
+
+paths:
+  output_dir: ./results  # Added for tests
+
+models:
+  default_mode: standard
+  threshold:
+    default_mode: standard

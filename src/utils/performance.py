@@ -182,6 +182,43 @@ class ParallelProcessor:
         """
         self.n_jobs = n_jobs if n_jobs is not None else mp.cpu_count()
         self.verbose = verbose
+        
+    @handle_errors
+    def process(self, func: Callable[[T], R], items: List[T], *args: Any, **kwargs: Any) -> List[R]:
+        """
+        Process a list of items in parallel using the specified function.
+        
+        This is a general-purpose method for parallel processing of data.
+        
+        Args:
+            func: Function to apply to each item.
+            items: List of items to process.
+            *args: Additional positional arguments to pass to the function.
+            **kwargs: Additional keyword arguments to pass to the function.
+            
+        Returns:
+            List of results from processing each item.
+        """
+        if not items:
+            return []
+            
+        if self.verbose:
+            logger.info(f"Processing {len(items)} items in parallel with {self.n_jobs} processes")
+            
+        if args or kwargs:
+            # If we have additional arguments, use partial to bind them
+            process_func = partial(func, *args, **kwargs)
+        else:
+            process_func = func
+            
+        # Use multiprocessing Pool for parallel execution
+        with mp.Pool(processes=self.n_jobs) as pool:
+            results = pool.map(process_func, items)
+            
+        if self.verbose:
+            logger.info(f"Parallel processing complete, got {len(results)} results")
+            
+        return results
 
     @handle_errors
     def map(self, func: Callable[[T], R], items: List[T]) -> List[R]:

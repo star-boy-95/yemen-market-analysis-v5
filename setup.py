@@ -13,7 +13,8 @@ setup(
     description="Econometric analysis tools for Yemen market integration",
     author="Mohammad Al-Akkaoui",
     author_email="mohammad@al-akkaoui.com",
-    packages=find_packages(),
+    packages=find_packages(include=['src', 'src.*']),
+    package_dir={'yemen_market_analysis': 'src'},
     include_package_data=True,
     install_requires=[
         "numpy>=1.20.0",
