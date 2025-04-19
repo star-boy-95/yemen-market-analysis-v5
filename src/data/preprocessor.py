@@ -597,3 +597,403 @@ class DataPreprocessor:
         
         logger.info(f"Encoded {len(columns)} categorical features")
         return data_copy
+    
+    @handle_errors
+    def detect_conflict_outliers(
+        self, data: pd.DataFrame, price_column: str,
+        conflict_column: Optional[str] = None,
+        threshold: float = 2.0
+    ) -> pd.Series:
+        """
+        Detect outliers in price data with conflict-aware methods.
+        
+        This method implements specialized outlier detection for conflict-affected price data,
+        which often exhibits structural shifts and unusual volatility patterns. When a conflict
+        column is provided, the method adjusts thresholds based on conflict intensity.
+        
+        Args:
+            data: DataFrame containing the price and optional conflict data.
+            price_column: Column containing price data to analyze for outliers.
+            conflict_column: Optional column containing conflict intensity data.
+                            If provided, thresholds are adjusted based on conflict intensity.
+            threshold: Base threshold for outlier detection. This value is adjusted
+                     based on conflict intensity when conflict_column is provided.
+                     
+        Returns:
+            Boolean Series indicating outliers (True for outliers).
+            
+        Raises:
+            YemenAnalysisError: If the price_column or conflict_column is not found in data.
+        """
+        logger.info(f"Detecting conflict-aware outliers in {price_column}")
+        
+        # Check if price column exists
+        if price_column not in data.columns:
+            logger.error(f"Price column {price_column} not found in data")
+            raise YemenAnalysisError(f"Price column {price_column} not found in data")
+        
+        # Check if conflict column exists if provided
+        if conflict_column is not None and conflict_column not in data.columns:
+            logger.error(f"Conflict column {conflict_column} not found in data")
+            raise YemenAnalysisError(f"Conflict column {conflict_column} not found in data")
+        
+        # Make a copy of the data to avoid modifying the original
+        data_copy = data.copy()
+        
+        # Get price data
+        price_data = data_copy[price_column]
+        
+        if conflict_column is not None:
+            # Conflict-aware outlier detection with dynamic thresholds
+            
+            # Normalize conflict intensity to a 0-1 scale if not already
+            conflict_data = data_copy[conflict_column]
+            if conflict_data.max() > 1:
+                # Assuming conflict data is on a different scale, normalize it
+                conflict_data = (conflict_data - conflict_data.min()) / (conflict_data.max() - conflict_data.min())
+            
+            # Create adjusted thresholds based on conflict intensity
+            # Higher conflict intensity allows for more volatility (higher threshold)
+            # This accounts for the fact that prices are more volatile during conflict
+            adjusted_thresholds = threshold * (1 + conflict_data)
+            
+            # Segment the data into windows to account for structural shifts
+            # Use rolling windows to calculate local statistics
+            window_size = min(30, len(price_data) // 4)  # Adaptive window size
+            if window_size < 5:
+                window_size = 5  # Minimum window size
+            
+            # Calculate rolling median and MAD (Median Absolute Deviation)
+            rolling_median = price_data.rolling(window=window_size, center=True, min_periods=3).median()
+            rolling_mad = (price_data - rolling_median).abs().rolling(window=window_size, center=True, min_periods=3).median()
+            
+            # Fill NaN values at the edges with the first/last valid values
+            rolling_median = rolling_median.fillna(method='bfill').fillna(method='ffill')
+            rolling_mad = rolling_mad.fillna(method='bfill').fillna(method='ffill')
+            
+            # Calculate modified Z-scores with conflict-adjusted thresholds
+            modified_z_scores = 0.6745 * np.abs(price_data - rolling_median) / (rolling_mad + 1e-8)  # Add small constant to avoid division by zero
+            
+            # Identify outliers using adjusted thresholds
+            outliers = modified_z_scores > adjusted_thresholds
+        else:
+            # If no conflict data is provided, use a robust method that's less sensitive to structural shifts
+            
+            # Use LOWESS (Locally Weighted Scatterplot Smoothing) to identify the trend
+            # This helps account for structural shifts without explicit conflict data
+            from statsmodels.nonparametric.smoothers_lowess import lowess
+            
+            # Create a time index
+            time_index = np.arange(len(price_data))
+            
+            # Apply LOWESS smoothing
+            # The frac parameter controls the size of the local window (as a fraction of the total number of data points)
+            smoothed = lowess(price_data.values, time_index, frac=0.2, return_sorted=False)
+            
+            # Calculate residuals from the trend
+            residuals = price_data.values - smoothed
+            
+            # Calculate robust statistics on the residuals
+            median_residual = np.median(residuals)
+            mad_residual = np.median(np.abs(residuals - median_residual))
+            
+            # Calculate modified Z-scores on the residuals
+            modified_z_scores = 0.6745 * np.abs(residuals - median_residual) / (mad_residual + 1e-8)
+            
+            # Identify outliers
+            outliers = pd.Series(modified_z_scores > threshold, index=price_data.index)
+        
+        logger.info(f"Detected {outliers.sum()} conflict-aware outliers in {price_column}")
+        return outliers
+    
+    @handle_errors
+    def adjust_dual_exchange_rates(
+        self, data: pd.DataFrame, price_column: str,
+        exchange_rate_columns: List[str],
+        regime_column: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        Adjust prices based on multiple exchange rate regimes.
+        
+        In conflict-affected regions, multiple exchange rate regimes often exist simultaneously.
+        This method adjusts price data to account for these different regimes, either using
+        an explicit regime indicator or by inferring the appropriate regime.
+        
+        Args:
+            data: DataFrame containing price and exchange rate data.
+            price_column: Column containing price data to adjust.
+            exchange_rate_columns: List of columns containing different exchange rates.
+            regime_column: Optional column indicating which exchange rate regime applies.
+                          If None, the method attempts to infer the appropriate regime.
+                          
+        Returns:
+            DataFrame with adjusted price data.
+            
+        Raises:
+            YemenAnalysisError: If any of the required columns are not found in data.
+        """
+        logger.info(f"Adjusting prices in {price_column} using multiple exchange rate regimes")
+        
+        # Check if price column exists
+        if price_column not in data.columns:
+            logger.error(f"Price column {price_column} not found in data")
+            raise YemenAnalysisError(f"Price column {price_column} not found in data")
+        
+        # Check if exchange rate columns exist
+        for column in exchange_rate_columns:
+            if column not in data.columns:
+                logger.error(f"Exchange rate column {column} not found in data")
+                raise YemenAnalysisError(f"Exchange rate column {column} not found in data")
+        
+        # Check if regime column exists if provided
+        if regime_column is not None and regime_column not in data.columns:
+            logger.error(f"Regime column {regime_column} not found in data")
+            raise YemenAnalysisError(f"Regime column {regime_column} not found in data")
+        
+        # Make a copy of the data to avoid modifying the original
+        data_copy = data.copy()
+        
+        # Create a new column for adjusted prices
+        adjusted_price_column = f"{price_column}_adjusted"
+        
+        if regime_column is not None:
+            # Use explicit regime indicator
+            for i, exchange_rate_column in enumerate(exchange_rate_columns):
+                # For each exchange rate, adjust prices where the regime matches
+                regime_mask = (data_copy[regime_column] == i)
+                if regime_mask.any():
+                    # Convert prices to a common currency using the appropriate exchange rate
+                    # We're assuming prices are in local currency and exchange rates are local/reference
+                    data_copy.loc[regime_mask, adjusted_price_column] = (
+                        data_copy.loc[regime_mask, price_column] /
+                        data_copy.loc[regime_mask, exchange_rate_column]
+                    )
+        else:
+            # Infer regime based on structural breaks in exchange rates
+            
+            # First, check for missing values in exchange rates
+            for column in exchange_rate_columns:
+                if data_copy[column].isna().any():
+                    # Fill missing values with forward fill then backward fill
+                    data_copy[column] = data_copy[column].fillna(method='ffill').fillna(method='bfill')
+            
+            # Initialize adjusted price column
+            data_copy[adjusted_price_column] = np.nan
+            
+            # Create a time index for structural break detection
+            time_index = np.arange(len(data_copy))
+            
+            # Detect structural breaks in exchange rate differences
+            if len(exchange_rate_columns) == 2:
+                # For two exchange rates, calculate the ratio between them
+                exchange_ratio = data_copy[exchange_rate_columns[0]] / data_copy[exchange_rate_columns[1]]
+                
+                # Use rolling statistics to identify regime changes
+                # A significant change in the ratio indicates a regime change
+                rolling_mean = exchange_ratio.rolling(window=10, min_periods=1).mean()
+                rolling_std = exchange_ratio.rolling(window=10, min_periods=1).std()
+                
+                # Identify potential regime changes (where ratio changes significantly)
+                z_scores = np.abs((exchange_ratio - rolling_mean) / (rolling_std + 1e-8))
+                regime_changes = z_scores > 3.0  # Threshold for significant change
+                
+                # Create regime indicators
+                regime_indicators = np.zeros(len(data_copy), dtype=int)
+                current_regime = 0
+                
+                for i in range(1, len(regime_indicators)):
+                    if regime_changes.iloc[i]:
+                        current_regime = 1 - current_regime  # Toggle between 0 and 1
+                    regime_indicators[i] = current_regime
+                
+                # Apply adjustments based on inferred regimes
+                for i, exchange_rate_column in enumerate(exchange_rate_columns):
+                    regime_mask = (regime_indicators == i)
+                    if regime_mask.any():
+                        data_copy.loc[regime_mask, adjusted_price_column] = (
+                            data_copy.loc[regime_mask, price_column] /
+                            data_copy.loc[regime_mask, exchange_rate_column]
+                        )
+            else:
+                # For more than two exchange rates, use a more complex approach
+                # We'll select the exchange rate that minimizes price volatility in each period
+                
+                # Create a window for local volatility calculation
+                window_size = min(30, len(data_copy) // 4)
+                if window_size < 5:
+                    window_size = 5  # Minimum window size
+                
+                # For each point, calculate adjusted prices using all exchange rates
+                adjusted_prices = {}
+                for exchange_rate_column in exchange_rate_columns:
+                    adjusted_prices[exchange_rate_column] = (
+                        data_copy[price_column] / data_copy[exchange_rate_column]
+                    )
+                
+                # For each point, select the exchange rate that minimizes local volatility
+                for i in range(len(data_copy)):
+                    start_idx = max(0, i - window_size // 2)
+                    end_idx = min(len(data_copy), i + window_size // 2 + 1)
+                    
+                    min_volatility = float('inf')
+                    best_column = exchange_rate_columns[0]
+                    
+                    for exchange_rate_column in exchange_rate_columns:
+                        # Calculate local volatility for this exchange rate
+                        local_prices = adjusted_prices[exchange_rate_column].iloc[start_idx:end_idx]
+                        volatility = local_prices.std() / local_prices.mean() if local_prices.mean() != 0 else float('inf')
+                        
+                        if volatility < min_volatility:
+                            min_volatility = volatility
+                            best_column = exchange_rate_column
+                    
+                    # Use the exchange rate that minimizes volatility
+                    data_copy.loc[i, adjusted_price_column] = adjusted_prices[best_column].iloc[i]
+        
+        logger.info(f"Created adjusted price column {adjusted_price_column}")
+        return data_copy
+    
+    @handle_errors
+    def transform_conflict_affected_data(
+        self, data: pd.DataFrame, price_column: str,
+        conflict_column: str, method: str = 'robust_scaling'
+    ) -> pd.DataFrame:
+        """
+        Transform conflict-affected price data using robust methods.
+        
+        This method applies specialized transformations to price data affected by conflict,
+        accounting for structural shifts, volatility clusters, and other anomalies common
+        in conflict-affected time series.
+        
+        Args:
+            data: DataFrame containing price and conflict data.
+            price_column: Column containing price data to transform.
+            conflict_column: Column containing conflict intensity data.
+            method: Transformation method to use. Options are:
+                  - 'robust_scaling': Uses median and IQR instead of mean and std
+                  - 'segmented_scaling': Applies different scaling to different conflict periods
+                  - 'winsorized_scaling': Winsorizes data before scaling
+                  - 'log_transform': Applies log transformation to reduce impact of extreme values
+                  
+        Returns:
+            DataFrame with transformed price data.
+            
+        Raises:
+            YemenAnalysisError: If any of the required columns are not found or the method is invalid.
+        """
+        logger.info(f"Transforming conflict-affected data in {price_column} using {method} method")
+        
+        # Check if price column exists
+        if price_column not in data.columns:
+            logger.error(f"Price column {price_column} not found in data")
+            raise YemenAnalysisError(f"Price column {price_column} not found in data")
+        
+        # Check if conflict column exists
+        if conflict_column not in data.columns:
+            logger.error(f"Conflict column {conflict_column} not found in data")
+            raise YemenAnalysisError(f"Conflict column {conflict_column} not found in data")
+        
+        # Make a copy of the data to avoid modifying the original
+        data_copy = data.copy()
+        
+        # Create a new column for transformed prices
+        transformed_column = f"{price_column}_transformed"
+        
+        # Get price and conflict data
+        price_data = data_copy[price_column]
+        conflict_data = data_copy[conflict_column]
+        
+        # Normalize conflict intensity to a 0-1 scale if not already
+        if conflict_data.max() > 1:
+            conflict_data = (conflict_data - conflict_data.min()) / (conflict_data.max() - conflict_data.min())
+        
+        if method == 'robust_scaling':
+            # Robust scaling using median and IQR instead of mean and std
+            # This is less sensitive to outliers and structural shifts
+            median = price_data.median()
+            q1 = price_data.quantile(0.25)
+            q3 = price_data.quantile(0.75)
+            iqr = q3 - q1
+            
+            # Avoid division by zero
+            if iqr == 0:
+                iqr = 1.0
+                
+            data_copy[transformed_column] = (price_data - median) / iqr
+            
+        elif method == 'segmented_scaling':
+            # Segmented scaling based on conflict intensity
+            # Define conflict thresholds for segmentation
+            low_conflict = conflict_data <= 0.3
+            medium_conflict = (conflict_data > 0.3) & (conflict_data <= 0.7)
+            high_conflict = conflict_data > 0.7
+            
+            # Initialize transformed column
+            data_copy[transformed_column] = np.nan
+            
+            # Apply different scaling to each segment
+            for segment_mask, segment_name in [
+                (low_conflict, "low conflict"),
+                (medium_conflict, "medium conflict"),
+                (high_conflict, "high conflict")
+            ]:
+                if segment_mask.any():
+                    segment_data = price_data[segment_mask]
+                    segment_median = segment_data.median()
+                    segment_iqr = segment_data.quantile(0.75) - segment_data.quantile(0.25)
+                    
+                    # Avoid division by zero
+                    if segment_iqr == 0:
+                        segment_iqr = 1.0
+                    
+                    data_copy.loc[segment_mask, transformed_column] = (
+                        (segment_data - segment_median) / segment_iqr
+                    )
+                    
+                    logger.info(f"Transformed {segment_mask.sum()} points in {segment_name} segment")
+            
+        elif method == 'winsorized_scaling':
+            # Winsorize data before scaling to reduce impact of extreme values
+            # The winsorization level is adjusted based on conflict intensity
+            
+            # Calculate winsorization levels based on conflict intensity
+            # Higher conflict intensity means more winsorization
+            winsor_level = 0.01 + 0.04 * conflict_data  # Ranges from 0.01 to 0.05
+            
+            # Apply winsorization point by point
+            winsorized_data = price_data.copy()
+            
+            for i in range(len(price_data)):
+                level = winsor_level.iloc[i]
+                lower_bound = price_data.quantile(level)
+                upper_bound = price_data.quantile(1 - level)
+                
+                if price_data.iloc[i] < lower_bound:
+                    winsorized_data.iloc[i] = lower_bound
+                elif price_data.iloc[i] > upper_bound:
+                    winsorized_data.iloc[i] = upper_bound
+            
+            # Scale the winsorized data
+            mean = winsorized_data.mean()
+            std = winsorized_data.std()
+            
+            # Avoid division by zero
+            if std == 0:
+                std = 1.0
+                
+            data_copy[transformed_column] = (winsorized_data - mean) / std
+            
+        elif method == 'log_transform':
+            # Log transformation to reduce impact of extreme values
+            # Add a small constant to avoid log(0)
+            min_value = price_data.min()
+            offset = 1.0 if min_value >= 0 else abs(min_value) + 1.0
+            
+            data_copy[transformed_column] = np.log(price_data + offset)
+            
+        else:
+            logger.error(f"Invalid transformation method: {method}")
+            raise YemenAnalysisError(f"Invalid transformation method: {method}")
+        
+        logger.info(f"Created transformed price column {transformed_column}")
+        return data_copy

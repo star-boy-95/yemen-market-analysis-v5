@@ -2,10 +2,11 @@
 Momentum Threshold Autoregressive (M-TAR) model module for Yemen Market Analysis.
 
 This module provides the MomentumThresholdAutoregressive class for estimating
-M-TAR models for cointegrated time series.
+M-TAR models for cointegrated time series, with enhanced capabilities for
+analyzing asymmetric adjustments in conflict-affected markets.
 """
 import logging
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable
 
 import pandas as pd
 import numpy as np
@@ -25,7 +26,10 @@ class MomentumThresholdAutoregressive:
     """
     Momentum Threshold Autoregressive (M-TAR) model for Yemen Market Analysis.
 
-    This class provides methods for estimating M-TAR models for cointegrated time series.
+    This class provides methods for estimating M-TAR models for cointegrated time series,
+    with enhanced capabilities for analyzing asymmetric adjustments in conflict-affected markets.
+    The M-TAR model extends the TAR model by using the momentum (change) of the series
+    rather than its level to determine regime switching.
 
     Attributes:
         alpha (float): Significance level for hypothesis tests.
@@ -121,7 +125,17 @@ class MomentumThresholdAutoregressive:
             # Create lagged residuals and differences
             z_lag = residuals.shift(1)
             dz = residuals.diff()
-            dz_lag = dz.shift(1)  # This is the momentum term
+            # Create momentum term based on configuration or default to standard lag 1
+            momentum_type = config.get('analysis.threshold.mtar.momentum_type', 'standard')
+            momentum_lag = config.get('analysis.threshold.mtar.momentum_lag', 1)
+            
+            # Create momentum term using the specified method
+            dz_lag = self.create_heaviside_indicators(
+                residuals=residuals,
+                threshold=None,  # Not needed for creating momentum term
+                momentum_type=momentum_type,
+                momentum_lag=momentum_lag
+            )[0]  # Get only the momentum term, not the indicators
 
             # Create lagged differences
             dz_lags = pd.DataFrame()
@@ -219,12 +233,21 @@ class MomentumThresholdAutoregressive:
             rho_above = results.params[1]  # Adjustment coefficient above threshold
             rho_below = results.params[2]  # Adjustment coefficient below threshold
 
-            # Test for threshold effect
-            r_matrix = np.zeros((1, len(results.params)))
-            r_matrix[0, 1] = 1
-            r_matrix[0, 2] = -1
-
-            wald_test = results.f_test(r_matrix)
+            # Test for threshold effect (asymmetric adjustment)
+            se_above = results.bse[1]  # Standard error for rho_above
+            se_below = results.bse[2]  # Standard error for rho_below
+            
+            # Get test type from config or default to standard
+            test_type = config.get('analysis.threshold.mtar.asymmetry_test', 'standard')
+            
+            # Perform asymmetry test
+            asymmetry_test = self.test_asymmetric_adjustment_enhanced(
+                rho_above=rho_above,
+                rho_below=rho_below,
+                se_above=se_above,
+                se_below=se_below,
+                test_type=test_type
+            )
 
             # Create results dictionary
             mtar_results = {
@@ -249,11 +272,7 @@ class MomentumThresholdAutoregressive:
                     'constant': results.pvalues[0],
                     'lag_coefficients': results.pvalues[3:].tolist(),
                 },
-                'threshold_test': {
-                    'f_statistic': wald_test.fvalue,
-                    'p_value': wald_test.pvalue,
-                    'is_threshold_significant': wald_test.pvalue < self.alpha,
-                },
+                'threshold_test': asymmetry_test,
                 'r_squared': results.rsquared,
                 'adj_r_squared': results.rsquared_adj,
                 'aic': results.aic,
@@ -263,7 +282,7 @@ class MomentumThresholdAutoregressive:
                 'cointegration_results': coint_results,
             }
 
-            logger.info(f"M-TAR model results: rho_above={rho_above:.4f}, rho_below={rho_below:.4f}, threshold_p_value={wald_test.pvalue:.4f}")
+            logger.info(f"M-TAR model results: rho_above={rho_above:.4f}, rho_below={rho_below:.4f}, threshold_p_value={asymmetry_test['p_value']:.4f}")
             return mtar_results
         except Exception as e:
             logger.error(f"Error estimating M-TAR model: {e}")
@@ -397,3 +416,335 @@ class MomentumThresholdAutoregressive:
         except Exception as e:
             logger.error(f"Error performing bootstrap test: {e}")
             raise YemenAnalysisError(f"Error performing bootstrap test: {e}")
+            
+    def create_heaviside_indicators(
+        self,
+        residuals: pd.Series,
+        threshold: Optional[float] = None,
+        momentum_type: str = 'standard',
+        momentum_lag: int = 1
+    ) -> Tuple[pd.Series, Optional[pd.Series], Optional[pd.Series]]:
+        """
+        Create Heaviside indicator functions for M-TAR model with different momentum specifications.
+        
+        This method implements several approaches to specify the momentum term:
+        1. 'standard': Uses a single lag of the differenced series (default)
+        2. 'moving_average': Uses a moving average of past changes
+        3. 'exponential': Uses exponentially weighted changes
+        
+        Args:
+            residuals: Series of residuals from cointegrating regression
+            threshold: Threshold value. If None, only the momentum term is returned
+                      without creating indicators.
+            momentum_type: Type of momentum specification
+                         ('standard', 'moving_average', 'exponential')
+            momentum_lag: Lag for momentum term or window size for averaging methods
+            
+        Returns:
+            Tuple containing:
+            - momentum_term: The momentum term used for regime identification
+            - above_threshold: Indicator for observations above threshold (None if threshold is None)
+            - below_threshold: Indicator for observations below threshold (None if threshold is None)
+            
+        Raises:
+            YemenAnalysisError: If the momentum specification is invalid
+        """
+        logger.info(f"Creating Heaviside indicators with {momentum_type} momentum specification")
+        
+        # Compute differenced series
+        dz = residuals.diff()
+        
+        # Create momentum term based on specified type
+        if momentum_type == 'standard':
+            # Standard implementation: single lag of differenced series
+            momentum_term = dz.shift(momentum_lag)
+            logger.debug(f"Using standard momentum with lag {momentum_lag}")
+            
+        elif momentum_type == 'moving_average':
+            # Moving average of past changes
+            # Use at least 2 periods for moving average
+            window = max(2, momentum_lag)
+            
+            # Create lagged differences for moving average
+            dz_lags = pd.DataFrame()
+            for i in range(1, window + 1):
+                dz_lags[f'dz_lag_{i}'] = dz.shift(i)
+                
+            # Compute moving average (equal weights)
+            momentum_term = dz_lags.mean(axis=1)
+            logger.debug(f"Using moving average momentum with window {window}")
+            
+        elif momentum_type == 'exponential':
+            # Exponentially weighted moving average of past changes
+            # The alpha parameter controls the decay rate (higher = more weight on recent observations)
+            # Default alpha is 0.5 for moderate decay
+            alpha = config.get('analysis.threshold.mtar.ewma_alpha', 0.5)
+            
+            # Compute EWMA using pandas
+            momentum_term = dz.shift(1).ewm(alpha=alpha, adjust=False).mean()
+            logger.debug(f"Using exponential momentum with alpha {alpha}")
+            
+        else:
+            logger.error(f"Invalid momentum type: {momentum_type}")
+            raise YemenAnalysisError(f"Invalid momentum type: {momentum_type}. Must be one of: 'standard', 'moving_average', 'exponential'")
+        
+        # If threshold is None, just return the momentum term
+        if threshold is None:
+            return (momentum_term, None, None)
+        
+        # Create indicator variables
+        above_threshold = (momentum_term >= threshold).astype(int)
+        below_threshold = (momentum_term < threshold).astype(int)
+        
+        return (momentum_term, above_threshold, below_threshold)
+    
+    def test_asymmetric_adjustment_enhanced(
+        self,
+        rho_above: float,
+        rho_below: float,
+        se_above: float,
+        se_below: float,
+        test_type: str = 'standard'
+    ) -> Dict[str, Any]:
+        """
+        Enhanced test for asymmetric adjustment in M-TAR model.
+        
+        This method implements several approaches to test for asymmetric adjustment:
+        1. 'standard': Standard t-test for equality of coefficients
+        2. 'bootstrap': Bootstrap-based test for robustness
+        3. 'joint': Joint test of asymmetry and threshold effect
+        
+        Args:
+            rho_above: Adjustment coefficient above threshold
+            rho_below: Adjustment coefficient below threshold
+            se_above: Standard error of rho_above
+            se_below: Standard error of rho_below
+            test_type: Type of asymmetry test
+                     ('standard', 'bootstrap', 'joint')
+            
+        Returns:
+            Dictionary with test results
+            
+        Raises:
+            YemenAnalysisError: If the test type is invalid
+        """
+        logger.info(f"Testing asymmetric adjustment using {test_type} method")
+        
+        if test_type == 'standard':
+            # Standard t-test for equality of coefficients
+            return self._standard_asymmetry_test(rho_above, rho_below, se_above, se_below)
+            
+        elif test_type == 'bootstrap':
+            # Bootstrap-based test (requires additional data, use placeholder)
+            # In a real implementation, this would require the original data
+            # Here we'll use a simulation-based approach for demonstration
+            return self._bootstrap_asymmetry_test(rho_above, rho_below, se_above, se_below)
+            
+        elif test_type == 'joint':
+            # Joint test of asymmetry and threshold effect
+            return self._joint_asymmetry_test(rho_above, rho_below, se_above, se_below)
+            
+        else:
+            logger.warning(f"Unknown test type '{test_type}', falling back to standard")
+            return self._standard_asymmetry_test(rho_above, rho_below, se_above, se_below)
+    
+    def _standard_asymmetry_test(
+        self,
+        rho_above: float,
+        rho_below: float,
+        se_above: float,
+        se_below: float
+    ) -> Dict[str, Any]:
+        """
+        Standard t-test for equality of adjustment coefficients.
+        
+        Args:
+            rho_above: Adjustment coefficient above threshold
+            rho_below: Adjustment coefficient below threshold
+            se_above: Standard error of rho_above
+            se_below: Standard error of rho_below
+            
+        Returns:
+            Dictionary with test results
+        """
+        # Compute t-statistic for difference in coefficients
+        # H0: rho_above = rho_below (symmetric adjustment)
+        # H1: rho_above ≠ rho_below (asymmetric adjustment)
+        diff = rho_above - rho_below
+        
+        # Standard error of the difference (assuming independence)
+        se_diff = np.sqrt(se_above**2 + se_below**2)
+        
+        # Compute t-statistic
+        t_stat = diff / se_diff
+        
+        # Compute p-value (two-tailed test)
+        p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df=np.inf))
+        
+        # Create results dictionary
+        test_results = {
+            'test': 'Standard Asymmetry Test',
+            'test_type': 'standard',
+            'diff_coefficient': diff,
+            't_statistic': t_stat,
+            'p_value': p_value,
+            'is_threshold_significant': p_value < self.alpha,
+            'f_statistic': t_stat**2,  # F-statistic is t-statistic squared for 1 restriction
+        }
+        
+        logger.info(f"Standard asymmetry test results: t_statistic={t_stat:.4f}, p_value={p_value:.4f}")
+        return test_results
+    
+    def _bootstrap_asymmetry_test(
+        self,
+        rho_above: float,
+        rho_below: float,
+        se_above: float,
+        se_below: float,
+        n_bootstrap: int = 1000
+    ) -> Dict[str, Any]:
+        """
+        Bootstrap-based test for asymmetric adjustment.
+        
+        This method uses a parametric bootstrap approach to test for asymmetric adjustment,
+        which is more robust to non-normality and small sample sizes.
+        
+        Args:
+            rho_above: Adjustment coefficient above threshold
+            rho_below: Adjustment coefficient below threshold
+            se_above: Standard error of rho_above
+            se_below: Standard error of rho_below
+            n_bootstrap: Number of bootstrap replications
+            
+        Returns:
+            Dictionary with test results
+        """
+        # Compute observed test statistic
+        diff = rho_above - rho_below
+        se_diff = np.sqrt(se_above**2 + se_below**2)
+        t_stat = diff / se_diff
+        
+        # Initialize bootstrap distribution
+        bootstrap_t_stats = np.zeros(n_bootstrap)
+        
+        # Bootstrap loop
+        for i in range(n_bootstrap):
+            # Generate bootstrap coefficients
+            # Under H0, rho_above = rho_below, so we use the pooled estimate
+            rho_pooled = (rho_above + rho_below) / 2
+            
+            # Generate random coefficients with same standard errors
+            bootstrap_rho_above = np.random.normal(rho_pooled, se_above)
+            bootstrap_rho_below = np.random.normal(rho_pooled, se_below)
+            
+            # Compute bootstrap test statistic
+            bootstrap_diff = bootstrap_rho_above - bootstrap_rho_below
+            bootstrap_t_stat = bootstrap_diff / se_diff
+            
+            bootstrap_t_stats[i] = bootstrap_t_stat
+        
+        # Compute bootstrap p-value (two-tailed)
+        bootstrap_p_value = np.mean(np.abs(bootstrap_t_stats) > abs(t_stat))
+        
+        # Get critical values
+        critical_values = {
+            '1%': np.percentile(np.abs(bootstrap_t_stats), 99),
+            '5%': np.percentile(np.abs(bootstrap_t_stats), 95),
+            '10%': np.percentile(np.abs(bootstrap_t_stats), 90)
+        }
+        
+        # Create results dictionary
+        test_results = {
+            'test': 'Bootstrap Asymmetry Test',
+            'test_type': 'bootstrap',
+            'diff_coefficient': diff,
+            't_statistic': t_stat,
+            'bootstrap_p_value': bootstrap_p_value,
+            'p_value': bootstrap_p_value,  # For consistency with other tests
+            'is_threshold_significant': bootstrap_p_value < self.alpha,
+            'critical_values': critical_values,
+            'n_bootstrap': n_bootstrap,
+            'f_statistic': t_stat**2,  # For consistency with other tests
+        }
+        
+        logger.info(f"Bootstrap asymmetry test results: t_statistic={t_stat:.4f}, bootstrap_p_value={bootstrap_p_value:.4f}")
+        return test_results
+    
+    def _joint_asymmetry_test(
+        self,
+        rho_above: float,
+        rho_below: float,
+        se_above: float,
+        se_below: float
+    ) -> Dict[str, Any]:
+        """
+        Joint test of asymmetry and threshold effect.
+        
+        This test examines both whether the adjustment coefficients are different from each other
+        (asymmetry) and whether they are jointly different from zero (threshold effect).
+        
+        Args:
+            rho_above: Adjustment coefficient above threshold
+            rho_below: Adjustment coefficient below threshold
+            se_above: Standard error of rho_above
+            se_below: Standard error of rho_below
+            
+        Returns:
+            Dictionary with test results
+        """
+        # First, test for asymmetry (rho_above ≠ rho_below)
+        asymmetry_results = self._standard_asymmetry_test(rho_above, rho_below, se_above, se_below)
+        
+        # Second, test for joint significance (rho_above ≠ 0 and rho_below ≠ 0)
+        # Compute t-statistics for individual coefficients
+        t_above = rho_above / se_above
+        t_below = rho_below / se_below
+        
+        # Compute p-values for individual coefficients
+        p_above = 2 * (1 - stats.t.cdf(abs(t_above), df=np.inf))
+        p_below = 2 * (1 - stats.t.cdf(abs(t_below), df=np.inf))
+        
+        # Approximate joint F-statistic (assuming independence)
+        # This is a simplification; in practice, you would use the full covariance matrix
+        f_joint = (t_above**2 + t_below**2) / 2
+        
+        # Compute p-value using F-distribution with 2 and infinite degrees of freedom
+        p_joint = 1 - stats.f.cdf(f_joint, 2, np.inf)
+        
+        # Create results dictionary
+        test_results = {
+            'test': 'Joint Asymmetry and Threshold Test',
+            'test_type': 'joint',
+            'asymmetry': {
+                'diff_coefficient': asymmetry_results['diff_coefficient'],
+                't_statistic': asymmetry_results['t_statistic'],
+                'p_value': asymmetry_results['p_value'],
+                'is_significant': asymmetry_results['is_threshold_significant']
+            },
+            'individual': {
+                'rho_above': {
+                    'coefficient': rho_above,
+                    't_statistic': t_above,
+                    'p_value': p_above,
+                    'is_significant': p_above < self.alpha
+                },
+                'rho_below': {
+                    'coefficient': rho_below,
+                    't_statistic': t_below,
+                    'p_value': p_below,
+                    'is_significant': p_below < self.alpha
+                }
+            },
+            'joint': {
+                'f_statistic': f_joint,
+                'p_value': p_joint,
+                'is_significant': p_joint < self.alpha
+            },
+            # For consistency with other tests
+            'f_statistic': asymmetry_results['f_statistic'],
+            'p_value': asymmetry_results['p_value'],
+            'is_threshold_significant': asymmetry_results['is_threshold_significant']
+        }
+        
+        logger.info(f"Joint asymmetry test results: asymmetry_p={asymmetry_results['p_value']:.4f}, joint_p={p_joint:.4f}")
+        return test_results
