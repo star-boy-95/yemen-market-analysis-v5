@@ -23,19 +23,19 @@ logger = logging.getLogger(__name__)
 class EngleGrangerTester:
     """
     Engle-Granger cointegration tester for Yemen Market Analysis.
-    
+
     This class provides methods for testing cointegration using the Engle-Granger
     two-step procedure.
-    
+
     Attributes:
         alpha (float): Significance level for hypothesis tests.
         max_lags (int): Maximum number of lags to consider in tests.
     """
-    
+
     def __init__(self, alpha: float = None, max_lags: int = None):
         """
         Initialize the Engle-Granger tester.
-        
+
         Args:
             alpha: Significance level for hypothesis tests. If None, uses the value
                   from config.
@@ -44,7 +44,7 @@ class EngleGrangerTester:
         """
         self.alpha = alpha if alpha is not None else config.get('analysis.cointegration.alpha', 0.05)
         self.max_lags = max_lags if max_lags is not None else config.get('analysis.cointegration.max_lags', 4)
-    
+
     @handle_errors
     def test(
         self, y: pd.DataFrame, x: pd.DataFrame, y_col: str = 'price', x_col: str = 'price',
@@ -52,11 +52,11 @@ class EngleGrangerTester:
     ) -> Dict[str, Any]:
         """
         Perform Engle-Granger test for cointegration.
-        
+
         The Engle-Granger test is a two-step procedure:
         1. Estimate the cointegrating relationship: y = a + b*x + e
         2. Test the residuals for stationarity using an ADF test
-        
+
         Args:
             y: DataFrame containing the dependent variable.
             x: DataFrame containing the independent variable.
@@ -67,37 +67,37 @@ class EngleGrangerTester:
                   and 'n' (no trend).
             max_lags: Maximum number of lags to consider. If None, uses the value
                      from the class.
-            
+
         Returns:
             Dictionary containing the test results.
-            
+
         Raises:
             YemenAnalysisError: If the columns are not found or the test fails.
         """
         logger.info(f"Performing Engle-Granger test with trend={trend}")
-        
+
         # Check if columns exist
         if y_col not in y.columns:
             logger.error(f"Column {y_col} not found in y data")
             raise YemenAnalysisError(f"Column {y_col} not found in y data")
-        
+
         if x_col not in x.columns:
             logger.error(f"Column {x_col} not found in x data")
             raise YemenAnalysisError(f"Column {x_col} not found in x data")
-        
+
         # Get column data
         y_data = y[y_col].dropna()
         x_data = x[x_col].dropna()
-        
+
         # Ensure the series have the same length
         common_index = y_data.index.intersection(x_data.index)
         y_data = y_data.loc[common_index]
         x_data = x_data.loc[common_index]
-        
+
         # Set max_lags
         if max_lags is None:
             max_lags = self.max_lags
-            
+
         # Handle small sample sizes
         n_obs = len(common_index)
         n_trend = 0
@@ -107,33 +107,33 @@ class EngleGrangerTester:
             n_trend = 2
         elif trend == 'ctt':
             n_trend = 3
-            
+
         # For the cointegration test, we need a minimum number of observations
         min_required_obs = 2 * (max_lags + 1 + n_trend) + 1
-        
+
         if n_obs < min_required_obs:
-            logger.warning(f"Sample size ({n_obs}) too small for Engle-Granger test. Needs at least {min_required_obs}. Returning mock results.")
-            return self._mock_eg_results(y_col, x_col, trend, n_obs)
-            
+            logger.warning(f"Sample size ({n_obs}) too small for Engle-Granger test. Needs at least {min_required_obs}.")
+            raise YemenAnalysisError(f"Sample size ({n_obs}) too small for Engle-Granger test. Need at least {min_required_obs} observations.")
+
         try:
             # Perform Engle-Granger test
             coint_result = coint(y_data, x_data, trend=trend, maxlag=max_lags, autolag=None)
-            
+
             # Extract results
             test_statistic = coint_result[0]
             p_value = coint_result[1]
             critical_values = coint_result[2]
-            
+
             # Determine if the series are cointegrated
             is_cointegrated = p_value < self.alpha
-            
+
             # Estimate the cointegrating relationship
             model = OLS(y_data, sm.add_constant(x_data))
             results = model.fit()
-            
+
             # Get the residuals
             residuals = results.resid
-            
+
             # Create results dictionary
             results_dict = {
                 'test': 'Engle-Granger',
@@ -148,49 +148,17 @@ class EngleGrangerTester:
                 'is_cointegrated': is_cointegrated,
                 'alpha': self.alpha,
                 'cointegrating_vector': {
-                    'constant': results.params[0],
-                    'coefficient': results.params[1],
+                    'constant': results.params.iloc[0],
+                    'coefficient': results.params.iloc[1],
                 },
                 'residuals': residuals,
                 'n_obs': len(y_data),
             }
-            
+
             logger.info(f"Engle-Granger test results: test_statistic={test_statistic:.4f}, p_value={p_value:.4f}, is_cointegrated={is_cointegrated}")
             return results_dict
         except Exception as e:
             logger.error(f"Error performing Engle-Granger test: {e}")
             raise YemenAnalysisError(f"Error performing Engle-Granger test: {e}")
-            
-    def _mock_eg_results(self, y_col: str, x_col: str, trend: str, n_obs: int) -> Dict[str, Any]:
-        """
-        Create mock Engle-Granger test results for small sample sizes.
-        
-        Args:
-            y_col: Column name for the dependent variable.
-            x_col: Column name for the independent variable.
-            trend: Trend that was used in the test.
-            n_obs: Number of observations.
-            
-        Returns:
-            Dictionary containing mock Engle-Granger test results.
-        """
-        return {
-            'test': 'Engle-Granger',
-            'y_col': y_col,
-            'x_col': x_col,
-            'trend': trend,
-            'test_statistic': -2.5,  # Mock value suggesting no cointegration
-            'p_value': 0.2,  # Mock p-value > alpha suggesting no cointegration
-            'critical_values': {'1%': -3.9, '5%': -3.3, '10%': -3.0},  # Typical critical values
-            'n_obs': n_obs,
-            'coef': 0.5,  # Mock regression coefficient
-            'is_cointegrated': False,  # Assuming no cointegration for safety
-            'alpha': self.alpha,
-            'max_lags': 1,
-            'residuals': pd.Series([0.1, -0.1, 0.2], index=pd.date_range(start='2023-01-01', periods=3)),  # Mock residuals
-            'cointegrating_vector': {
-                'constant': 0.1,
-                'coefficient': 0.5,
-            },
-            'mock_result': True  # Flag to indicate this is a mock result
-        }
+
+

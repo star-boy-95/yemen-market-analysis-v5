@@ -5,6 +5,7 @@
 This project implements advanced econometric methodologies for analyzing market integration in conflict-affected Yemen. It examines how conflict-induced transaction costs impede arbitrage and impact dual exchange rate regimes, using threshold cointegration and spatial econometric techniques.
 
 The analysis addresses key questions:
+
 - How do conflict barriers affect price transmission between markets?
 - What are the economic impacts of the dual exchange rate regime?
 - How would exchange rate unification and conflict reduction affect market integration?
@@ -31,7 +32,7 @@ pip install -e .
 ## Features
 
 - **Data Processing**: Comprehensive tools for loading, cleaning, and transforming market data from various sources, including WFP and ACLED. Supports GeoJSON format with spatial attributes.
-- **Econometric Analysis**: 
+- **Econometric Analysis**:
   - **Unit Root Testing**: ADF, Zivot-Andrews, and other tests with structural break detection
   - **Cointegration Analysis**: Engle-Granger, Johansen, Gregory-Hansen methods
   - **Threshold Models**: TAR, M-TAR, and Threshold VECM implementations
@@ -49,6 +50,7 @@ pip install -e .
   - Interactive spatial maps for market integration
   - Diagnostic plots for model evaluation
 - **Integrated Analysis Pipeline**: End-to-end workflow from data processing to result interpretation
+- **Robust Error Handling**: Clear error messages when data is insufficient for analysis instead of returning mock results
 
 ## Usage
 
@@ -124,8 +126,30 @@ spatial_lag_model = spatial_model.spatial_lag_model('price', ['distance', 'confl
 from src.models.simulation import MarketIntegrationSimulation
 
 # Simulate exchange rate unification
-sim = MarketIntegrationSimulation(markets_data)
-unification_results = sim.simulate_exchange_rate_unification(target_rate='official')
+sim = MarketIntegrationSimulation(markets_data, exchange_rate_data)
+unification_results = sim.simulate_exchange_rate_unification(
+    target_rate='official',  # Options: 'official', 'parallel', 'average'
+    method='tvecm',          # Options: 'tvecm', 'tar'
+    original_threshold=0.1,  # Original threshold parameter from threshold model
+    original_adjustment_speed=0.2  # Original adjustment speed from threshold model
+)
+
+# Simulate improved spatial connectivity
+from geopandas import GeoDataFrame
+spatial_data = GeoDataFrame(markets_data)  # Convert to GeoDataFrame with geometry
+connectivity_results = sim.simulate_spatial_connectivity(
+    data=spatial_data,
+    connectivity_improvement=0.5,  # 50% improvement in connectivity
+    weight_type='distance',        # Options: 'distance', 'contiguity', 'kernel'
+    original_results=spatial_model_results  # Original spatial model results
+)
+
+# Run full simulation (both exchange rate and spatial connectivity)
+full_results = sim.run_full_simulation(
+    data=markets_data,
+    exchange_rate_data=exchange_rate_data,
+    spatial_data=spatial_data
+)
 ```
 
 ### Integration and Reporting
@@ -170,6 +194,12 @@ python run_yemen_analysis.py --commodity "beans (kidney red)" --output results
 
 # Run with additional parameters
 python run_yemen_analysis.py --commodity "wheat" --output results --max-lags 6 --k-neighbors 8 --report-format markdown
+
+# Run with simulation options
+python run_yemen_analysis.py --commodity "wheat" --output results --no-spatial --no-simulation
+
+# Run only simulation
+python run_yemen_analysis.py --commodity "wheat" --output results --no-spatial
 ```
 
 ### Running Tests
@@ -183,6 +213,9 @@ pytest tests/test_integrated_analysis.py
 
 # Run tests with coverage report
 pytest tests --cov=src --cov-report=term --cov-report=html
+
+# Test handling of insufficient data
+python test_insufficient_data.py
 ```
 
 ## Development Tools
@@ -201,6 +234,7 @@ jupyter notebook --notebook-dir=notebooks
 ```
 
 You can also run these tools using VS Code tasks:
+
 - "Format Code with Black"
 - "Lint with Flake8"
 - "Run Tests"
@@ -220,6 +254,7 @@ The project includes comprehensive documentation:
 - **Utils Guide**: `docs/utils_guide.md` and `UTILS_GUIDE.md` - Utility functions reference
 - **Best Practices**: `docs/best_practices.md` - Code examples and patterns
 - **Coding Standards**: `docs/coding_standards.md` - Project coding standards
+- **Error Handling**: `docs/error_handling.md` - Guide to error handling and data requirements
 
 ## Project Structure
 
@@ -310,24 +345,31 @@ yemen-market-integration/
 This project relies on several key Python packages:
 
 **Core Data Processing**
+
 - numpy, pandas, scipy
 
 **Geospatial Analysis**
+
 - geopandas, pyproj, pysal, folium, contextily, libpysal, esda, spreg, splot, networkx
 
 **Econometrics and Statistics**
+
 - statsmodels, scikit-learn, arch, pmdarima, linearmodels
 
 **Spatial Econometrics**
+
 - spreg, esda, spglm, spint
 
 **Visualization**
+
 - matplotlib, seaborn, plotly, mapclassify, bokeh
 
 **Performance Optimization**
+
 - numba, joblib, dask, swifter, psutil, cython
 
 **Time Series Analysis**
+
 - statsforecast, tsfresh, prophet
 
 See `requirements.txt` for full dependency list.

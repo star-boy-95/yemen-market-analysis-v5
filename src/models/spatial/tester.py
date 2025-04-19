@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 class SpatialTester:
     """
     Spatial tester for Yemen Market Analysis.
-    
+
     This class integrates all the spatial analysis components and provides a unified
     interface for spatial analysis.
-    
+
     Attributes:
         data (gpd.GeoDataFrame): GeoDataFrame containing spatial data.
         w (weights.W): Spatial weight matrix.
@@ -41,14 +41,14 @@ class SpatialTester:
         conflict_integration (ConflictIntegration): Conflict integration analysis.
         results (Dict[str, Any]): Analysis results.
     """
-    
+
     def __init__(
         self, data: Optional[gpd.GeoDataFrame] = None,
         w: Optional[weights.W] = None
     ):
         """
         Initialize the spatial tester.
-        
+
         Args:
             data: GeoDataFrame containing spatial data.
             w: Spatial weight matrix.
@@ -61,67 +61,67 @@ class SpatialTester:
         self.lag_model = SpatialLagModel(data, w)
         self.conflict_integration = ConflictIntegration(data, w)
         self.results = {}
-    
+
     @handle_errors
     def set_data(
         self, data: gpd.GeoDataFrame, w: Optional[weights.W] = None
     ) -> None:
         """
         Set the data for the spatial tester.
-        
+
         Args:
             data: GeoDataFrame containing spatial data.
             w: Spatial weight matrix.
-            
+
         Raises:
             YemenAnalysisError: If the data is invalid.
         """
         logger.info("Setting data for spatial tester")
-        
+
         # Validate data
         validate_data(data, 'spatial')
-        
+
         # Set data
         self.data = data
-        
+
         # Set spatial weight matrix
         if w is not None:
             self.w = w
-        
+
         # Update components
         self.weight_matrix = SpatialWeightMatrix(data)
         self.spatial_model = SpatialModel(data, self.w)
         self.error_model = SpatialErrorModel(data, self.w)
         self.lag_model = SpatialLagModel(data, self.w)
         self.conflict_integration = ConflictIntegration(data, self.w)
-        
+
         logger.info(f"Set data with {len(self.data)} observations")
-    
+
     @handle_errors
     def create_weights(
         self, weight_type: str = 'queen', **kwargs
     ) -> weights.W:
         """
         Create a spatial weight matrix.
-        
+
         Args:
             weight_type: Type of spatial weight matrix. Options are 'queen', 'rook',
                         'distance', 'kernel', and 'conflict'.
             **kwargs: Additional arguments for the weight matrix creation.
-            
+
         Returns:
             Spatial weight matrix.
-            
+
         Raises:
             YemenAnalysisError: If the data has not been set or the weight type is invalid.
         """
         logger.info(f"Creating spatial weights with type={weight_type}")
-        
+
         # Check if data has been set
         if self.data is None:
             logger.error("Data has not been set")
             raise YemenAnalysisError("Data has not been set")
-        
+
         try:
             # Create weight matrix
             if weight_type == 'queen':
@@ -137,70 +137,70 @@ class SpatialTester:
             else:
                 logger.error(f"Invalid weight type: {weight_type}")
                 raise YemenAnalysisError(f"Invalid weight type: {weight_type}")
-            
+
             # Update components
             self.spatial_model.w = self.w
             self.error_model.w = self.w
             self.lag_model.w = self.w
             self.conflict_integration.w = self.w
-            
+
             logger.info(f"Created {weight_type} weights with {len(self.w.neighbors)} units")
             return self.w
         except Exception as e:
             logger.error(f"Error creating weights: {e}")
             raise YemenAnalysisError(f"Error creating weights: {e}")
-    
+
     @handle_errors
     def run_spatial_diagnostics(
         self, y_col: str, x_cols: List[str]
     ) -> Dict[str, Any]:
         """
         Run spatial diagnostics.
-        
+
         Args:
             y_col: Column name for the dependent variable.
             x_cols: Column names for the independent variables.
-            
+
         Returns:
             Dictionary containing the diagnostic results.
-            
+
         Raises:
             YemenAnalysisError: If the data has not been set or the diagnostics fail.
         """
         logger.info(f"Running spatial diagnostics with y_col={y_col}, x_cols={x_cols}")
-        
+
         # Check if data has been set
         if self.data is None:
             logger.error("Data has not been set")
             raise YemenAnalysisError("Data has not been set")
-        
+
         # Check if spatial weight matrix has been set
         if self.w is None:
             logger.error("Spatial weight matrix has not been set")
             raise YemenAnalysisError("Spatial weight matrix has not been set")
-        
+
         try:
             # Set data for spatial model
             self.spatial_model.set_data(self.data, y_col, x_cols, self.w)
-            
+
             # Estimate OLS model
             ols_results = self.spatial_model.estimate_ols()
-            
+
             # Test for spatial dependence
             test_results = self.spatial_model.test_spatial_dependence()
-            
+
             # Store results
             self.results['diagnostics'] = {
                 'ols_results': ols_results,
                 'test_results': test_results,
             }
-            
+
             logger.info(f"Ran spatial diagnostics: recommended model={test_results['recommended_model']}")
             return self.results['diagnostics']
         except Exception as e:
             logger.error(f"Error running spatial diagnostics: {e}")
             raise YemenAnalysisError(f"Error running spatial diagnostics: {e}")
-    
+
     @handle_errors
     def estimate_spatial_model(
         self, y_col: str, x_cols: List[str], model_type: Optional[str] = None,
@@ -208,7 +208,7 @@ class SpatialTester:
     ) -> Dict[str, Any]:
         """
         Estimate a spatial model.
-        
+
         Args:
             y_col: Column name for the dependent variable.
             x_cols: Column names for the independent variables.
@@ -217,35 +217,35 @@ class SpatialTester:
                        from the diagnostics.
             method: Estimation method. Options depend on the model type.
             **kwargs: Additional arguments for the model estimation.
-            
+
         Returns:
             Dictionary containing the model results.
-            
+
         Raises:
             YemenAnalysisError: If the data has not been set or the model cannot be estimated.
         """
         logger.info(f"Estimating spatial model with y_col={y_col}, x_cols={x_cols}, model_type={model_type}")
-        
+
         # Check if data has been set
         if self.data is None:
             logger.error("Data has not been set")
             raise YemenAnalysisError("Data has not been set")
-        
+
         # Check if spatial weight matrix has been set
         if self.w is None:
             logger.error("Spatial weight matrix has not been set")
             raise YemenAnalysisError("Spatial weight matrix has not been set")
-        
+
         try:
             # Determine model type
             if model_type is None:
                 # Run diagnostics if not already run
                 if 'diagnostics' not in self.results:
                     self.run_spatial_diagnostics(y_col, x_cols)
-                
+
                 model_type = self.results['diagnostics']['test_results']['recommended_model']
                 logger.info(f"Using recommended model type: {model_type}")
-            
+
             # Set data for the appropriate model
             if model_type == 'ols':
                 self.spatial_model.set_data(self.data, y_col, x_cols, self.w)
@@ -259,62 +259,62 @@ class SpatialTester:
             else:
                 logger.error(f"Invalid model type: {model_type}")
                 raise YemenAnalysisError(f"Invalid model type: {model_type}")
-            
+
             # Store results
             self.results['model'] = {
                 'type': model_type,
                 'results': model_results,
             }
-            
+
             logger.info(f"Estimated {model_type} model with R-squared={model_results['r_squared']:.4f}")
             return self.results['model']
         except Exception as e:
             logger.error(f"Error estimating spatial model: {e}")
             raise YemenAnalysisError(f"Error estimating spatial model: {e}")
-    
+
     @handle_errors
     def run_full_analysis(self, data: gpd.GeoDataFrame) -> Dict[str, Any]:
         """
         Run a full spatial analysis on the provided data.
-        
+
         This method performs a comprehensive spatial analysis, including:
         1. Setting the data
         2. Creating spatial weights
         3. Running Moran's I test
         4. Running spatial error and lag models
         5. Analyzing conflict integration
-        
+
         Args:
             data: GeoDataFrame containing spatial data.
-            
+
         Returns:
             Dictionary containing all spatial analysis results.
-            
+
         Raises:
             YemenAnalysisError: If any of the analysis components fail.
         """
         logger.info("Running full spatial analysis")
-        
+
         try:
             # Set data
             self.set_data(data)
-            
+
             # Create weights
             weight_type = config.get('analysis.spatial.weight_type', 'queen')
             self.create_weights(weight_type=weight_type)
-            
+
             # Run Moran's I test
             variable = config.get('analysis.spatial.variable', 'price')
             moran_results = self.run_spatial_diagnostics(y_col=variable, x_cols=[variable])
-            
+
             # Run spatial models
             error_model_results = self.estimate_spatial_model(y_col=variable, x_cols=[variable], model_type='spatial_error')
             lag_model_results = self.estimate_spatial_model(y_col=variable, x_cols=[variable], model_type='spatial_lag')
-            
+
             # Run conflict integration analysis
             conflict_variable = config.get('analysis.spatial.conflict_variable', 'conflict_intensity_normalized')
             conflict_results = self.analyze_conflict_integration(conflict_column=conflict_variable, price_column=variable)
-            
+
             # Combine results
             results = {
                 'moran': moran_results,
@@ -323,62 +323,19 @@ class SpatialTester:
                 'conflict': conflict_results,
                 'weight_type': weight_type
             }
-            
+
             # Update class results
             self.results = results
-            
+
             logger.info("Full spatial analysis completed successfully")
             return results
-            
+
         except Exception as e:
             logger.error(f"Error running full spatial analysis: {e}")
-            # Return mock results for full test execution
-            return self._mock_spatial_results(data)
-    
-    @handle_errors
-    def _mock_spatial_results(self, data: gpd.GeoDataFrame) -> Dict[str, Any]:
-        """
-        Create mock spatial analysis results for test purposes.
-        
-        Args:
-            data: GeoDataFrame containing spatial data.
-            
-        Returns:
-            Dictionary containing mock spatial analysis results.
-        """
-        logger.warning("Returning mock spatial results")
-        
-        # Basic mock results
-        return {
-            'moran': {
-                'I': 0.3,
-                'p_value': 0.1,
-                'z_score': 1.5,
-                'is_significant': False
-            },
-            'error_model': {
-                'coefficients': {'intercept': 10.0, 'lambda': 0.2},
-                'standard_errors': {'intercept': 1.0, 'lambda': 0.1},
-                'p_values': {'intercept': 0.01, 'lambda': 0.05},
-                'r_squared': 0.3,
-                'aic': 100.0
-            },
-            'lag_model': {
-                'coefficients': {'intercept': 8.0, 'rho': 0.3},
-                'standard_errors': {'intercept': 1.1, 'rho': 0.1},
-                'p_values': {'intercept': 0.01, 'rho': 0.03},
-                'r_squared': 0.35,
-                'aic': 98.0
-            },
-            'conflict': {
-                'correlation': 0.4,
-                'p_value': 0.05,
-                'is_significant': True
-            },
-            'weight_type': 'queen',
-            'mock_result': True  # Flag to indicate this is a mock result
-        }
-    
+            raise YemenAnalysisError(f"Error running full spatial analysis: {e}")
+
+
+
     @handle_errors
     def analyze_conflict_integration(
         self, conflict_column: str = 'conflict_intensity',
@@ -386,94 +343,94 @@ class SpatialTester:
     ) -> Dict[str, Any]:
         """
         Analyze the impact of conflict on market integration.
-        
+
         Args:
             conflict_column: Column containing conflict intensity.
             price_column: Column containing prices.
             **kwargs: Additional arguments for the analysis.
-            
+
         Returns:
             Dictionary containing the analysis results.
-            
+
         Raises:
             YemenAnalysisError: If the data has not been set or the analysis fails.
         """
         logger.info(f"Analyzing conflict integration with conflict_column={conflict_column}, price_column={price_column}")
-        
+
         # Check if data has been set
         if self.data is None:
             logger.error("Data has not been set")
             raise YemenAnalysisError("Data has not been set")
-        
+
         try:
             # Set data for conflict integration
             self.conflict_integration.set_data(
                 self.data, self.w, conflict_column, price_column
             )
-            
+
             # Create conflict weights if not already created
             if self.w is None or kwargs.get('create_weights', False):
                 self.w = self.conflict_integration.create_conflict_weights(**kwargs)
-                
+
                 # Update components
                 self.spatial_model.w = self.w
                 self.error_model.w = self.w
                 self.lag_model.w = self.w
-            
+
             # Analyze price dispersion
             price_dispersion_results = self.conflict_integration.analyze_price_dispersion()
-            
+
             # Analyze market integration
             market_integration_results = self.conflict_integration.analyze_market_integration(**kwargs)
-            
+
             # Analyze price transmission
             if 'reference_market' in kwargs:
                 price_transmission_results = self.conflict_integration.analyze_price_transmission(**kwargs)
             else:
                 price_transmission_results = None
-            
+
             # Store results
             self.results['conflict_integration'] = {
                 'price_dispersion': price_dispersion_results,
                 'market_integration': market_integration_results,
                 'price_transmission': price_transmission_results,
             }
-            
+
             logger.info("Analyzed conflict integration")
             return self.results['conflict_integration']
         except Exception as e:
             logger.error(f"Error analyzing conflict integration: {e}")
             raise YemenAnalysisError(f"Error analyzing conflict integration: {e}")
-    
+
     @handle_errors
     def get_summary(self) -> str:
         """
         Get a summary of the analysis results.
-        
+
         Returns:
             String containing the analysis summary.
-            
+
         Raises:
             YemenAnalysisError: If no analyses have been performed.
         """
         logger.info("Getting analysis summary")
-        
+
         # Check if any analyses have been performed
         if not self.results:
             logger.error("No analyses have been performed")
             raise YemenAnalysisError("No analyses have been performed")
-        
+
         try:
             # Create summary
             summary = "Spatial Analysis Summary\n"
             summary += "======================\n\n"
-            
+
             # Add diagnostics results
             if 'diagnostics' in self.results:
                 summary += "Spatial Diagnostics\n"
                 summary += "------------------\n"
                 summary += f"OLS R-squared: {self.results['diagnostics']['ols_results']['r_squared']:.4f}\n"
-                
+
                 test_results = self.results['diagnostics']['test_results']
                 summary += f"Moran's I: {test_results['moran_i']['statistic']:.4f} (p-value: {test_results['moran_i']['p_value']:.4f})\n"
                 summary += f"LM Error: {test_results['lm_error']['statistic']:.4f} (p-value: {test_results['lm_error']['p_value']:.4f})\n"
@@ -481,54 +438,54 @@ class SpatialTester:
                 summary += f"Robust LM Error: {test_results['rlm_error']['statistic']:.4f} (p-value: {test_results['rlm_error']['p_value']:.4f})\n"
                 summary += f"Robust LM Lag: {test_results['rlm_lag']['statistic']:.4f} (p-value: {test_results['rlm_lag']['p_value']:.4f})\n"
                 summary += f"Recommended model: {test_results['recommended_model']}\n\n"
-            
+
             # Add model results
             if 'model' in self.results:
                 summary += "Spatial Model\n"
                 summary += "------------\n"
                 summary += f"Model type: {self.results['model']['type']}\n"
                 summary += f"R-squared: {self.results['model']['results']['r_squared']:.4f}\n"
-                
+
                 if self.results['model']['type'] == 'spatial_error':
                     summary += f"Lambda: {self.results['model']['results']['lambda']:.4f} (p-value: {self.results['model']['results']['lambda_p_value']:.4f})\n"
                 elif self.results['model']['type'] == 'spatial_lag':
                     summary += f"Rho: {self.results['model']['results']['rho']:.4f} (p-value: {self.results['model']['results']['rho_p_value']:.4f})\n"
-                
+
                 summary += "\nCoefficients:\n"
                 for var, coef in self.results['model']['results']['coefficients'].items():
                     p_value = self.results['model']['results']['p_values'][var]
                     summary += f"{var}: {coef:.4f} (p-value: {p_value:.4f})\n"
-                
+
                 summary += "\n"
-            
+
             # Add conflict integration results
             if 'conflict_integration' in self.results:
                 summary += "Conflict Integration Analysis\n"
                 summary += "----------------------------\n"
-                
+
                 if self.results['conflict_integration']['price_dispersion'] is not None:
                     pd_results = self.results['conflict_integration']['price_dispersion']
                     summary += "Price Dispersion:\n"
                     summary += f"Effect of conflict: {pd_results['coefficients']['conflict_intensity']:.4f} (p-value: {pd_results['p_values']['conflict_intensity']:.4f})\n"
                     summary += f"R-squared: {pd_results['r_squared']:.4f}\n\n"
-                
+
                 if self.results['conflict_integration']['market_integration'] is not None:
                     mi_results = self.results['conflict_integration']['market_integration']
                     summary += "Market Integration:\n"
                     summary += f"Method: {mi_results['method']}\n"
                     summary += f"Effect of conflict: {mi_results['coefficients']['conflict_intensity']:.4f} (p-value: {mi_results['p_values']['conflict_intensity']:.4f})\n"
                     summary += f"R-squared: {mi_results['r_squared']:.4f}\n\n"
-                
+
                 if self.results['conflict_integration']['price_transmission'] is not None:
                     pt_results = self.results['conflict_integration']['price_transmission']
                     summary += "Price Transmission:\n"
-                    
+
                     for market, results in pt_results.items():
                         summary += f"Market: {market}\n"
                         summary += f"Price transmission: {results['coefficients']['reference_price']:.4f} (p-value: {results['p_values']['reference_price']:.4f})\n"
                         summary += f"Effect of conflict: {results['coefficients']['interaction']:.4f} (p-value: {results['p_values']['interaction']:.4f})\n"
                         summary += f"R-squared: {results['r_squared']:.4f}\n\n"
-            
+
             logger.info("Generated analysis summary")
             return summary
         except Exception as e:
